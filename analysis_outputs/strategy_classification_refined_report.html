@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>投顾策略精准分类与广发布局机会分析</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5b6674;
+      --line: #d9e0e8;
+      --soft: #f5f7fa;
+      --panel: #ffffff;
+      --accent: #1f7a8c;
+      --accent-2: #7a5c1f;
+      --good: #1b7f4d;
+      --warn: #a36200;
+      --bad: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef2f6;
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      background: #0e3641;
+      color: white;
+      padding: 30px 36px 26px;
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+    header p {
+      margin: 4px 0;
+      color: #d7e7ec;
+      max-width: 1080px;
+    }
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px 28px 44px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      margin: 0 0 18px;
+      box-shadow: 0 1px 2px rgba(18, 27, 38, 0.04);
+    }
+    h2 {
+      font-size: 20px;
+      margin: 0 0 12px;
+    }
+    h3 {
+      font-size: 16px;
+      margin: 18px 0 10px;
+    }
+    p { margin: 8px 0; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 14px 0 6px;
+    }
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: var(--soft);
+      min-height: 104px;
+    }
+    .stat-label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    .stat-value {
+      font-weight: 700;
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+    .stat-note {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 6px;
+      background: white;
+      table-layout: auto;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 9px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #edf3f7;
+      color: #243442;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    td {
+      color: #25313e;
+    }
+    .wide td:nth-child(n+2), .wide th:nth-child(n+2) {
+      white-space: nowrap;
+    }
+    .wide td:last-child {
+      white-space: normal;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #eef8fb;
+      padding: 12px 14px;
+      margin: 12px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e8edf3;
+      color: #2d3a46;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .pill.high { background: #fde7e4; color: var(--bad); }
+    .pill.mid { background: #fff1d6; color: var(--warn); }
+    .pill.good { background: #e3f6eb; color: var(--good); }
+    .bar-cell {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+    }
+    .bar-track {
+      height: 8px;
+      background: #e3e9ef;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      background: var(--accent);
+    }
+    ul { margin: 8px 0 0 20px; padding: 0; }
+    li { margin: 5px 0; }
+    code {
+      background: #eef2f6;
+      border: 1px solid #dce3ea;
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    footer {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      padding: 10px 0 0;
+    }
+    @media (max-width: 960px) {
+      header { padding: 24px 18px; }
+      main { padding: 18px 12px 34px; }
+      .stats, .grid-2 { grid-template-columns: 1fr; }
+      section { padding: 16px; }
+      table { display: block; overflow-x: auto; }
+      th, td { min-width: 108px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>投顾策略精准分类与广发布局机会分析</h1>
+    <p>基于 <code>basic_data/data/basic_summary.js</code> 的 1154 条展示策略、2335 条调仓事件派生。数据更新至：2026-06-03；报告生成：2026/6/4 22:25:47。</p>
+    <p>目标：同一套分类同时支持投研考核、销售货架、营销活动、产品布局诊断与广发基金潜在业务机会挖掘。</p>
+  </header>
+  <main>
+    <section>
+      <h2>结论摘要</h2>
+      <div class="callout">
+        <p><strong>目标盈不是 338 个独立产品线。</strong> 数据中确实有 338 条“目标盈系列产品”记录，且全部带目标盈/止盈类标签；但其中 314 条是期次发车型，归并到“机构 + 系列名”后约 64 个系列。销售、营销和产品分析应该看“系列 + 风险桶 + 期次节奏”，不是把 338 条直接当作同质目标盈。</p>
+        <p><strong>广发当前目标盈布局不弱但结构要重分。</strong> 广发目标盈 11 条，覆盖幸福小列车、小心愿、Pro、多元平衡、超级定投家；其中“超级定投家”是高权益/高回撤，不应代表稳健目标盈。</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="stat-label">全市场策略数</div><div class="stat-value">1154</div><div class="stat-note">展示策略，不含隐藏渠道</div></div>
+        <div class="stat"><div class="stat-label">广发策略数</div><div class="stat-value">101</div><div class="stat-note">占全市场 8.8%</div></div>
+        <div class="stat"><div class="stat-label">目标盈记录数</div><div class="stat-value">338</div><div class="stat-note">314 条为期次发车型</div></div>
+        <div class="stat"><div class="stat-label">目标盈归并系列</div><div class="stat-value">64</div><div class="stat-note">44 条持仓缺失待核验</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>推荐分类体系</h2>
+      <p>不要只用一个“主可比池”。正式落地建议把每条策略打成六组标签：业务主类、风险预算、目标盈机制、运作节奏、实现方式、数据质量/生命周期。这样同一数据既能用于排名，也能用于销售货架和产品机会挖掘。</p>
+      <table class="wide"><thead><tr><th>维度</th><th>字段/规则</th><th>服务目标</th><th>用于广发机会挖掘时的用法</th></tr></thead><tbody><tr><td>业务主类</td><td>主可比池校正：现金、纯债、固收+、目标盈、多资产、偏股、主题、海外、养老</td><td>销售货架、产品布局、竞品覆盖</td><td>先看广发在哪些主类低于整体占比，再下钻到风险桶。</td></tr><tr><td>风险预算</td><td>权益权重 + 波动率 + 最大回撤，目标盈另设 T1-T5</td><td>投研比较、客户风险适配</td><td>同主类内只比较同风险桶；跨桶只做营销定位。</td></tr><tr><td>目标盈机制</td><td>低波稳健、多元平衡、主题工具、跨境全球、黄金商品、标准期次</td><td>营销卖点、活动设计</td><td>判断广发目标盈是稳健主打、增强主打，还是缺全球/主题切口。</td></tr><tr><td>运作节奏</td><td>期次发车、常设货架、连续运作、高触达维护、测试内部</td><td>销售运营、复购续作、服务触达</td><td>期次型看发车节奏和达成率；常设型看长期留存和可买状态。</td></tr><tr><td>实现方式</td><td>主动基金组合、指数/被动工具、主动+指数、QDII/海外、FOF/养老</td><td>投研归因、产品能力拆解</td><td>同类策略看广发底层产品与竞品工具链是否短板。</td></tr><tr><td>数据质量/生命周期</td><td>完整性、持仓缺失、运作状态、成立时间、费率状态</td><td>正式考核、合规展示</td><td>D0 或不可买策略只用于线索，不用于销售主推和排名。</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>全市场业务主类与广发布局</h2>
+      <p class="note">“广发占比”按该分类内广发策略数 / 全市场策略数计算；广发整体展示策略占比为 8.8%，可作为布局强弱的粗基准。</p>
+      <table class="wide"><thead><tr><th>业务主类</th><th>全市场策略数</th><th>广发策略数</th><th>广发占比</th><th>机构数</th><th>权益中位数</th><th>年化中位数</th><th>波动中位数</th><th>回撤中位数</th></tr></thead><tbody><tr><td>目标盈/止盈/小目标<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:100.0%"></div></div><span>338</span></div></td><td>338</td><td>11</td><td>3.3%</td><td>25</td><td>7.0</td><td>3.9%</td><td>2.6%</td><td>2.6%</td></tr><tr><td>偏股核心配置<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:56.5%"></div></div><span>191</span></div></td><td>191</td><td>20</td><td>10.5%</td><td>36</td><td>72.0</td><td>7.3%</td><td>13.3%</td><td>26.7%</td></tr><tr><td>固收+稳健增强<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:49.7%"></div></div><span>168</span></div></td><td>168</td><td>18</td><td>10.7%</td><td>34</td><td>11.1</td><td>3.9%</td><td>2.9%</td><td>3.5%</td></tr><tr><td>海外/全球配置<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:41.1%"></div></div><span>139</span></div></td><td>139</td><td>17</td><td>12.2%</td><td>29</td><td>50.1</td><td>7.5%</td><td>7.9%</td><td>9.4%</td></tr><tr><td>纯债/短债<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:30.2%"></div></div><span>102</span></div></td><td>102</td><td>17</td><td>16.7%</td><td>31</td><td>0.0</td><td>2.6%</td><td>0.7%</td><td>0.8%</td></tr><tr><td>多资产均衡配置<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:24.9%"></div></div><span>84</span></div></td><td>84</td><td>7</td><td>8.3%</td><td>26</td><td>28.4</td><td>4.3%</td><td>6.4%</td><td>13.8%</td></tr><tr><td>主题/行业机会<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:20.4%"></div></div><span>69</span></div></td><td>69</td><td>2</td><td>2.9%</td><td>21</td><td>65.5</td><td>6.1%</td><td>14.3%</td><td>29.5%</td></tr><tr><td>现金管理/活钱<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:10.4%"></div></div><span>35</span></div></td><td>35</td><td>4</td><td>11.4%</td><td>18</td><td>0.0</td><td>1.8%</td><td>0.1%</td><td>0.1%</td></tr><tr><td>养老/目标日期<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:8.3%"></div></div><span>28</span></div></td><td>28</td><td>5</td><td>17.9%</td><td>8</td><td>37.6</td><td>6.9%</td><td>9.8%</td><td>23.8%</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>广发潜在业务机会</h2>
+      <p>机会不是简单看广发是否有产品，而是看市场池规模、广发相对份额、销售场景是否清晰、以及能否用广发底层产品能力形成差异化。</p>
+      <table class="wide"><thead><tr><th>机会等级</th><th>分类</th><th>全市场</th><th>广发</th><th>广发占比</th><th>相对广发整体</th><th>业务动作</th></tr></thead><tbody><tr><td><span class="pill high">高</span></td><td>目标盈/止盈/小目标</td><td>338</td><td>11</td><td>3.3%</td><td>-5.5pct</td><td>市场池大且广发份额低，适合做产品线补位、销售主题或竞品复盘。</td></tr><tr><td><span class="pill mid">中</span></td><td>多资产均衡配置</td><td>84</td><td>7</td><td>8.3%</td><td>-0.4pct</td><td>已有样本但份额低于广发整体策略占比，适合找细分切口。</td></tr><tr><td><span class="pill mid">中</span></td><td>主题/行业机会</td><td>69</td><td>2</td><td>2.9%</td><td>-5.9pct</td><td>已有样本但份额低于广发整体策略占比，适合找细分切口。</td></tr><tr><td><span class="pill good">已有优势</span></td><td>海外/全球配置</td><td>139</td><td>17</td><td>12.2%</td><td>+3.5pct</td><td>广发布局相对充分，下一步看差异化卖点和头部策略复用。</td></tr><tr><td><span class="pill good">已有优势</span></td><td>纯债/短债</td><td>102</td><td>17</td><td>16.7%</td><td>+7.9pct</td><td>广发布局相对充分，下一步看差异化卖点和头部策略复用。</td></tr><tr><td><span class="pill good">已有优势</span></td><td>现金管理/活钱</td><td>35</td><td>4</td><td>11.4%</td><td>+2.7pct</td><td>广发布局相对充分，下一步看差异化卖点和头部策略复用。</td></tr><tr><td><span class="pill good">已有优势</span></td><td>养老/目标日期</td><td>28</td><td>5</td><td>17.9%</td><td>+9.1pct</td><td>广发布局相对充分，下一步看差异化卖点和头部策略复用。</td></tr><tr><td><span class="pill ">维持/观察</span></td><td>偏股核心配置</td><td>191</td><td>20</td><td>10.5%</td><td>+1.7pct</td><td>保持当前覆盖，重点看单策略质量和渠道可见度。</td></tr><tr><td><span class="pill ">维持/观察</span></td><td>固收+稳健增强</td><td>168</td><td>18</td><td>10.7%</td><td>+2.0pct</td><td>保持当前覆盖，重点看单策略质量和渠道可见度。</td></tr></tbody></table>
+      <h3>优先判断</h3>
+      <ul>
+        <li><strong>目标盈/小目标：</strong>市场最大池，广发 11/338，低于广发整体策略占比。机会在于把“幸福小列车/小心愿/Pro/多元平衡/进取”拆成明确货架，而不是合并成一个目标盈。</li>
+        <li><strong>主题/行业机会：</strong>全市场有 69 条，广发只有 2 条。若广发具备 ETF、主动权益或行业基金能力，这里适合做营销切口，但要单列高风险提示。</li>
+        <li><strong>海外/全球配置：</strong>广发覆盖相对充分，可进一步判断是否能从“全球配置”延展到“全球目标盈/海外主题目标盈”的活动型产品。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>目标盈复核：为什么不能再粗分</h2>
+      <div class="stats">
+        <div class="stat"><div class="stat-label">目标盈主池</div><div class="stat-value">338</div><div class="stat-note">全部命中目标盈/止盈标签</div></div>
+        <div class="stat"><div class="stat-label">关键词误命中</div><div class="stat-value">11</div><div class="stat-note">含稳稳/幸福等词但不是目标盈</div></div>
+        <div class="stat"><div class="stat-label">期次发车型</div><div class="stat-value">314</div><div class="stat-note">92.9% 的目标盈记录</div></div>
+        <div class="stat"><div class="stat-label">持仓缺失/待核验</div><div class="stat-value">44</div><div class="stat-note">不进入正式比较池</div></div>
+      </div>
+      <h3>目标盈风险桶</h3>
+      <table class="wide"><thead><tr><th>目标盈风险桶</th><th>策略数</th><th>广发数</th><th>广发占比</th><th>权益中位数</th><th>年化中位数</th><th>波动中位数</th><th>回撤中位数</th><th>适用业务口径</th></tr></thead><tbody><tr><td>T3 增强目标盈<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:100.0%"></div></div><span>104</span></div></td><td>104</td><td>1</td><td>1.0%</td><td>12.1</td><td>5.0%</td><td>3.2%</td><td>3.9%</td><td>增强目标收益、适合和稳健产品分层销售。</td></tr><tr><td>T2 稳健目标盈<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:97.1%"></div></div><span>101</span></div></td><td>101</td><td>7</td><td>6.9%</td><td>7.0</td><td>4.2%</td><td>2.4%</td><td>2.6%</td><td>稳健小目标、固收+销售主货架。</td></tr><tr><td>T1 低波目标盈<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:51.0%"></div></div><span>53</span></div></td><td>53</td><td>0</td><td>0.0%</td><td>0.0</td><td>3.6%</td><td>1.2%</td><td>0.9%</td><td>低波达标、短周期营销、现金增强替代。</td></tr><tr><td>D0 持仓缺失/待核验<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:42.3%"></div></div><span>44</span></div></td><td>44</td><td>1</td><td>2.3%</td><td>0.0</td><td>0.4%</td><td>2.2%</td><td>2.3%</td><td>不进正式比较池；先补持仓和可买状态。</td></tr><tr><td>T4 平衡/多元目标盈<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:20.2%"></div></div><span>21</span></div></td><td>21</td><td>1</td><td>4.8%</td><td>14.1</td><td>3.9%</td><td>4.9%</td><td>8.1%</td><td>多元平衡目标，适合中风险客户。</td></tr><tr><td>T5 进取/权益目标盈<div class="bar-cell"><div class="bar-track"><div class="bar-fill" style="width:14.4%"></div></div><span>15</span></div></td><td>15</td><td>1</td><td>6.7%</td><td>55.8</td><td>7.2%</td><td>13.6%</td><td>18.3%</td><td>权益机会/主题目标，只能和高权益目标盈比较。</td></tr></tbody></table>
+      <h3>目标盈机制/卖点</h3>
+      <table class="wide"><thead><tr><th>目标盈机制/卖点</th><th>策略数</th><th>广发数</th><th>权益中位数</th><th>年化中位数</th><th>说明</th></tr></thead><tbody><tr><td>标准期次目标盈</td><td>239</td><td>8</td><td>7.0</td><td>3.9%</td><td>目标盈主力形态，多为同一系列不同期次，适合活动化、续作和达标体验运营。</td></tr><tr><td>低波稳健目标盈</td><td>41</td><td>0</td><td>5.6</td><td>3.9%</td><td>低波、微波、稳健等关键词明显，适合低风险客群承接。</td></tr><tr><td>跨境/全球目标盈</td><td>33</td><td>0</td><td>1.7</td><td>4.1%</td><td>全球/QDII 暴露，汇率和海外市场 Beta 另行分池。</td></tr><tr><td>多元平衡目标盈</td><td>21</td><td>2</td><td>8.1</td><td>4.5%</td><td>多资产或 Pro/升级版，不能和低波型直接比收益。</td></tr><tr><td>黄金/商品目标盈</td><td>3</td><td>0</td><td>5.0</td><td>8.8%</td><td>商品或黄金是主要卖点，适合作为配置补充而非固收+替代。</td></tr><tr><td>主题/工具化目标盈</td><td>1</td><td>1</td><td>72.6</td><td>4.1%</td><td>权益或指数工具色彩强，适合营销但要单列风险提示。</td></tr></tbody></table>
+      <h3>目标盈运作节奏</h3>
+      <table class="wide"><thead><tr><th>运作节奏</th><th>策略数</th><th>占目标盈比例</th><th>广发数</th><th>解释</th></tr></thead><tbody><tr><td>期次发车型</td><td>314</td><td>92.9%</td><td>6</td><td>同一产品系列按不同期次发行或展示，是 338 条目标盈记录膨胀的主因。</td></tr><tr><td>常设货架型</td><td>14</td><td>4.1%</td><td>4</td><td>不是强期次形态，更适合常态化销售货架和投研长期跟踪。</td></tr><tr><td>高触达维护型</td><td>8</td><td>2.4%</td><td>1</td><td>调仓或更新频率高，更接近高维护策略。</td></tr><tr><td>测试/内部</td><td>1</td><td>0.3%</td><td>0</td><td>不进入正式销售或考核口径。</td></tr><tr><td>连续运作型</td><td>1</td><td>0.3%</td><td>0</td><td>类似永续/天天运作，重点看持有体验和续作质量。</td></tr></tbody></table>
+      <h3>归并后目标盈系列 Top</h3>
+      <table class="wide"><thead><tr><th>归并后目标盈系列 Top</th><th>策略记录数</th><th>广发数</th><th>权益中位数</th><th>年化中位数</th><th>波动中位数</th><th>回撤中位数</th></tr></thead><tbody><tr><td>华夏投顾 / 小常乐目标盈天天</td><td>47</td><td>0</td><td>3.1</td><td>2.8%</td><td>2.8%</td><td>2.9%</td></tr><tr><td>中欧财富投顾 / 幸福六六小目标天天</td><td>30</td><td>0</td><td>7.5</td><td>3.5%</td><td>2.9%</td><td>4.0%</td></tr><tr><td>南方基金-司南投顾 / 南方小目标</td><td>25</td><td>0</td><td>7.0</td><td>2.3%</td><td>2.0%</td><td>2.6%</td></tr><tr><td>建信基金-建信投顾 / 建信小幸运目标盈</td><td>21</td><td>0</td><td>14.0</td><td>5.7%</td><td>2.9%</td><td>2.4%</td></tr><tr><td>中欧财富投顾 / 尊享添盈小目标</td><td>19</td><td>0</td><td>0.0</td><td>3.8%</td><td>1.4%</td><td>0.9%</td></tr><tr><td>银华天玑投顾 / 银华天玑-小星愿目标盈</td><td>17</td><td>0</td><td>14.1</td><td>3.9%</td><td>2.9%</td><td>2.4%</td></tr><tr><td>中欧财富投顾 / 幸福低波小目标</td><td>14</td><td>0</td><td>0.0</td><td>3.3%</td><td>1.2%</td><td>1.0%</td></tr><tr><td>汇添富基金-汇添富投顾 / 添富目标盈</td><td>13</td><td>0</td><td>15.9</td><td>5.5%</td><td>2.6%</td><td>2.0%</td></tr><tr><td>景顺长城投顾 / 景顺长城目标盈</td><td>11</td><td>0</td><td>10.6</td><td>5.0%</td><td>3.2%</td><td>3.4%</td></tr><tr><td>华夏投顾 / 小微波目标盈天天</td><td>10</td><td>0</td><td>7.4</td><td>4.3%</td><td>1.2%</td><td>0.8%</td></tr><tr><td>富国基金-富国星投顾 / 富国90天低波目标盈</td><td>9</td><td>0</td><td>5.6</td><td>4.2%</td><td>2.0%</td><td>2.0%</td></tr><tr><td>富国基金-富国星投顾 / 启明星理财升级目标盈</td><td>9</td><td>0</td><td>8.1</td><td>4.5%</td><td>2.3%</td><td>2.5%</td></tr><tr><td>南方基金-司南投顾 / 南方幸福小目标</td><td>9</td><td>0</td><td>2.9</td><td>5.7%</td><td>3.4%</td><td>4.0%</td></tr><tr><td>国泰基金-国泰民安投顾 / 国泰目标盈</td><td>7</td><td>0</td><td>10.0</td><td>6.1%</td><td>6.6%</td><td>7.5%</td></tr><tr><td>广发基金-广发投顾 / 幸福小列车目标盈</td><td>6</td><td>6</td><td>6.8</td><td>3.9%</td><td>2.4%</td><td>2.7%</td></tr><tr><td>万家基金懂你投 / 万家稳稳小目标</td><td>6</td><td>0</td><td>10.7</td><td>3.8%</td><td>3.3%</td><td>5.5%</td></tr><tr><td>招商基金-招商投顾 / 招商小心愿目标盈</td><td>6</td><td>0</td><td>12.1</td><td>3.4%</td><td>3.6%</td><td>6.3%</td></tr><tr><td>银河证券-银河投顾 / 银河目标盈</td><td>5</td><td>0</td><td>0.0</td><td>-0.3%</td><td>3.6%</td><td>5.4%</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>广发目标盈应如何重分</h2>
+      <p>广发目标盈内部至少要拆成稳健达标、增强目标、多元平衡和进取权益四类；其中持仓缺失的期次先做数据补齐，不进入正式排名。</p>
+      <table class="wide"><thead><tr><th>广发目标盈策略</th><th>风险桶</th><th>机制卖点</th><th>运作节奏</th><th>权益</th><th>债券</th><th>货币</th><th>年化</th><th>波动</th><th>最大回撤</th><th>判断</th></tr></thead><tbody><tr><td>幸福小列车目标盈第9期</td><td>D0 持仓缺失/待核验</td><td>标准期次目标盈</td><td>期次发车型</td><td>0.0</td><td>0.0</td><td>0.0</td><td>-</td><td>-</td><td>-</td><td>当前持仓权重缺失，先不进正式比较池。</td></tr><tr><td>幸福小列车目标盈</td><td>T2 稳健目标盈</td><td>标准期次目标盈</td><td>常设货架型</td><td>14.5</td><td>81.8</td><td>3.7</td><td>3.9%</td><td>1.9%</td><td>2.3%</td><td>可进入对应细分池比较。</td></tr><tr><td>幸福小列车目标盈第4期</td><td>T2 稳健目标盈</td><td>标准期次目标盈</td><td>期次发车型</td><td>6.8</td><td>72.1</td><td>1.0</td><td>3.5%</td><td>2.3%</td><td>2.7%</td><td>可进入对应细分池比较。</td></tr><tr><td>幸福小列车目标盈第5期</td><td>T2 稳健目标盈</td><td>标准期次目标盈</td><td>期次发车型</td><td>6.8</td><td>72.1</td><td>1.0</td><td>3.9%</td><td>2.3%</td><td>2.7%</td><td>可进入对应细分池比较。</td></tr><tr><td>幸福小列车目标盈第6期</td><td>T2 稳健目标盈</td><td>标准期次目标盈</td><td>期次发车型</td><td>6.8</td><td>72.1</td><td>1.0</td><td>3.6%</td><td>2.4%</td><td>3.4%</td><td>可进入对应细分池比较。</td></tr><tr><td>幸福小列车目标盈第7期</td><td>T2 稳健目标盈</td><td>标准期次目标盈</td><td>期次发车型</td><td>6.8</td><td>72.1</td><td>1.0</td><td>4.7%</td><td>2.5%</td><td>2.2%</td><td>可进入对应细分池比较。</td></tr><tr><td>幸福小列车目标盈第8期</td><td>T2 稳健目标盈</td><td>标准期次目标盈</td><td>期次发车型</td><td>7.0</td><td>71.9</td><td>1.0</td><td>4.9%</td><td>2.4%</td><td>2.1%</td><td>可进入对应细分池比较。</td></tr><tr><td>幸福小心愿目标盈</td><td>T2 稳健目标盈</td><td>标准期次目标盈</td><td>高触达维护型</td><td>8.9</td><td>86.5</td><td>4.6</td><td>5.0%</td><td>1.6%</td><td>1.5%</td><td>可进入对应细分池比较。</td></tr><tr><td>幸福小心愿Pro目标盈</td><td>T3 增强目标盈</td><td>多元平衡目标盈</td><td>常设货架型</td><td>21.7</td><td>74.3</td><td>4.0</td><td>6.0%</td><td>3.7%</td><td>3.1%</td><td>可进入对应细分池比较。</td></tr><tr><td>广发多元平衡目标盈</td><td>T4 平衡/多元目标盈</td><td>多元平衡目标盈</td><td>常设货架型</td><td>47.8</td><td>46.1</td><td>1.0</td><td>8.3%</td><td>9.8%</td><td>8.2%</td><td>可进入对应细分池比较。</td></tr><tr><td>广发超级定投家</td><td>T5 进取/权益目标盈</td><td>主题/工具化目标盈</td><td>常设货架型</td><td>72.6</td><td>0.0</td><td>3.0</td><td>4.1%</td><td>13.7%</td><td>33.0%</td><td>更像权益定投/进取目标，不宜放入低波目标盈营销。</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>不能误并入目标盈的样本</h2>
+      <p class="note">这些策略名称含“稳稳/幸福”等销售词，但系统主池和标签并非目标盈/止盈。后续规则不能只靠营销关键词匹配。</p>
+      <table class="wide"><thead><tr><th>不应并入目标盈的关键词命中样本</th><th>当前主池</th><th>机构</th><th>权益</th><th>波动</th><th>最大回撤</th><th>处理建议</th></tr></thead><tbody><tr><td>我要稳稳的幸福（直销）</td><td>固收增强型</td><td>未披露</td><td>15.2</td><td>2.0%</td><td>2.6%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>万家稳稳向钱冲</td><td>固收增强型</td><td>万家基金懂你投</td><td>7.2</td><td>2.4%</td><td>3.6%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>我要稳稳的幸福</td><td>固收增强型</td><td>交银施罗德基金-交银投顾</td><td>15.2</td><td>2.0%</td><td>2.4%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>稳稳进</td><td>主题/行业型</td><td>华宝智选投顾</td><td>7.4</td><td>1.3%</td><td>1.7%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>省心投幸福稳稳</td><td>主题/行业型</td><td>华泰证券省心投</td><td>11.1</td><td>1.8%</td><td>2.3%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>富国稳稳星稳健理财</td><td>纯债/短债型</td><td>富国基金-富国星投顾</td><td>0.0</td><td>0.7%</td><td>1.7%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>景顺长城稳稳小确幸</td><td>纯债/短债型</td><td>景顺长城投顾</td><td>7.4</td><td>1.9%</td><td>4.1%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>添富稳稳小确幸</td><td>固收增强型</td><td>汇添富基金-汇添富投顾</td><td>6.7</td><td>2.4%</td><td>4.4%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>银华天玑-稳稳金牛座</td><td>偏股配置型</td><td>银华天玑投顾</td><td>3.5</td><td>1.0%</td><td>1.5%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>银华天玑-稳稳金牛座</td><td>纯债/短债型</td><td>银华天玑投顾</td><td>2.7</td><td>0.9%</td><td>1.6%</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr><tr><td>银华天玑-稳稳金牛座（测试）</td><td>多资产配置型</td><td>银华天玑投顾</td><td>0.0</td><td>-</td><td>-</td><td>名称含“稳稳/幸福”等营销词，但没有目标盈/止盈标签，保留原主池。</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>落地建议</h2>
+      <ul>
+        <li><strong>投研：</strong>排名池使用“业务主类 × 风险预算 × 市场地域 × 实现方式 × 运作节奏”的交集；目标盈另看达成率、达成时间、到期/续作质量和持有期最大回撤。</li>
+        <li><strong>销售：</strong>货架按客户需求组织：活钱、短债低波、稳健固收+、目标达标、多元配置、权益进取、主题机会、全球配置、养老长期。</li>
+        <li><strong>营销：</strong>期次型目标盈适合活动化发车和续作；常设型策略适合长期货架；主题/工具化目标盈适合市场热点，但不能包装成稳健目标盈。</li>
+        <li><strong>产品分析：</strong>对广发做“有无覆盖、覆盖深度、竞品拥挤度、底层产品能力、数据完整性”五项评分，优先看目标盈细分和主题/行业机会。</li>
+        <li><strong>数据补齐：</strong>目标盈需要补目标收益率、目标期限、是否达标、达标日期、到期/续作状态；信号发车类还需补信号日期、建议买卖日期、跟车可买状态、信号后最大回撤。</li>
+      </ul>
+    </section>
+
+    <footer>
+      来源：basic_data\data\basic_summary.js。本报告为本地数据再分类结果，不改写原始数据。
+    </footer>
+  </main>
+</body>
+</html>

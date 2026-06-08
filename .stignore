@@ -1,0 +1,14 @@
+// Keep the Syncthing deploy folder focused on static site assets.
+// These folders are local scratch/runtime artifacts and are not needed on Linux.
+(?d).cache
+(?d).cache/**
+(?d).python
+(?d).python/**
+(?d)output
+(?d)output/**
+(?d)tmp
+(?d)tmp/**
+(?d).stfolder.removed-*
+(?d).stfolder.removed-*/**
+(?d)logs
+(?d)logs/**

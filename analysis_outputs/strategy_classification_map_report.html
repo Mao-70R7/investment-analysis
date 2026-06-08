@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>全市场投顾策略分类地图</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #617080;
+      --line: #d8e0e8;
+      --soft: #f4f7fa;
+      --panel: #ffffff;
+      --accent: #186b77;
+      --accent2: #8a5a12;
+      --green: #1f7a4d;
+      --red: #b42318;
+      --orange: #a36200;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #eef2f6;
+      color: var(--ink);
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      background: #0c3540;
+      color: white;
+      padding: 30px 36px;
+    }
+    header h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }
+    header p { margin: 4px 0; color: #dcecef; max-width: 1120px; }
+    main { max-width: 1320px; margin: 0 auto; padding: 24px 28px 44px; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 1px 2px rgba(20, 30, 45, .04);
+    }
+    h2 { margin: 0 0 12px; font-size: 20px; }
+    h3 { margin: 0; font-size: 15px; }
+    p { margin: 8px 0; }
+    code {
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #eef8fb;
+      padding: 12px 14px;
+      border-radius: 0 8px 8px 0;
+      margin: 12px 0;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 14px 0 0;
+    }
+    .stat {
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 94px;
+    }
+    .stat span { display: block; color: var(--muted); font-size: 13px; }
+    .stat strong { display: block; font-size: 24px; margin: 4px 0; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .class-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfe;
+    }
+    .class-card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .metric-line {
+      display: grid;
+      grid-template-columns: 48px 64px 1fr;
+      gap: 6px;
+      align-items: baseline;
+      color: var(--muted);
+      margin: 3px 0;
+    }
+    .metric-line strong { color: var(--ink); font-size: 18px; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e8eef4;
+      color: #33404c;
+      white-space: nowrap;
+      font-weight: 650;
+      font-size: 12px;
+    }
+    .pill.strong { background: #e2f6ea; color: var(--green); }
+    .pill.weak { background: #fff0d6; color: var(--orange); }
+    .pill.empty { background: #fde7e4; color: var(--red); }
+    .bar {
+      height: 7px;
+      background: #e2e9ef;
+      border-radius: 999px;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+    .bar span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 9px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #edf3f7;
+      color: #263746;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .wide td:nth-child(n+2), .wide th:nth-child(n+2) { white-space: nowrap; }
+    .wide td:nth-child(1), .wide td:nth-child(2), .wide td:last-child { white-space: normal; }
+    .muted { color: var(--muted); font-size: 12px; }
+    ul { margin: 8px 0 0 20px; padding: 0; }
+    li { margin: 5px 0; }
+    footer {
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+      padding-top: 8px;
+    }
+    @media (max-width: 980px) {
+      header { padding: 24px 18px; }
+      main { padding: 18px 12px 34px; }
+      .stats, .cards { grid-template-columns: 1fr; }
+      section { padding: 16px; }
+      table { display: block; overflow-x: auto; }
+      th, td { min-width: 112px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>全市场投顾策略分类地图</h1>
+    <p>数据来源：<code>basic_data/data/basic_summary.js</code>。当前可分析明细为 1154 条展示策略；overview 策略总数为 1228，其中 7 个渠道在列表中隐藏（cmfchina、efundcf、fullgoal、fund99、harvestwm、southern、zocaifu）。</p>
+    <p>数据更新至 2026-06-03；报告生成 2026/6/4 22:49:09。本报告先聚焦分类地图、市场情况和广发情况，不展开具体营销机会排序。</p>
+  </header>
+  <main>
+    <section>
+      <h2>分类地图口径</h2>
+      <div class="callout">
+        <p><strong>一级分类</strong>是销售/产品货架，保持互斥，用来回答“市场有多大、广发有没有布局”。</p>
+        <p><strong>二级分类</strong>是更接近真实比较池或营销子货架的拆分，用来回答“同类里广发处在什么位置”。风险、地域、实现方式和数据质量作为解释字段，不额外重复计数。</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><span>可分析策略</span><strong>1154</strong><span>当前展示明细</span></div>
+        <div class="stat"><span>一级分类数</span><strong>9</strong><span>互斥主货架</span></div>
+        <div class="stat"><span>二级分类数</span><strong>31</strong><span>互斥子货架</span></div>
+        <div class="stat"><span>广发策略</span><strong>101</strong><span>全市场占比 8.8%</span></div>
+      </div>
+      <div class="cards"><div class="class-card">
+    <div class="class-card-head">
+      <h3>现金管理/活钱</h3>
+      <span class="pill ">基本覆盖</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>35</strong><span>3.0%</span></div>
+    <div class="metric-line"><span>广发</span><strong>4</strong><span>11.4%</span></div>
+    <p>活钱管理、闲钱暂存、低波备用金</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>纯债/短债</h3>
+      <span class="pill strong">相对高配</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>102</strong><span>8.8%</span></div>
+    <div class="metric-line"><span>广发</span><strong>17</strong><span>16.7%</span></div>
+    <p>低波防守、短债替代、稳健客户承接</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>固收+稳健增强</h3>
+      <span class="pill ">基本覆盖</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>168</strong><span>14.6%</span></div>
+    <div class="metric-line"><span>广发</span><strong>18</strong><span>10.7%</span></div>
+    <p>稳健增值、固收+主货架</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>目标盈/止盈/小目标</h3>
+      <span class="pill weak">相对低配</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>338</strong><span>29.3%</span></div>
+    <div class="metric-line"><span>广发</span><strong>11</strong><span>3.3%</span></div>
+    <p>达标体验、期次发车、活动化营销</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>多资产均衡配置</h3>
+      <span class="pill ">基本覆盖</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>84</strong><span>7.3%</span></div>
+    <div class="metric-line"><span>广发</span><strong>7</strong><span>8.3%</span></div>
+    <p>家庭资产配置、长期持有、风险分散</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>偏股核心配置</h3>
+      <span class="pill ">基本覆盖</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>191</strong><span>16.6%</span></div>
+    <div class="metric-line"><span>广发</span><strong>20</strong><span>10.5%</span></div>
+    <p>权益核心、长期增值、定投承接</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>主题/行业机会</h3>
+      <span class="pill weak">相对低配</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>69</strong><span>6.0%</span></div>
+    <div class="metric-line"><span>广发</span><strong>2</strong><span>2.9%</span></div>
+    <p>主题热点、行业赛道、阶段性营销</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>海外/全球配置</h3>
+      <span class="pill ">基本覆盖</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>139</strong><span>12.0%</span></div>
+    <div class="metric-line"><span>广发</span><strong>17</strong><span>12.2%</span></div>
+    <p>全球分散、海外资产配置、汇率分散</p>
+  </div><div class="class-card">
+    <div class="class-card-head">
+      <h3>养老/目标日期</h3>
+      <span class="pill strong">相对高配</span>
+    </div>
+    <div class="metric-line"><span>市场</span><strong>28</strong><span>2.4%</span></div>
+    <div class="metric-line"><span>广发</span><strong>5</strong><span>17.9%</span></div>
+    <p>养老长期、生命周期、退休规划</p>
+  </div></div>
+    </section>
+
+    <section>
+      <h2>分类规则</h2>
+      <table class="wide"><thead><tr><th>维度</th><th>规则</th><th>用途</th></tr></thead><tbody><tr><td>一级分类</td><td>优先使用系统主可比池并映射为销售/产品货架：现金、纯债、固收+、目标盈、多资产、偏股、主题、海外、养老。</td><td>保证每条策略只进入一个一级池，适合做市场规模和广发布局对比。</td></tr><tr><td>二级分类</td><td>在一级池内按目标机制、风险预算、资产权重、地域、实现方式、名称/标签拆分。</td><td>二级池用于真实比较、营销子货架和产品线缺口识别。</td></tr><tr><td>风险预算</td><td>权益权重 + 波动率 + 最大回撤；目标盈单独使用低波、稳健、增强、平衡、进取五档。</td><td>同风险桶内可比较，跨风险桶只做客户适配和销售定位。</td></tr><tr><td>目标盈期次</td><td>名称含期次的策略归为期次发车，系列名通过剔除期次号归并。</td><td>避免把同一系列多期重复发车误认为多个独立产品线。</td></tr><tr><td>广发口径</td><td>投顾机构或渠道包含“广发基金/广发投顾”。</td><td>用于衡量广发在每个市场分类中的覆盖和相对高低配。</td></tr><tr><td>数据质量</td><td>持仓权重全部为 0 或空的策略进入待核验，不进入正式考核比较池。</td><td>仍可用于销售/产品线索，但需补持仓、可买状态和生命周期。</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>一级分类：市场情况与广发情况</h2>
+      <p class="note">“权益/年化/波动/回撤中位数”均使用当前策略明细字段。广发情况中的“相对高配/低配”以广发整体占比 8.8% 为粗基准。</p>
+      <table class="wide"><thead><tr><th>一级分类</th><th>市场情况</th><th>机构覆盖</th><th>广发情况</th><th>广发代表策略</th><th>权益/年化/波动/回撤中位数</th><th>主要风险与实现方式</th><th>产品分析含义</th></tr></thead><tbody><tr><td><strong>现金管理/活钱</strong><div class="bar"><span style="width:10.4%"></span></div><div class="muted">活钱管理、闲钱暂存、低波备用金</div></td><td>35<br><span class="muted">3.0% / 中小池</span></td><td>18<br><span class="muted">华泰证券省心投(5)、中欧财富投顾(4)、国联证券-国联投顾(3)、博时基金-博乐智投(2)</span></td><td>4<br><span class="muted">11.4% / 基本覆盖</span></td><td>广发货币优选、广发货币优选（机构版）、广发货币加、添利30天</td><td>0.0 / 1.8% / 0.1% / 0.1%</td><td>R0 现金/超低波(31)、R2 稳健收益(2)、R4 均衡成长(1)<br><span class="muted">主动基金组合(33)、主动+指数混合(2)</span></td><td>现金管理或货币增强底座</td></tr><tr><td><strong>纯债/短债</strong><div class="bar"><span style="width:30.2%"></span></div><div class="muted">低波防守、短债替代、稳健客户承接</div></td><td>102<br><span class="muted">8.8% / 中大池</span></td><td>31<br><span class="muted">广发基金投顾(14)、华宝智选投顾(9)、申万菱信基金-申小顾(9)、银华天玑投顾(8)</span></td><td>17<br><span class="muted">16.7% / 相对高配</span></td><td>南海定制1号、南海定制2号、广发债券宝、广发债基精选、广发尊享稳健甄选</td><td>0.0 / 2.6% / 0.7% / 0.8%</td><td>R0 现金/超低波(60)、R1 低波(30)、R2 稳健收益(10)<br><span class="muted">主动基金组合(90)、QDII/海外工具(8)、主动+指数混合(4)</span></td><td>短债/纯债货架覆盖</td></tr><tr><td><strong>固收+稳健增强</strong><div class="bar"><span style="width:49.7%"></span></div><div class="muted">稳健增值、固收+主货架</div></td><td>168<br><span class="muted">14.6% / 中大池</span></td><td>34<br><span class="muted">南方基金-司南投顾(18)、工银瑞信容易投(16)、广发基金投顾(13)、中欧财富投顾(13)</span></td><td>18<br><span class="muted">10.7% / 基本覆盖</span></td><td>亲子理财加、固收增强组合、小小的太阳、广发全天候多元稳健、智慧教育金2025</td><td>11.1 / 3.9% / 2.9% / 3.5%</td><td>R2 稳健收益(95)、R3 均衡稳健(65)、R1 低波(8)<br><span class="muted">主动基金组合(105)、QDII/海外工具(25)、FOF/养老工具(18)</span></td><td>低权益、标准固收+、弹性固收+分层</td></tr><tr><td><strong>目标盈/止盈/小目标</strong><div class="bar"><span style="width:100.0%"></span></div><div class="muted">达标体验、期次发车、活动化营销</div></td><td>338<br><span class="muted">29.3% / 大池</span></td><td>25<br><span class="muted">中欧财富投顾(73)、华夏投顾(58)、南方基金-司南投顾(37)、富国基金-富国星投顾(23)</span></td><td>11<br><span class="muted">3.3% / 相对低配</span></td><td>幸福小列车目标盈、幸福小心愿Pro目标盈、幸福小心愿目标盈、幸福小列车目标盈第4期、幸福小列车目标盈第5期</td><td>7.0 / 3.9% / 2.6% / 2.6%</td><td>R2 稳健收益(162)、R1 低波(59)、D0 持仓缺失(44)<br><span class="muted">主动基金组合(226)、主动+指数混合(57)、QDII/海外工具(32)</span></td><td>低波目标、增强目标、多元目标、进取目标</td></tr><tr><td><strong>多资产均衡配置</strong><div class="bar"><span style="width:24.9%"></span></div><div class="muted">家庭资产配置、长期持有、风险分散</div></td><td>84<br><span class="muted">7.3% / 中大池</span></td><td>26<br><span class="muted">中欧财富投顾(12)、银华天玑投顾(11)、嘉实财富-嘉实投顾(8)、华安基金-华安投顾(5)</span></td><td>7<br><span class="muted">8.3% / 基本覆盖</span></td><td>一起幸福增长、奔跑吧少年、广发全天候多元稳健增长、股债平衡大师、带你投稳中求进</td><td>28.4 / 4.3% / 6.4% / 13.8%</td><td>R4 均衡成长(32)、R5 权益/进取(19)、D0 持仓缺失(17)<br><span class="muted">主动基金组合(51)、QDII/海外工具(19)、主动+指数混合(8)</span></td><td>稳健多资产、均衡多资产、成长多资产</td></tr><tr><td><strong>偏股核心配置</strong><div class="bar"><span style="width:56.5%"></span></div><div class="muted">权益核心、长期增值、定投承接</div></td><td>191<br><span class="muted">16.6% / 大池</span></td><td>36<br><span class="muted">华宝智选投顾(28)、南方基金-司南投顾(22)、国联证券-国联投顾(21)、广发基金投顾(15)</span></td><td>20<br><span class="muted">10.5% / 基本覆盖</span></td><td>优选成长组合、奔跑吧牛基、广发中国30甄选、广发价值30甄选、广发全天候多元配置定制策略</td><td>72.0 / 7.3% / 13.3% / 26.7%</td><td>R5 权益/进取(183)、R1 低波(4)、R4 均衡成长(2)<br><span class="muted">主动基金组合(97)、QDII/海外工具(43)、指数/被动工具(37)</span></td><td>主动权益、指数工具、主动+指数组合</td></tr><tr><td><strong>主题/行业机会</strong><div class="bar"><span style="width:20.4%"></span></div><div class="muted">主题热点、行业赛道、阶段性营销</div></td><td>69<br><span class="muted">6.0% / 中小池</span></td><td>21<br><span class="muted">华宝智选投顾(24)、中欧财富投顾(7)、南方基金-司南投顾(5)、华夏投顾(4)</span></td><td>2<br><span class="muted">2.9% / 相对低配</span></td><td>带你投消费、广发带你投医药</td><td>65.5 / 6.1% / 14.3% / 29.5%</td><td>R5 权益/进取(52)、R3 均衡稳健(7)、R2 稳健收益(5)<br><span class="muted">主动基金组合(29)、指数/被动工具(17)、QDII/海外工具(14)</span></td><td>行业基金、ETF、主题工具链</td></tr><tr><td><strong>海外/全球配置</strong><div class="bar"><span style="width:41.1%"></span></div><div class="muted">全球分散、海外资产配置、汇率分散</div></td><td>139<br><span class="muted">12.0% / 中大池</span></td><td>29<br><span class="muted">华宝智选投顾(26)、兴证全球投顾(17)、国联证券-国联投顾(11)、广发基金投顾(10)</span></td><td>17<br><span class="muted">12.2% / 基本覆盖</span></td><td>优选香港组合、全球多元平衡、全球多元平衡尊享、全球多元稳健、全球多元稳健增长</td><td>50.1 / 7.5% / 7.9% / 9.4%</td><td>R5 权益/进取(66)、R3 均衡稳健(32)、R4 均衡成长(18)<br><span class="muted">QDII/海外工具(108)、主动+指数混合(15)、主动基金组合(10)</span></td><td>全球多资产、海外权益、跨境工具</td></tr><tr><td><strong>养老/目标日期</strong><div class="bar"><span style="width:8.3%"></span></div><div class="muted">养老长期、生命周期、退休规划</div></td><td>28<br><span class="muted">2.4% / 小池</span></td><td>8<br><span class="muted">中欧财富投顾(6)、广发基金投顾(5)、华夏投顾/华夏财富查理智投(4)、建信基金-建信投顾(4)</span></td><td>5<br><span class="muted">17.9% / 相对高配</span></td><td>广发积极养老、智慧教育金2030、智慧教育金2035、智慧教育金2040、智慧教育金2045</td><td>37.6 / 6.9% / 9.8% / 23.8%</td><td>R5 权益/进取(17)、R4 均衡成长(10)、R3 均衡稳健(1)<br><span class="muted">主动基金组合(17)、QDII/海外工具(8)、主动+指数混合(3)</span></td><td>目标日期、目标风险、养老 FOF</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>二级分类：市场情况与广发情况</h2>
+      <p class="note">二级分类在一级分类内互斥。目标盈的跨境/黄金/主题型优先单列，其余按风险预算拆分。</p>
+      <table class="wide"><thead><tr><th>一级分类</th><th>二级分类</th><th>市场情况</th><th>机构覆盖</th><th>广发情况</th><th>广发代表策略</th><th>权益/年化/波动/回撤中位数</th><th>主要风险与实现方式</th></tr></thead><tbody><tr><td>现金管理/活钱</td><td><strong>现金-货币主导</strong><div class="bar"><span style="width:5.6%"></span></div></td><td>19<br><span class="muted">1.6%</span></td><td>12<br><span class="muted">华泰证券省心投(4)、广发基金投顾(2)、华夏投顾(2)、银华天玑投顾(2)</span></td><td>2<br><span class="muted">10.5% / 基本覆盖</span></td><td>广发货币优选、广发货币优选（机构版）</td><td>0.0 / 1.7% / 0.0% / 0.0%</td><td>R0 现金/超低波(17)、R4 均衡成长(1)、R5 权益/进取(1)<br><span class="muted">主动基金组合(19)</span></td></tr><tr><td>现金管理/活钱</td><td><strong>现金-货债增强</strong><div class="bar"><span style="width:3.8%"></span></div></td><td>13<br><span class="muted">1.1%</span></td><td>9<br><span class="muted">国联证券-国联投顾(3)、广发基金-广发投顾(2)、中欧财富投顾(2)、博时基金-博乐智投(1)</span></td><td>2<br><span class="muted">15.4% / 相对高配</span></td><td>广发货币加、添利30天</td><td>0.0 / 2.0% / 0.1% / 0.3%</td><td>R0 现金/超低波(11)、R2 稳健收益(2)<br><span class="muted">主动基金组合(11)、主动+指数混合(2)</span></td></tr><tr><td>现金管理/活钱</td><td><strong>现金-低波配置</strong><div class="bar"><span style="width:2.0%"></span></div></td><td>3<br><span class="muted">0.3%</span></td><td>3<br><span class="muted">财通证券投顾(1)、国泰基金-国泰民安投顾(1)、农银汇理基金投顾(1)</span></td><td>0<br><span class="muted">0.0% / 空白</span></td><td>无</td><td>0.0 / 1.8% / 0.1% / 0.2%</td><td>R0 现金/超低波(3)<br><span class="muted">主动基金组合(3)</span></td></tr><tr><td>纯债/短债</td><td><strong>纯债-低波短债</strong><div class="bar"><span style="width:14.5%"></span></div></td><td>49<br><span class="muted">4.2%</span></td><td>20<br><span class="muted">申万菱信基金-申小顾(9)、广发基金投顾(6)、华宝智选投顾(5)、国联证券-国联投顾(4)</span></td><td>7<br><span class="muted">14.3% / 相对高配</span></td><td>广发债券宝、广发债基精选、广发短债甄选、广发纯债甄选、添利30天</td><td>0.0 / 2.6% / 0.6% / 0.8%</td><td>R0 现金/超低波(33)、R1 低波(16)<br><span class="muted">主动基金组合(42)、QDII/海外工具(5)、主动+指数混合(2)</span></td></tr><tr><td>纯债/短债</td><td><strong>短债-货债流动型</strong><div class="bar"><span style="width:8.0%"></span></div></td><td>27<br><span class="muted">2.3%</span></td><td>18<br><span class="muted">银华天玑投顾(5)、南方基金-司南投顾(3)、广发基金投顾(2)、交银施罗德基金-交银投顾(2)</span></td><td>2<br><span class="muted">7.4% / 基本覆盖</span></td><td>广发货币加、货币加（机构版）</td><td>0.0 / 1.9% / 0.1% / 0.2%</td><td>R0 现金/超低波(27)<br><span class="muted">主动基金组合(27)</span></td></tr><tr><td>纯债/短债</td><td><strong>纯债-含少量权益待核验</strong><div class="bar"><span style="width:4.4%"></span></div></td><td>15<br><span class="muted">1.3%</span></td><td>8<br><span class="muted">广发基金投顾(6)、工银瑞信容易投(2)、广发基金-广发投顾(2)、国海富兰克林基金-国富弈投顾(1)</span></td><td>8<br><span class="muted">53.3% / 相对高配</span></td><td>南海定制1号、南海定制2号、广发尊享稳健甄选、广发尊享稳健甄选（机构版）、理财小加</td><td>5.4 / 3.0% / 1.5% / 1.9%</td><td>R1 低波(9)、R2 稳健收益(4)、R3 均衡稳健(2)<br><span class="muted">主动基金组合(12)、QDII/海外工具(3)</span></td></tr><tr><td>纯债/短债</td><td><strong>纯债-标准纯债</strong><div class="bar"><span style="width:3.3%"></span></div></td><td>11<br><span class="muted">1.0%</span></td><td>7<br><span class="muted">华宝智选投顾(3)、中欧财富投顾(3)、东方财富证券-东方财富证券投顾(1)、工银瑞信容易投(1)</span></td><td>0<br><span class="muted">0.0% / 空白</span></td><td>无</td><td>0.0 / 3.2% / 2.0% / 2.3%</td><td>R2 稳健收益(6)、R1 低波(5)<br><span class="muted">主动基金组合(9)、主动+指数混合(2)</span></td></tr><tr><td>固收+稳健增强</td><td><strong>固收+-标准型</strong><div class="bar"><span style="width:31.4%"></span></div></td><td>106<br><span class="muted">9.2%</span></td><td>30<br><span class="muted">南方基金-司南投顾(17)、工银瑞信容易投(15)、广发基金投顾(10)、中欧财富投顾(10)</span></td><td>12<br><span class="muted">11.3% / 基本覆盖</span></td><td>亲子理财加、固收增强组合、小小的太阳、广发全天候多元稳健、智慧教育金2025</td><td>12.1 / 3.8% / 2.9% / 3.8%</td><td>R2 稳健收益(69)、R3 均衡稳健(37)<br><span class="muted">主动基金组合(58)、QDII/海外工具(19)、FOF/养老工具(18)</span></td></tr><tr><td>固收+稳健增强</td><td><strong>固收+-低权益</strong><div class="bar"><span style="width:12.1%"></span></div></td><td>41<br><span class="muted">3.6%</span></td><td>16<br><span class="muted">申万菱信基金-申小顾(9)、嘉实财富-嘉实投顾(6)、华宝智选投顾(5)、国联证券-国联投顾(3)</span></td><td>2<br><span class="muted">4.9% / 相对低配</span></td><td>幸福小列车第2期投顾服务、幸福小列车第3期投顾服务</td><td>6.2 / 3.6% / 2.4% / 3.1%</td><td>R2 稳健收益(26)、R1 低波(8)、R3 均衡稳健(7)<br><span class="muted">主动基金组合(38)、主动+指数混合(3)</span></td></tr><tr><td>固收+稳健增强</td><td><strong>固收+-弹性增强</strong><div class="bar"><span style="width:6.2%"></span></div></td><td>21<br><span class="muted">1.8%</span></td><td>12<br><span class="muted">华泰证券省心投(4)、广发基金投顾(3)、国联证券-国联投顾(3)、银华天玑投顾(3)</span></td><td>4<br><span class="muted">19.0% / 相对高配</span></td><td>稳健向前跑、稳健增强组合、稳健理财组合、多资产稳健指数组合</td><td>21.4 / 5.1% / 3.3% / 3.3%</td><td>R3 均衡稳健(21)<br><span class="muted">主动基金组合(9)、QDII/海外工具(6)、指数/被动工具(3)</span></td></tr><tr><td>目标盈/止盈/小目标</td><td><strong>目标盈-跨境/全球型</strong><div class="bar"><span style="width:100.0%"></span></div></td><td>338<br><span class="muted">29.3%</span></td><td>25<br><span class="muted">中欧财富投顾(73)、华夏投顾(58)、南方基金-司南投顾(37)、富国基金-富国星投顾(23)</span></td><td>11<br><span class="muted">3.3% / 相对低配</span></td><td>幸福小列车目标盈、幸福小心愿Pro目标盈、幸福小心愿目标盈、幸福小列车目标盈第4期、幸福小列车目标盈第5期</td><td>7.0 / 3.9% / 2.6% / 2.6%</td><td>R2 稳健收益(162)、R1 低波(59)、D0 持仓缺失(44)<br><span class="muted">主动基金组合(226)、主动+指数混合(57)、QDII/海外工具(32)</span></td></tr><tr><td>多资产均衡配置</td><td><strong>多资产-均衡配置</strong><div class="bar"><span style="width:8.6%"></span></div></td><td>29<br><span class="muted">2.5%</span></td><td>15<br><span class="muted">银华天玑投顾(7)、易方达基金投顾(4)、东方财富证券-东方财富证券投顾(2)、工银瑞信容易投(2)</span></td><td>3<br><span class="muted">10.3% / 基本覆盖</span></td><td>一起幸福增长、股债平衡大师、带你投稳中求进</td><td>34.1 / 4.7% / 7.5% / 17.4%</td><td>R4 均衡成长(15)、R5 权益/进取(11)、R3 均衡稳健(3)<br><span class="muted">主动基金组合(22)、主动+指数混合(4)、指数/被动工具(3)</span></td></tr><tr><td>多资产均衡配置</td><td><strong>多资产-全球分散</strong><div class="bar"><span style="width:5.6%"></span></div></td><td>19<br><span class="muted">1.6%</span></td><td>9<br><span class="muted">中欧财富投顾(10)、银华天玑投顾(2)、广发基金投顾(1)、国联证券-国联投顾(1)</span></td><td>1<br><span class="muted">5.3% / 相对低配</span></td><td>广发全天候多元稳健增长</td><td>28.0 / 6.5% / 5.5% / 5.4%</td><td>R3 均衡稳健(8)、R4 均衡成长(8)、R5 权益/进取(3)<br><span class="muted">QDII/海外工具(19)</span></td></tr><tr><td>多资产均衡配置</td><td><strong>多资产均衡配置-持仓缺失待核验</strong><div class="bar"><span style="width:5.0%"></span></div></td><td>17<br><span class="muted">1.5%</span></td><td>7<br><span class="muted">嘉实财富-嘉实投顾(6)、华安基金-华安投顾(4)、民生加银基金投顾(3)、广发基金-广发投顾(1)</span></td><td>1<br><span class="muted">5.9% / 相对低配</span></td><td>幸福小列车第1期投顾服务</td><td>0.0 / 0.2% / 2.2% / 3.1%</td><td>D0 持仓缺失(17)<br><span class="muted">主动基金组合(17)</span></td></tr><tr><td>多资产均衡配置</td><td><strong>多资产-稳健配置</strong><div class="bar"><span style="width:3.6%"></span></div></td><td>12<br><span class="muted">1.0%</span></td><td>8<br><span class="muted">国联证券-国联投顾(3)、嘉实财富-嘉实投顾(2)、银华天玑投顾(2)、广发基金-广发投顾(1)</span></td><td>1<br><span class="muted">8.3% / 基本覆盖</span></td><td>幸福小列车Plus第1期投顾服务</td><td>19.1 / 4.1% / 5.3% / 13.8%</td><td>R4 均衡成长(6)、R2 稳健收益(2)、R3 均衡稳健(2)<br><span class="muted">主动基金组合(8)、主动+指数混合(3)、指数/被动工具(1)</span></td></tr><tr><td>多资产均衡配置</td><td><strong>多资产-成长配置</strong><div class="bar"><span style="width:2.1%"></span></div></td><td>7<br><span class="muted">0.6%</span></td><td>7<br><span class="muted">博时基金-博乐智投(1)、工银瑞信容易投(1)、广发基金投顾(1)、华宝智选投顾(1)</span></td><td>1<br><span class="muted">14.3% / 相对高配</span></td><td>奔跑吧少年</td><td>47.3 / 5.2% / 8.5% / 18.6%</td><td>R5 权益/进取(4)、R4 均衡成长(3)<br><span class="muted">主动基金组合(4)、指数/被动工具(2)、主动+指数混合(1)</span></td></tr><tr><td>偏股核心配置</td><td><strong>偏股-核心主动</strong><div class="bar"><span style="width:31.4%"></span></div></td><td>106<br><span class="muted">9.2%</span></td><td>30<br><span class="muted">南方基金-司南投顾(19)、华宝智选投顾(14)、国联证券-国联投顾(12)、银华天玑投顾(7)</span></td><td>3<br><span class="muted">2.8% / 相对低配</span></td><td>奔跑吧牛基、带你投长跑老将、广发价值30甄选</td><td>59.0 / 6.0% / 12.4% / 30.9%</td><td>R5 权益/进取(99)、R1 低波(4)、R2 稳健收益(1)<br><span class="muted">主动基金组合(82)、QDII/海外工具(15)、主动+指数混合(9)</span></td></tr><tr><td>偏股核心配置</td><td><strong>偏股-指数/工具</strong><div class="bar"><span style="width:17.8%"></span></div></td><td>60<br><span class="muted">5.2%</span></td><td>22<br><span class="muted">华宝智选投顾(14)、广发基金投顾(8)、华泰证券省心投(6)、国联证券-国联投顾(4)</span></td><td>10<br><span class="muted">16.7% / 相对高配</span></td><td>广发价值30甄选、广发全天候多元配置定制策略、广发全天候进取定制策略、广发小盘先锋、广发指数宝</td><td>92.8 / 10.3% / 14.4% / 20.4%</td><td>R5 权益/进取(59)、R4 均衡成长(1)<br><span class="muted">指数/被动工具(37)、QDII/海外工具(23)</span></td></tr><tr><td>偏股核心配置</td><td><strong>偏股-高权益主动</strong><div class="bar"><span style="width:7.4%"></span></div></td><td>25<br><span class="muted">2.2%</span></td><td>10<br><span class="muted">广发基金投顾(7)、国联证券-国联投顾(5)、财通证券投顾(4)、未披露(2)</span></td><td>7<br><span class="muted">28.0% / 相对高配</span></td><td>优选成长组合、奔跑吧牛基、广发中国30甄选、广发甄选尊享组合、积极精选组合</td><td>84.9 / 7.6% / 14.5% / 31.3%</td><td>R5 权益/进取(25)<br><span class="muted">主动基金组合(15)、主动+指数混合(5)、QDII/海外工具(5)</span></td></tr><tr><td>主题/行业机会</td><td><strong>主题-行业/赛道主动</strong><div class="bar"><span style="width:9.8%"></span></div></td><td>33<br><span class="muted">2.9%</span></td><td>14<br><span class="muted">华宝智选投顾(7)、中欧财富投顾(6)、南方基金-司南投顾(5)、华夏投顾(4)</span></td><td>1<br><span class="muted">3.0% / 相对低配</span></td><td>广发带你投医药</td><td>72.9 / 4.8% / 15.0% / 35.5%</td><td>R5 权益/进取(28)、R2 稳健收益(2)、R4 均衡成长(2)<br><span class="muted">主动基金组合(26)、主动+指数混合(7)</span></td></tr><tr><td>主题/行业机会</td><td><strong>主题-黄金/商品</strong><div class="bar"><span style="width:6.2%"></span></div></td><td>21<br><span class="muted">1.8%</span></td><td>10<br><span class="muted">华宝智选投顾(11)、国泰基金-国泰民安投顾(2)、博时基金-博乐智投(1)、富国基金-富国星投顾(1)</span></td><td>0<br><span class="muted">0.0% / 空白</span></td><td>无</td><td>19.7 / 7.8% / 6.8% / 8.4%</td><td>R5 权益/进取(9)、R3 均衡稳健(7)、R2 稳健收益(3)<br><span class="muted">QDII/海外工具(12)、指数/被动工具(4)、主动基金组合(3)</span></td></tr><tr><td>主题/行业机会</td><td><strong>主题-指数工具</strong><div class="bar"><span style="width:3.8%"></span></div></td><td>13<br><span class="muted">1.1%</span></td><td>7<br><span class="muted">华宝智选投顾(6)、招商基金-招商投顾(2)、富国基金-富国星投顾(1)、广发基金-广发投顾(1)</span></td><td>1<br><span class="muted">7.7% / 基本覆盖</span></td><td>带你投消费</td><td>95.7 / 3.7% / 14.6% / 32.2%</td><td>R5 权益/进取(13)<br><span class="muted">指数/被动工具(13)</span></td></tr><tr><td>主题/行业机会</td><td><strong>主题-跨境主题</strong><div class="bar"><span style="width:2.0%"></span></div></td><td>2<br><span class="muted">0.2%</span></td><td>2<br><span class="muted">汇添富基金-汇添富投顾(1)、嘉实财富-嘉实投顾(1)</span></td><td>0<br><span class="muted">0.0% / 空白</span></td><td>无</td><td>76.7 / 9.0% / 14.1% / 42.5%</td><td>R5 权益/进取(2)<br><span class="muted">QDII/海外工具(2)</span></td></tr><tr><td>海外/全球配置</td><td><strong>海外-权益进取</strong><div class="bar"><span style="width:17.2%"></span></div></td><td>58<br><span class="muted">5.0%</span></td><td>20<br><span class="muted">华宝智选投顾(15)、国联证券-国联投顾(10)、华夏投顾(5)、广发基金投顾(4)</span></td><td>7<br><span class="muted">12.1% / 基本覆盖</span></td><td>优选香港组合、全球多元进取、广发全球30甄选、广发全球甄选尊享1号、带你投新生代</td><td>86.2 / 9.5% / 11.6% / 19.1%</td><td>R5 权益/进取(58)<br><span class="muted">QDII/海外工具(55)、主动基金组合(2)、指数/被动工具(1)</span></td></tr><tr><td>海外/全球配置</td><td><strong>海外-跨境混合</strong><div class="bar"><span style="width:14.5%"></span></div></td><td>49<br><span class="muted">4.2%</span></td><td>18<br><span class="muted">兴证全球投顾(12)、广发基金投顾(6)、华泰证券省心投(5)、南方基金-司南投顾(5)</span></td><td>7<br><span class="muted">14.3% / 相对高配</span></td><td>全球多元平衡、全球多元平衡尊享、全球多元稳健、全球多元稳健增长、广发全球债券30甄选组合</td><td>21.5 / 7.7% / 3.5% / 3.5%</td><td>R3 均衡稳健(27)、R4 均衡成长(9)、R2 稳健收益(8)<br><span class="muted">QDII/海外工具(25)、主动+指数混合(15)、指数/被动工具(4)</span></td></tr><tr><td>海外/全球配置</td><td><strong>海外-全球多资产</strong><div class="bar"><span style="width:8.3%"></span></div></td><td>28<br><span class="muted">2.4%</span></td><td>13<br><span class="muted">华宝智选投顾(7)、华夏投顾(4)、银华天玑投顾(4)、广发基金-广发投顾(3)</span></td><td>3<br><span class="muted">10.7% / 基本覆盖</span></td><td>全球多元进取、全球平衡精选、多元稳健配置策略</td><td>32.2 / 7.5% / 5.2% / 6.1%</td><td>R4 均衡成长(9)、R2 稳健收益(7)、R3 均衡稳健(5)<br><span class="muted">QDII/海外工具(28)</span></td></tr><tr><td>海外/全球配置</td><td><strong>海外/全球配置-持仓缺失待核验</strong><div class="bar"><span style="width:2.0%"></span></div></td><td>4<br><span class="muted">0.3%</span></td><td>1<br><span class="muted">兴证全球投顾(4)</span></td><td>0<br><span class="muted">0.0% / 空白</span></td><td>无</td><td>0.0 / 0.5% / 2.2% / 2.3%</td><td>D0 持仓缺失(4)<br><span class="muted">主动基金组合(4)</span></td></tr><tr><td>养老/目标日期</td><td><strong>养老-目标风险/稳健养老</strong><div class="bar"><span style="width:5.0%"></span></div></td><td>17<br><span class="muted">1.5%</span></td><td>6<br><span class="muted">中欧财富投顾(6)、华夏投顾/华夏财富查理智投(4)、华夏投顾(3)、民生加银基金投顾(2)</span></td><td>1<br><span class="muted">5.9% / 相对低配</span></td><td>广发积极养老</td><td>46.4 / 6.9% / 11.4% / 27.1%</td><td>R5 权益/进取(13)、R4 均衡成长(3)、R3 均衡稳健(1)<br><span class="muted">主动基金组合(11)、QDII/海外工具(6)</span></td></tr><tr><td>养老/目标日期</td><td><strong>养老-中端目标日期</strong><div class="bar"><span style="width:2.0%"></span></div></td><td>5<br><span class="muted">0.4%</span></td><td>3<br><span class="muted">广发基金投顾(2)、建信基金-建信投顾(2)、国泰基金-国泰民安投顾(1)</span></td><td>2<br><span class="muted">40.0% / 相对高配</span></td><td>智慧教育金2040、智慧教育金2045</td><td>37.1 / 6.9% / 9.6% / 19.3%</td><td>R4 均衡成长(3)、R5 权益/进取(2)<br><span class="muted">主动基金组合(3)、主动+指数混合(2)</span></td></tr><tr><td>养老/目标日期</td><td><strong>养老-近端目标日期</strong><div class="bar"><span style="width:2.0%"></span></div></td><td>4<br><span class="muted">0.3%</span></td><td>2<br><span class="muted">广发基金投顾(2)、建信基金-建信投顾(2)</span></td><td>2<br><span class="muted">50.0% / 相对高配</span></td><td>智慧教育金2030、智慧教育金2035</td><td>28.1 / 4.8% / 6.9% / 14.4%</td><td>R4 均衡成长(4)<br><span class="muted">主动基金组合(3)、主动+指数混合(1)</span></td></tr><tr><td>养老/目标日期</td><td><strong>养老-远端目标日期</strong><div class="bar"><span style="width:2.0%"></span></div></td><td>2<br><span class="muted">0.2%</span></td><td>1<br><span class="muted">国泰基金-国泰民安投顾(2)</span></td><td>0<br><span class="muted">0.0% / 空白</span></td><td>无</td><td>20.4 / 14.9% / 19.4% / 26.0%</td><td>R5 权益/进取(2)<br><span class="muted">QDII/海外工具(2)</span></td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>广发策略落点</h2>
+      <p class="note">以下只看广发已有策略，右侧给出同类全市场规模和广发占比，便于后续再做产品布局深挖。</p>
+      <table class="wide"><thead><tr><th>一级分类</th><th>广发二级分类</th><th>广发策略数</th><th>全市场同类数</th><th>同类广发占比</th><th>广发权益/年化/回撤中位数</th><th>广发策略样例</th></tr></thead><tbody><tr><td>现金管理/活钱</td><td>现金-货币主导</td><td>2</td><td>19</td><td>10.5%</td><td>0.0 / 1.7% / 0.0%</td><td>广发货币优选、广发货币优选（机构版）</td></tr><tr><td>现金管理/活钱</td><td>现金-货债增强</td><td>2</td><td>13</td><td>15.4%</td><td>0.0 / 2.4% / 0.3%</td><td>广发货币加、添利30天</td></tr><tr><td>纯债/短债</td><td>纯债-含少量权益待核验</td><td>8</td><td>15</td><td>53.3%</td><td>5.1 / 3.1% / 1.8%</td><td>南海定制1号、南海定制2号、广发尊享稳健甄选、广发尊享稳健甄选（机构版）、理财小加、超级理财加（机构版）、理财小加、超级理财加</td></tr><tr><td>纯债/短债</td><td>纯债-低波短债</td><td>7</td><td>49</td><td>14.3%</td><td>0.0 / 2.6% / 0.8%</td><td>广发债券宝、广发债基精选、广发短债甄选、广发纯债甄选、添利30天、添利30天（机构版）、广发纯债甄选</td></tr><tr><td>纯债/短债</td><td>短债-货债流动型</td><td>2</td><td>27</td><td>7.4%</td><td>0.0 / 2.0% / 0.2%</td><td>广发货币加、货币加（机构版）</td></tr><tr><td>固收+稳健增强</td><td>固收+-标准型</td><td>12</td><td>106</td><td>11.3%</td><td>14.5 / 3.8% / 2.8%</td><td>亲子理财加、固收增强组合、小小的太阳、广发全天候多元稳健、智慧教育金2025、智选理财Plus、稳健优选组合、稳健增长组合</td></tr><tr><td>固收+稳健增强</td><td>固收+-弹性增强</td><td>4</td><td>21</td><td>19.0%</td><td>21.3 / 4.0% / 4.0%</td><td>稳健向前跑、稳健增强组合、稳健理财组合、多资产稳健指数组合</td></tr><tr><td>固收+稳健增强</td><td>固收+-低权益</td><td>2</td><td>41</td><td>4.9%</td><td>6.8 / 2.3% / 3.8%</td><td>幸福小列车第2期投顾服务、幸福小列车第3期投顾服务</td></tr><tr><td>目标盈/止盈/小目标</td><td>目标盈-跨境/全球型</td><td>11</td><td>338</td><td>3.3%</td><td>7.0 / 4.4% / 2.7%</td><td>幸福小列车目标盈、幸福小心愿Pro目标盈、幸福小心愿目标盈、幸福小列车目标盈第4期、幸福小列车目标盈第5期、幸福小列车目标盈第6期、幸福小列车目标盈第7期、幸福小列车目标盈第8期</td></tr><tr><td>多资产均衡配置</td><td>多资产-均衡配置</td><td>3</td><td>29</td><td>10.3%</td><td>32.8 / 4.7% / 14.1%</td><td>一起幸福增长、股债平衡大师、带你投稳中求进</td></tr><tr><td>多资产均衡配置</td><td>多资产-成长配置</td><td>1</td><td>7</td><td>14.3%</td><td>52.0 / 7.6% / 17.7%</td><td>奔跑吧少年</td></tr><tr><td>多资产均衡配置</td><td>多资产-全球分散</td><td>1</td><td>19</td><td>5.3%</td><td>34.4 / 9.1% / 5.7%</td><td>广发全天候多元稳健增长</td></tr><tr><td>多资产均衡配置</td><td>多资产-稳健配置</td><td>1</td><td>12</td><td>8.3%</td><td>21.0 / 4.0% / 12.9%</td><td>幸福小列车Plus第1期投顾服务</td></tr><tr><td>多资产均衡配置</td><td>多资产均衡配置-持仓缺失待核验</td><td>1</td><td>17</td><td>5.9%</td><td>0.0 / 0.0% / 3.0%</td><td>幸福小列车第1期投顾服务</td></tr><tr><td>偏股核心配置</td><td>偏股-指数/工具</td><td>10</td><td>60</td><td>16.7%</td><td>94.9 / 16.7% / 15.4%</td><td>广发价值30甄选、广发全天候多元配置定制策略、广发全天候进取定制策略、广发小盘先锋、广发指数宝、指数100份、积极优选组合、股债动态配置组合</td></tr><tr><td>偏股核心配置</td><td>偏股-高权益主动</td><td>7</td><td>25</td><td>28.0%</td><td>98.0 / 6.2% / 32.9%</td><td>优选成长组合、奔跑吧牛基、广发中国30甄选、广发甄选尊享组合、积极精选组合、积极进取组合、超级定投家</td></tr><tr><td>偏股核心配置</td><td>偏股-核心主动</td><td>3</td><td>106</td><td>2.8%</td><td>69.1 / 3.7% / 30.2%</td><td>奔跑吧牛基、带你投长跑老将、广发价值30甄选</td></tr><tr><td>主题/行业机会</td><td>主题-行业/赛道主动</td><td>1</td><td>33</td><td>3.0%</td><td>68.2 / -0.5% / 39.2%</td><td>广发带你投医药</td></tr><tr><td>主题/行业机会</td><td>主题-指数工具</td><td>1</td><td>13</td><td>7.7%</td><td>99.0 / -6.1% / 42.4%</td><td>带你投消费</td></tr><tr><td>海外/全球配置</td><td>海外-跨境混合</td><td>7</td><td>49</td><td>14.3%</td><td>17.6 / 8.3% / 3.7%</td><td>全球多元平衡、全球多元平衡尊享、全球多元稳健、全球多元稳健增长、广发全球债券30甄选组合、广发全球商品甄选、全球多元稳健</td></tr><tr><td>海外/全球配置</td><td>海外-权益进取</td><td>7</td><td>58</td><td>12.1%</td><td>90.9 / 18.0% / 16.8%</td><td>优选香港组合、全球多元进取、广发全球30甄选、广发全球甄选尊享1号、带你投新生代、带你投科技、广发全球30甄选</td></tr><tr><td>海外/全球配置</td><td>海外-全球多资产</td><td>3</td><td>28</td><td>10.7%</td><td>52.6 / 8.7% / 7.2%</td><td>全球多元进取、全球平衡精选、多元稳健配置策略</td></tr><tr><td>养老/目标日期</td><td>养老-近端目标日期</td><td>2</td><td>4</td><td>50.0%</td><td>34.3 / 4.2% / 14.4%</td><td>智慧教育金2030、智慧教育金2035</td></tr><tr><td>养老/目标日期</td><td>养老-中端目标日期</td><td>2</td><td>5</td><td>40.0%</td><td>56.7 / 6.6% / 22.0%</td><td>智慧教育金2040、智慧教育金2045</td></tr><tr><td>养老/目标日期</td><td>养老-目标风险/稳健养老</td><td>1</td><td>17</td><td>5.9%</td><td>98.9 / 15.2% / 24.2%</td><td>广发积极养老</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>目标盈分类边界</h2>
+      <p>目标盈主池共有 338 条记录，其中 314 条为期次发车型；按“机构 + 归并系列名”后约 64 个系列。另有 44 条持仓缺失或权重全为 0，适合先做数据核验，不进入正式比较池。</p>
+      <ul>
+        <li>低波/稳健目标盈适合销售达标体验和稳健活动。</li>
+        <li>增强/平衡目标盈适合中风险客户的目标收益子货架。</li>
+        <li>主题、全球、黄金或高权益目标盈要单列，不能代表“稳健目标盈”。</li>
+      </ul>
+    </section>
+
+    <footer>本报告由本地 Node 脚本生成，不改写原始数据。生成脚本：analysis_outputs/generate_strategy_classification_map_report.js</footer>
+  </main>
+</body>
+</html>
