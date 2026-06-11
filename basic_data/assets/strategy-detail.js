@@ -43,6 +43,9 @@
   function isBlank(value) {
     return value === null || value === undefined || value === "" || value === "未披露";
   }
+  function raw(value) {
+    return value === null || value === undefined ? "" : String(value);
+  }
   function fundDetailUrl(row) {
     const params = new URLSearchParams();
     if (row.基金代码) params.set("code", row.基金代码);
@@ -439,19 +442,47 @@
       });
     });
   }
-  function contributionFor(snapshot) {
+  function contributionSeriesNames(payload) {
+    const series = payload?.series || {};
+    return Object.entries(series)
+      .filter(([, item]) => Array.isArray(item?.points) && item.points.length >= 2)
+      .map(([name]) => name);
+  }
+  function hasDrawableContributionPayload(payload) {
+    return contributionSeriesNames(payload).length > 0;
+  }
+  function preferredContributionFallback() {
+    return snapshots
+      .filter((item) => item.id !== "current")
+      .map((item) => ({ snapshot: item, payload: contributionPayloadForSnapshot(item) }))
+      .find((item) => hasDrawableContributionPayload(item.payload)) || { snapshot: null, payload: null };
+  }
+  function contributionPayloadForSnapshot(snapshot) {
     const curves = detail.contributionCurves || {};
-    if (snapshot && snapshot.id && curves[String(snapshot.id)]) {
-      return { snapshot, payload: curves[String(snapshot.id)] };
+    if (snapshot?.id && curves[String(snapshot.id)]) return curves[String(snapshot.id)];
+    const date = raw(snapshot?.日期);
+    if (!date) return null;
+    return Object.values(curves).find((payload) => raw(payload?.起始日期) === date && hasDrawableContributionPayload(payload))
+      || Object.values(curves).find((payload) => raw(payload?.起始日期) === date)
+      || null;
+  }
+  function contributionFor(snapshot) {
+    if (snapshot && snapshot.id && snapshot.id !== "current") {
+      return { snapshot, payload: contributionPayloadForSnapshot(snapshot) };
     }
-    const fallback = snapshots.find((item) => item.id !== "current" && curves[String(item.id)]);
-    return fallback ? { snapshot: fallback, payload: curves[String(fallback.id)] } : { snapshot: null, payload: null };
+    return preferredContributionFallback();
+  }
+  function contributionEmptyText(snapshot, payload) {
+    if (snapshot?.id === "current") return "当前仓位不是一次调仓事件；已优先寻找最近一条可评价历史调仓。若仍为空，说明该策略暂无调仓质量曲线。";
+    if (payload && !hasDrawableContributionPayload(payload)) return "该次调仓已有调仓质量记录，但调仓前、调仓后、基准和沪深300曲线在该区间均没有足够可画点。常见原因是区间端点缺少策略净值或基金净值。";
+    return "该次调仓尚无可用于绘制贡献曲线的调仓质量评估数据，通常是缺少调仓质量事件记录、下次调仓锚点或可比净值区间。";
   }
   function renderContribution(snapshot) {
     const target = contributionFor(snapshot);
     const desc = B.byId("contributionDesc");
-    if (!target.payload) {
-      desc.textContent = "暂无可用于绘制调仓贡献曲线的调仓质量评估数据。";
+    const drawableNames = contributionSeriesNames(target.payload);
+    if (!target.payload || !drawableNames.length) {
+      desc.textContent = contributionEmptyText(target.snapshot || snapshot, target.payload);
       B.drawReturnChart(B.byId("contributionChart"), {}, { alreadyReturn: false, title: "调仓贡献曲线" });
       return;
     }
@@ -462,9 +493,32 @@
     if (selected && Array.isArray(selected.points) && selected.points.length) {
       series[selectedName] = { 模式: "nav", points: selected.points };
     }
-    desc.textContent = `${meta.起始日期 || target.snapshot?.日期 || ""} 至 ${meta.结束日期 || "最新"}，默认展示调仓前后仓位曲线；基准、沪深300和全局基准可在图例中勾选。`;
-    const defaultVisible = selectedName ? ["调仓前仓位模拟", "调仓后仓位实际", selectedName] : ["调仓前仓位模拟", "调仓后仓位实际"];
+    const usingCurrentFallback = snapshot?.id === "current" && target.snapshot && target.snapshot.id !== "current";
+    const dateRange = `${meta.起始日期 || target.snapshot?.日期 || ""} 至 ${meta.结束日期 || "最新"}`;
+    desc.textContent = usingCurrentFallback
+      ? `当前仓位默认对标最近一次可评价调仓：${target.snapshot.日期 || ""}｜${target.snapshot.标题 || ""}。${dateRange}，默认展示调仓前后仓位曲线；基准、沪深300和全局基准可在图例中勾选。`
+      : `${dateRange}，默认展示调仓前后仓位曲线；基准、沪深300和全局基准可在图例中勾选。`;
+    const preferred = ["调仓前仓位模拟", "调仓后仓位实际"].filter((name) => drawableNames.includes(name));
+    const defaultVisible = [...(preferred.length ? preferred : drawableNames.slice(0, 2)), ...(selectedName ? [selectedName] : [])];
     B.drawReturnChart(B.byId("contributionChart"), series, { alreadyReturn: false, title: "调仓贡献曲线", height: 280, defaultVisibleSeries: defaultVisible });
+  }
+  function snapshotResearchBlock(snap) {
+    if (snap.类型 !== "历史调仓") return "";
+    const meta = [
+      snap.披露日期 ? `披露日期：${B.esc(snap.披露日期)}` : "",
+      snap.调仓逻辑 ? `逻辑：${B.esc(snap.调仓逻辑)}` : "",
+      snap.涉及资产 ? `涉及资产：${B.esc(snap.涉及资产)}` : ""
+    ].filter(Boolean);
+    const reason = raw(snap.调仓原因).trim() || "该次调仓未披露具体原因。";
+    const summary = raw(snap.AI投研总结 || snap.投研摘要).trim() || "当前调仓明细缺少足够资产/行业分类信息，暂无法生成投研摘要。";
+    return `
+      <div class="rebalance-research">
+        <div class="rebalance-research-meta">${meta.map((text) => `<span>${text}</span>`).join("")}</div>
+        <div class="rebalance-research-grid">
+          <div><strong>披露原因</strong><p>${B.esc(reason)}</p></div>
+          <div><strong>AI投研摘要</strong><p>${B.esc(summary)}</p></div>
+        </div>
+      </div>`;
   }
   function renderPositions() {
     activeSnapshotIndex = Math.max(0, Math.min(activeSnapshotIndex, Math.max(0, snapshots.length - 1)));
@@ -476,6 +530,8 @@
         <p>${B.esc(snap.类型 || "")}｜${B.esc(snap.日期 || "未披露日期")}｜${B.esc(snap.说明 || "")}</p>
       </div>
       <span class="pill">${(snap.holdings || []).length.toLocaleString("zh-CN")} 只基金</span>`;
+    const researchHost = B.byId("rebalanceResearch");
+    if (researchHost) researchHost.innerHTML = snapshotResearchBlock(snap);
     B.byId("holdingTable").innerHTML = holdingTable(snap.holdings || []);
     B.byId("holdingTable").querySelectorAll("[data-holding-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
@@ -584,6 +640,7 @@
         <div id="rebalanceList" class="rebalance-list"></div>
         <div class="position-detail">
           <div id="holdingHead" class="holding-head"></div>
+          <div id="rebalanceResearch"></div>
           <div id="holdingTable"></div>
         </div>
       </div>

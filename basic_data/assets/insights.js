@@ -3,7 +3,8 @@
   const summary = B.state.summary || {};
   const insight = summary.insightData || {};
   const root = B.byId("insightsPage");
-  const riskOrder = ["R0 现金/超低波", "R1 低波", "R2 稳健收益", "R3 均衡稳健", "R4 均衡成长", "R5 权益/进取"];
+  const riskOrder = ["低风险", "R0 现金/超低波", "中低风险", "中低风险(R2)", "R1 低波", "R2 稳健收益", "中风险", "中风险(R3)", "R3 均衡稳健", "中高风险", "中高风险(R4)", "R4 均衡成长", "高风险", "R5 权益/进取", "未披露"];
+  const riskOrderMap = new Map(riskOrder.map((risk, index) => [risk, index]));
   const dateRanges = [
     { key: "1w", label: "近1周", metric: "近一周", days: 7, monthCount: 1 },
     { key: "1m", label: "近1月", metric: "近一月", days: 31 },
@@ -65,7 +66,7 @@
   const rawPointById = new Map(rawPoints.map((row) => [row.统一策略ID, row]));
   const displayStrategyIds = new Set(rawPoints.map((row) => row.统一策略ID).filter(Boolean));
   const signalDetailStore = new Map();
-  const risks = riskOrder.filter((name) => rawPoints.some((row) => row.风险等级 === name));
+  const risks = orderedRiskValues(rawPoints);
   const businesses = [...new Set(rawPoints.map((row) => row.业务分类).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const regions = [...new Set(rawPoints.map((row) => row.市场地域).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const institutions = [...new Set(rawPoints.map((row) => row.投顾机构).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
@@ -84,6 +85,34 @@
 
   function raw(value) {
     return value === null || value === undefined ? "" : String(value);
+  }
+
+  function riskSortValue(value) {
+    const text = raw(value).trim();
+    if (riskOrderMap.has(text)) return riskOrderMap.get(text);
+    if (/低风险|R0|R1/.test(text)) return 2;
+    if (/中低|R2/.test(text)) return 4;
+    if (/中风险|R3/.test(text)) return 7;
+    if (/中高|R4/.test(text)) return 10;
+    if (/高风险|R5/.test(text)) return 13;
+    if (!text || text === "未披露") return 999;
+    return 500;
+  }
+
+  function orderedRiskValues(rows) {
+    return [...new Set((rows || []).map((row) => raw(row.风险等级).trim()).filter((value) => value && value !== "D0 持仓缺失"))]
+      .sort((a, b) => riskSortValue(a) - riskSortValue(b) || a.localeCompare(b, "zh-CN"));
+  }
+
+  function uniqueRowsBy(rows, keyFn, preferFn = null) {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      const key = keyFn(row);
+      if (!key) return;
+      const existing = map.get(key);
+      if (!existing || (preferFn && preferFn(row, existing))) map.set(key, row);
+    });
+    return [...map.values()];
   }
 
   function isDisplayableInsightRow(row) {
@@ -331,18 +360,30 @@
     }).join("")}${grouped.length > visible.length ? `<small>另${countText(grouped.length - visible.length)}只</small>` : ""}</div>`;
   }
 
+  function registerSignalDetail(label, row, title = "") {
+    const detail = row._策略明细 || [];
+    if (!detail.length) return "";
+    const id = `signal-detail-${signalDetailStore.size}`;
+    signalDetailStore.set(id, { label, row, detail, title });
+    return id;
+  }
+
   function signalDetailButton(label, row) {
     const detail = row._策略明细 || [];
     if (!detail.length) return '<span class="small">无明细</span>';
-    const id = `signal-detail-${signalDetailStore.size}`;
-    signalDetailStore.set(id, { label, row, detail });
+    const id = registerSignalDetail(label, row);
     return `<button type="button" class="detail-button" data-signal-detail="${B.esc(id)}">查看${countText(detail.length)}个</button>`;
+  }
+
+  function signalDetailCellAttrs(label, row, title = "") {
+    const id = registerSignalDetail(label, row, title);
+    return id ? ` data-signal-detail="${B.esc(id)}" role="button" tabindex="0"` : "";
   }
 
   function showSignalDetail(id) {
     const payload = signalDetailStore.get(id);
     if (!payload) return;
-    const { label, row, detail } = payload;
+    const { label, row, detail, title } = payload;
     const sorted = [...detail].sort((a, b) => Math.abs(num(b.净变化) || 0) - Math.abs(num(a.净变化) || 0) || raw(a.策略名称).localeCompare(raw(b.策略名称), "zh-CN"));
     const html = `
       <div class="modal-summary">
@@ -355,7 +396,7 @@
       </div>
       <div class="detail-table">
         <table>
-          <thead><tr><th>策略</th><th>投顾机构</th><th>方向</th><th>净变化</th><th>调前权重</th><th>调后权重</th><th>调仓强度</th><th>基金调整</th></tr></thead>
+          <thead><tr><th>策略</th><th>投顾机构</th><th>方向</th><th>净变化</th><th>调前权重</th><th>调后权重</th><th>调仓强度</th><th>命中原因</th><th>基金调整</th></tr></thead>
           <tbody>${sorted.map((item) => `<tr>
             <td>${strategyLink(item)}</td>
             <td>${B.esc(item.投顾机构 || "未识别机构")}</td>
@@ -364,13 +405,14 @@
             <td>${weightPct(item.调前权重)}</td>
             <td>${weightPct(item.调后权重)}</td>
             <td>${weightPoint(item.调仓强度)}</td>
+            <td>${B.esc(item.命中原因 || fundAdjustmentSummary(item.基金明细 || []) || "该策略在当前分类下发生有效仓位变化")}</td>
             <td>${fundAdjustmentCell(item.基金明细)}</td>
           </tr>`).join("")}</tbody>
         </table>
       </div>
       <p class="detail-note">参与策略表示当前观察窗口内在“${B.esc(label)}=${B.esc(row.分类 || "未分类")}”下发生基金级调增或调减的策略；基金调整列展示具体调增/调减基金及调前、调后仓位。</p>
     `;
-    B.showHtmlModal(`${label}｜${row.分类 || "未分类"}｜参与策略明细`, html);
+    B.showHtmlModal(title || `${label}｜${row.分类 || "未分类"}｜参与策略明细`, html);
   }
 
   function barList(rows, labelField, valueField, options = {}) {
@@ -444,7 +486,7 @@
   }
 
   function highestRisk(rows) {
-    return [...rows].sort((a, b) => riskOrder.indexOf(b.风险等级) - riskOrder.indexOf(a.风险等级))[0]?.风险等级 || rows[0]?.风险等级 || "未分类";
+    return [...rows].sort((a, b) => riskSortValue(b.风险等级) - riskSortValue(a.风险等级))[0]?.风险等级 || rows[0]?.风险等级 || "未分类";
   }
 
   function majority(rows, field) {
@@ -732,7 +774,7 @@
   }
 
   function riskCountRows(rows) {
-    return riskOrder.map((risk) => {
+    return orderedRiskValues(rows).map((risk) => {
       const list = rows.filter((row) => row.风险等级 === risk);
       return { 风险等级: risk, 市场数量: list.length, 广发数量: list.filter(isGf).length };
     }).filter((row) => row.市场数量);
@@ -1187,6 +1229,65 @@
     }).sort((a, b) => b.调仓强度 - a.调仓强度);
   }
 
+  function heatmapInstitutionMatch(row, institution) {
+    return institution === "全市场汇总" || row.投顾机构 === institution;
+  }
+
+  function advisorAssetHeatmapDetailRow(sourceRows, institution, type) {
+    const scoped = (sourceRows || [])
+      .filter((row) => reliableReportAsset(row) === type)
+      .filter((row) => heatmapInstitutionMatch(row, institution));
+    return strategyAssetSignalRows(scoped, "研报大类资产").find((row) => row.分类 === type) || null;
+  }
+
+  function activeAssetBeforeAfterDetailRow(sourceRows, fundDetailRows, institution, type) {
+    const scoped = (sourceRows || [])
+      .filter((row) => reliableReportAsset(row) === type)
+      .filter((row) => heatmapInstitutionMatch(row, institution));
+    const detailMap = groupBy((fundDetailRows || []).filter((row) => row.分类字段 === "研报大类资产" && row.分类 === type), (row) => row.统一策略ID || "");
+    const detail = [...groupBy(scoped, (row) => `${row.投顾机构 || "未识别机构"}｜${row.统一策略ID || ""}`).entries()]
+      .map(([, list]) => {
+        const ordered = [...list].sort((a, b) => String(a.调仓日期 || "").localeCompare(String(b.调仓日期 || "")));
+        const first = ordered[0] || {};
+        const last = ordered.at(-1) || {};
+        const before = num(first.调前权重) ?? num(first.调后权重) ?? 0;
+        const after = num(last.调后权重) ?? num(last.调前权重) ?? 0;
+        const change = after - before;
+        const fundDetails = detailMap.get(first.统一策略ID || "") || [];
+        const action = change > 0 ? "增配" : (change < 0 ? "减配" : "调整");
+        const dateText = first.调仓日期 && last.调仓日期 ? `${first.调仓日期}至${last.调仓日期}` : "当前观察窗口";
+        const fundReason = fundAdjustmentSummary(fundDetails);
+        return {
+          统一策略ID: first.统一策略ID,
+          策略名称: first.策略名称,
+          投顾机构: first.投顾机构 || "未识别机构",
+          分类: type,
+          净变化: change,
+          调仓强度: ordered.reduce((total, row) => total + (num(row.总点位) || Math.abs(num(row.净增配) || 0)), 0),
+          调前权重: before,
+          调后权重: after,
+          基金明细: fundDetails,
+          命中原因: `${dateText}，${type}仓位${action}${weightPoint(change)}（${weightPct(before)}→${weightPct(after)}）${fundReason ? `；${fundReason}` : ""}`
+        };
+      })
+      .filter((row) => Math.abs(num(row.净变化) || 0) > .0001 || (num(row.调仓强度) || 0) > .0001)
+      .sort((a, b) => Math.abs(num(b.净变化) || 0) - Math.abs(num(a.净变化) || 0));
+    const add = detail.filter((row) => (num(row.净变化) || 0) > .0001);
+    const reduce = detail.filter((row) => (num(row.净变化) || 0) < -.0001);
+    return {
+      分类: type,
+      判断: add.length > reduce.length ? "前后增配" : (reduce.length > add.length ? "前后减配" : "方向分歧"),
+      参与策略数: detail.length,
+      增持策略数: add.length,
+      减持策略数: reduce.length,
+      中位净变化: median(detail.map((row) => row.净变化)),
+      典型变化: median(detail.map((row) => row.净变化)),
+      净变化: sum(detail, "净变化"),
+      调仓强度: sum(detail, "调仓强度"),
+      _策略明细: detail
+    };
+  }
+
   function companyAssetHeatmap(advisorAssetRows, sourceRows = []) {
     const columns = heatmapInstitutionColumns(advisorAssetRows, "投顾机构", { sourceRows, maxNonGf: 5 });
     const assetTypes = [...groupBy(advisorAssetRows || [], (row) => row.资产类型).entries()]
@@ -1211,12 +1312,15 @@
       const totalPoint = num(row.总点位) || 0;
       const avgChange = num(row.平均变化);
       const title = `${column.label}｜${type}｜增持${countText(addCount)}个策略，中位${weightPoint(row.增持中位数)}｜减持${countText(reduceCount)}个策略，中位${weightPoint(row.减持中位数)}｜中位变化${weightPoint(medianChange)}｜平均变化${weightPoint(avgChange)}｜总点位${weightPoint(totalPoint)}｜策略数${countText(totalStrategies)}`;
-      return `<td class="heat-cell advisor-heat-cell" style="background:${bg};color:${color}" title="${B.esc(title)}">
+      const detailRow = advisorAssetHeatmapDetailRow(sourceRows, column.key, type);
+      const detailAttrs = detailRow ? signalDetailCellAttrs("投顾机构资产方向热力图", detailRow, `${column.label}｜${type}｜策略命中明细`) : "";
+      const detailCount = detailRow?._策略明细?.length || 0;
+      return `<td class="heat-cell advisor-heat-cell${detailAttrs ? " is-clickable" : ""}" style="background:${bg};color:${color};${detailAttrs ? "cursor:pointer" : ""}" title="${B.esc(detailAttrs ? `${title}｜点击查看策略明细` : title)}"${detailAttrs}>
         <b>增${countText(addCount)}｜减${countText(reduceCount)}</b>
         <small>增中位 ${weightPoint(row.增持中位数)}</small>
         <small>减中位 ${weightPoint(row.减持中位数)}</small>
         <small>中位/均值 ${weightPoint(medianChange)} / ${weightPoint(avgChange)}</small>
-        <small>总${weightPoint(totalPoint)}｜${countText(totalStrategies)}策</small>
+        <small>${detailCount ? `点看${countText(detailCount)}策` : `总${weightPoint(totalPoint)}｜${countText(totalStrategies)}策`}</small>
       </td>`;
     };
     return `<div class="heatmap-wrap"><table class="heatmap-table advisor-heatmap-table"><thead><tr><th>资产类型</th>${columns.map((column) => `<th>${B.esc(column.label)}</th>`).join("")}</tr></thead><tbody>${assetTypes.map((type) => `<tr><th>${B.esc(type)}</th>${columns.map((column) => cell(column, type)).join("")}</tr>`).join("")}</tbody></table></div>
@@ -1279,6 +1383,7 @@
     if (!columns.length || !assetTypes.length) return '<div class="empty">当前筛选下暂无主动调仓前后资产变化数据。</div>';
     const map = new Map(data.map((row) => [`${row.投顾机构}｜${row.资产类型}`, row]));
     const maxAbs = Math.max(1, ...columns.flatMap((column) => assetTypes.map((type) => Math.abs(num(map.get(`${column.key}｜${type}`)?.中位变化) || 0))));
+    const fundDetailRows = filteredRebalanceFundCategoryRows(true);
     const cell = (column, type) => {
       const row = map.get(`${column.key}｜${type}`) || {};
       if (!Object.keys(row).length) return heatmapEmptyCell(`${column.label}｜${type}｜当前筛选区间该资产无主动调仓前后变化`, "0变化");
@@ -1287,11 +1392,14 @@
       const bg = Math.abs(value) < 0.0001 ? "#f8fafc" : (value > 0 ? `rgba(180,35,24,${alpha.toFixed(2)})` : `rgba(15,118,110,${alpha.toFixed(2)})`);
       const color = Math.abs(value) / maxAbs > .45 ? "#fff" : "#172033";
       const title = `${column.label}｜${type}｜调前中位${weightPoint(row.期初中位)}｜调后中位${weightPoint(row.期末中位)}｜中位变化${weightPoint(row.中位变化)}｜平均变化${weightPoint(row.平均变化)}｜增${countText(row.增持策略数)} / 减${countText(row.减持策略数)}｜策略数${countText(row.总策略数)}`;
-      return `<td class="heat-cell advisor-heat-cell" style="background:${bg};color:${color}" title="${B.esc(title)}">
+      const detailRow = activeAssetBeforeAfterDetailRow(rows, fundDetailRows, column.key, type);
+      const detailAttrs = detailRow._策略明细.length ? signalDetailCellAttrs("主动调仓前后大类资产变化热力图", detailRow, `${column.label}｜${type}｜策略命中明细`) : "";
+      const detailCount = detailRow._策略明细.length;
+      return `<td class="heat-cell advisor-heat-cell${detailAttrs ? " is-clickable" : ""}" style="background:${bg};color:${color};${detailAttrs ? "cursor:pointer" : ""}" title="${B.esc(detailAttrs ? `${title}｜点击查看策略明细` : title)}"${detailAttrs}>
         <b>${weightPoint(row.中位变化)}</b>
         <small>前 ${weightPoint(row.期初中位)}｜后 ${weightPoint(row.期末中位)}</small>
         <small>均值 ${weightPoint(row.平均变化)}</small>
-        <small>增${countText(row.增持策略数)}｜减${countText(row.减持策略数)}｜${countText(row.总策略数)}策</small>
+        <small>${detailCount ? `点看${countText(detailCount)}策` : `增${countText(row.增持策略数)}｜减${countText(row.减持策略数)}｜${countText(row.总策略数)}策`}</small>
       </td>`;
     };
     return `<div class="heatmap-wrap"><table class="heatmap-table advisor-heatmap-table"><thead><tr><th>资产类型</th>${columns.map((column) => `<th>${B.esc(column.label)}</th>`).join("")}</tr></thead><tbody>${assetTypes.map((type) => `<tr><th>${B.esc(type)}</th>${columns.map((column) => cell(column, type)).join("")}</tr>`).join("")}</tbody></table></div>
@@ -1346,7 +1454,7 @@
     }
     const dict = pack.dict || {};
     const fields = pack.fields || [];
-    holdingSnapshotRowsCache = (pack.rows || []).map((row) => {
+    holdingSnapshotRowsCache = uniqueRowsBy((pack.rows || []).map((row) => {
       const strategy = dict.strategies?.[row[0]] || [];
       const version2 = Number(pack.version || 1) >= 2;
       return {
@@ -1368,7 +1476,21 @@
         基金数: row[version2 ? 14 : 12] || 0,
         策略快照数: 1
       };
-    });
+    }), (row) => [
+      row.统一策略ID,
+      row.快照日期,
+      row.投顾机构,
+      row.是否广发策略,
+      row.风险等级,
+      row.业务分类,
+      row.研报产品类型,
+      row.研报股票子类型,
+      row.市场地域,
+      row.天天当前对客展示,
+      row.天天展示状态,
+      row.分类字段,
+      row.分类
+    ].map(raw).join("｜"), (row, existing) => (num(row.基金数) || 0) > (num(existing.基金数) || 0));
     return holdingSnapshotRowsCache;
   }
 
@@ -1422,7 +1544,7 @@
     }
     const dict = pack.dict || {};
     const fields = pack.fields || [];
-    rebalanceFundCategoryRowsCache = (pack.rows || []).map((row) => {
+    rebalanceFundCategoryRowsCache = uniqueRowsBy((pack.rows || []).map((row) => {
       const strategy = dict.strategies?.[row[1]] || [];
       const fund = dict.funds?.[row[13]] || [];
       return {
@@ -1450,7 +1572,25 @@
         权重变化: num(row[18]) || 0,
         调仓动作: dict.actions?.[row[19]] || ""
       };
-    });
+    }), (row) => [
+      row.调仓日期,
+      row.统一策略ID,
+      row.投顾机构,
+      row.风险等级,
+      row.业务分类,
+      row.研报产品类型,
+      row.研报股票子类型,
+      row.市场地域,
+      row.天天当前对客展示,
+      row.天天展示状态,
+      row.分类字段,
+      row.分类,
+      row.基金代码,
+      row.基金名称,
+      row.基金公司,
+      row.基金类型,
+      row.调仓动作
+    ].map(raw).join("｜"), (row, existing) => Math.abs(num(row.权重变化) || 0) > Math.abs(num(existing.权重变化) || 0));
     return rebalanceFundCategoryRowsCache;
   }
 
@@ -2187,7 +2327,7 @@
         <section class="insight-grid">
           <div class="panel">
             <div class="panel-head"><div><h2>风险等级产品数量</h2><p class="desc">柱为全市场产品数量，细线为广发产品数量。</p></div></div>
-            ${barList(riskRows, "风险等级", "市场数量", { targetField: "广发数量", formatter: (value, row) => `市场${countText(value)} / 广发${countText(row.广发数量)}`, limit: 8 })}
+            ${barList(riskRows, "风险等级", "市场数量", { targetField: "广发数量", formatter: (value, row) => `市场${countText(value)} / 广发${countText(row.广发数量)}`, limit: 12 })}
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>业务分类覆盖</h2><p class="desc">按市场产品数量排序，并显示广发覆盖数量。</p></div></div>
@@ -2589,8 +2729,26 @@
     return null;
   }
 
+  function rebalanceEventKey(row) {
+    const turn = num(row.单次换手率);
+    const businessKey = [
+      row.统一策略ID,
+      row.调仓日期,
+      row.调仓标题,
+      row.调仓原因,
+      row.涉及资产,
+      turn === null ? "" : turn.toFixed(4)
+    ].map(raw).join("｜");
+    if (raw(row.统一策略ID).trim() && raw(row.调仓日期).trim()) return businessKey;
+    return raw(row.调仓事件ID).trim() || businessKey;
+  }
+
+  function uniqueRebalanceEvents(rows) {
+    return uniqueRowsBy(rows || [], rebalanceEventKey);
+  }
+
   function rebalanceEvents(applyReportType = true) {
-    const rows = (insight.调仓事件 || [])
+    const rows = uniqueRebalanceEvents(insight.调仓事件 || [])
       .filter(dimensionMatch)
       .filter((row) => !applyReportType || reportTypeMatch(row));
     return rebalanceRangeRows(rows, "调仓日期").sort((a, b) => String(b.调仓日期 || "").localeCompare(String(a.调仓日期 || "")));
@@ -3452,6 +3610,11 @@
     if (rebalanceReportType) rebalanceReportType.addEventListener("change", () => { state.reportType = rebalanceReportType.value || ""; state.rebalancePage = 1; render(); });
     root.querySelectorAll("[data-signal-detail]").forEach((button) => {
       button.addEventListener("click", () => {
+        showSignalDetail(button.dataset.signalDetail || "");
+      });
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
         showSignalDetail(button.dataset.signalDetail || "");
       });
     });

@@ -53,9 +53,102 @@ window.BasicData = (() => {
     return derivedFieldHints.some((word) => text.includes(word));
   }
   function fieldSourceText(field) {
-    return isDerivedField(field)
-      ? "数据来源：字段名称带 *，表示基于基础数据加工、汇总、计算或规则归类得到。"
-      : "数据来源：字段名称不带 *，表示采集数据或平台直接披露字段。";
+    const text = String(field || "");
+    const source = isDerivedField(text)
+      ? "口径属性：加工字段。由本地分析库在导出阶段按规则清洗、关联、聚合或计算，不是渠道原始字段。"
+      : "口径属性：采集/披露字段。优先来自渠道原始披露、公开净值、当前持仓或调仓记录；缺失时只使用明确的本地补全规则。";
+    if (text.includes("基金") || text.includes("资产") || text.includes("行业")) {
+      return `${source}\n数据链路：策略当前持仓/推算持仓/调仓明细 -> 基金信息、基金标准分类字典、基金日度净值 -> 页面仓位与调仓洞察包。`;
+    }
+    if (text.includes("调仓") || text.includes("调前") || text.includes("调后") || text.includes("净增配")) {
+      return `${source}\n数据链路：策略调仓事件、策略调仓明细、调仓质量事件分析和调仓质量基金明细；按当前筛选范围、研报产品类型和时间窗口重新汇总。`;
+    }
+    if (text.includes("收益") || text.includes("净值") || text.includes("回撤") || text.includes("波动") || text.includes("夏普")) {
+      return `${source}\n数据链路：策略日度业绩、策略标准业绩净值、基金日度净值和公开指数行情；优先使用官方披露曲线，必要时使用统一回放净值。`;
+    }
+    if (text.includes("持仓") || text.includes("仓位") || text.includes("权重")) {
+      return `${source}\n数据链路：策略当前持仓、策略当前持仓推算补齐和历史调仓明细；页面按当前筛选范围重新聚合。`;
+    }
+    return `${source}\n数据链路：当前分析库导出的 basic_summary、策略详情文件和洞察数据包；页面只负责展示与交互筛选。`;
+  }
+  function fallbackFieldDescription(field) {
+    const text = String(field || "");
+    if (text.includes("基金分类依据")) {
+      return "计算口径：展示单只基金归类时命中的证据链。优先取基金代码/名称标准字典，其次取平台持仓披露的资产类型或分组，再用基金名称、跟踪指数、QDII/ETF/FOF/REIT/黄金/商品/短债/纯债/可转债等关键词兜底。该字段用于解释为什么基金被归入当前基金类型。";
+    }
+    if (text.includes("基金分类置信度")) {
+      return "计算口径：A=命中基金标准字典或明确代码规则；B=有平台披露分类且名称规则能解释；C=主要依赖基金名称/指数关键词；D=缺少标准档案或平台分类，仅能用兜底规则，后续需要补采公开基金资料。";
+    }
+    if (text.includes("资产暴露") || text.includes("研报大类资产")) {
+      return "计算口径：先识别单只基金主类型，再把基金权重拆到A股、港股、美股、债券、货币及现金、黄金、商品、海外债、REIT等资产。图表权重=sum(策略基金权重*基金对应资产暴露比例)。例如固收+/偏债混合默认拆为债券70%+A股25%+现金5%，沪港深权益默认A股55%+港股40%+现金5%。";
+    }
+    if (text.includes("行业暴露") || text.includes("研报A股行业")) {
+      return "计算口径：只对可识别A股行业主题的基金拆行业。行业权重=sum(基金持仓权重*A股资产暴露比例*基金行业暴露比例)。宽基、主动权益、均衡混合、债券、货币、海外、商品等缺少可验证行业主题时为空，不强行拆行业。";
+    }
+    if (text.includes("行业主题") || text.includes("行业大类") || text.includes("权益行业")) {
+      return "计算口径：按基金资产暴露和行业暴露继续归并。非权益资产归入现金管理、纯债/固收、海外债券、贵金属、能源商品等；A股行业按申万一级行业映射到科技制造、消费医药、金融周期、宽基/主动权益等上层主题。";
+    }
+    if (text.includes("权重占比") || text.includes("占比")) {
+      return "计算口径：当前筛选范围内，本行对象的权重合计除以同口径全部对象权重合计。用于基金、基金公司、资产大类、行业主题等聚合项时，先在单只策略内按基金权重或拆分暴露求和，再跨策略汇总。";
+    }
+    if (text.includes("总权重") || text.includes("持仓权重合计")) {
+      return "计算口径：当前筛选范围内持有该基金、公司、资产或行业的策略期末持仓比例求和。该值是跨策略合计点位，不代表任何单一组合的真实仓位。";
+    }
+    if (text.includes("广发策略权重")) {
+      return "计算口径：只统计投顾机构归属为广发的策略，在当前筛选范围内对该基金、基金公司、资产或行业的期末持仓权重合计。";
+    }
+    if (text.includes("非广发策略权重") || text.includes("外部策略权重")) {
+      return "计算口径：剔除广发投顾策略后，其余策略在当前筛选范围内对该基金、基金公司、资产或行业的期末持仓权重合计，用于观察外部策略是否认可该底层资产。";
+    }
+    if (text.includes("持仓策略数")) {
+      return "计算口径：当前筛选范围内期末仍持有该基金、基金公司、资产或行业的去重策略数。同一策略在同一统计项下只计一次。";
+    }
+    if (text.includes("调仓策略数")) {
+      return "计算口径：当前调仓窗口内，对该基金、基金公司、资产或行业发生有效权重变化的去重策略数。有效变化阈值为绝对净变化大于0.0001个百分点。";
+    }
+    if (text.includes("中位权重")) {
+      return "计算口径：当前筛选范围内持有该对象的单个策略持仓比例中位数，表示典型策略的配置强度，不受极端大仓位策略过度影响。";
+    }
+    if (text.includes("区间收益率") || text.includes("近一周") || text.includes("近一月") || text.includes("近三月") || text.includes("今年以来")) {
+      return "计算口径：取观察窗口起止日期附近最近可用净值，收益率=(期末净值/期初净值-1)*100%。策略优先使用官方披露净值，基金使用基金日度净值；窗口内缺少可比净值时显示未披露。";
+    }
+    if (text.includes("回撤")) {
+      return "计算口径：基于清洗后的日度净值序列，逐日计算相对历史高点的跌幅；最大回撤取区间内最深跌幅，当前回撤取最新净值相对历史高点的跌幅。";
+    }
+    if (text.includes("波动")) {
+      return "计算口径：用日收益率标准差按252个交易日年化，公式=std(日收益率)*sqrt(252)。样本不足或净值不连续时不参与正式比较。";
+    }
+    if (text.includes("夏普")) {
+      return "计算口径：年化收益率/年化波动率，当前无风险收益率按0处理；波动率为0或样本不足时为空。";
+    }
+    if (text.includes("净增配") || text.includes("权重变化")) {
+      return "计算口径：调后权重-调前权重。按基金、资产、行业聚合时，先在单只策略内汇总同类基金变化，再跨策略计算合计、中位数、增配策略数和减配策略数。";
+    }
+    if (text.includes("加仓权重")) {
+      return "计算口径：当前窗口内所有正向权重变化的合计，只统计买入或增配部分，不与减仓抵消。";
+    }
+    if (text.includes("减仓权重")) {
+      return "计算口径：当前窗口内所有负向权重变化绝对值的合计，只统计卖出或减配部分，不与加仓抵消。";
+    }
+    if (text.includes("调仓强度") || text.includes("换手")) {
+      return "计算口径：一次调仓中买入与卖出权重变化绝对值的综合强度。单次换手率通常按sum(abs(权重变化))/2估算，年度指标再按策略运作时间折算。";
+    }
+    if (text.includes("胜率")) {
+      return "计算口径：只统计调仓后观察窗口已经结束且可评价的事件，胜率=正向事件数/可评价事件数*100%。未到观察窗口或缺少可比收益的事件不进入分母。";
+    }
+    if (text.includes("贡献")) {
+      return "计算口径：把调后持仓权重与后续区间收益结合估算，近似为调后权重*调仓后收益率/100，用于比较调仓后单只基金或资产对组合收益的影响。";
+    }
+    if (text.includes("排名") || text.includes("分位") || text.includes("Top")) {
+      return "计算口径：在当前筛选后的同一可比池内重排。排序字段随页面选择变化；分位数按同池策略或同类产品的相对位置计算，不跨产品类型混排。";
+    }
+    if (text.includes("数量") || text.endsWith("数") || text.includes("事件数") || text.includes("样本数")) {
+      return "计算口径：按当前筛选范围去重计数。策略按统一策略ID去重，基金按基金代码去重，调仓事件按调仓事件ID去重；明细行数只在明确写作记录数时使用。";
+    }
+    if (text.includes("日期") || text.endsWith("日")) {
+      return "计算口径：取该对象在对应业务表中的最大可用日期。策略业绩看最新业绩日，持仓看最新持仓日或推算持仓日，调仓看最新调仓日，基金净值看最新交易日期。";
+    }
+    return "计算口径：该字段暂未配置专门字典项。页面按字段所在模块采用固定链路推断：策略类字段来自策略信息/业绩/持仓/调仓表；仓位类字段按当前筛选范围对基金权重和资产暴露聚合；调仓类字段按调仓明细的调前、调后权重计算。建议后续在 FIELD_DICTIONARY 或洞察包 FIELD_PATCH 中为该字段补充专门口径。";
   }
   function showInfoModal(title, body) {
     byId("fieldModalTitle").textContent = title;
@@ -328,7 +421,7 @@ window.BasicData = (() => {
     const button = event.target.closest("[data-field]");
     if (!button) return;
     const field = button.getAttribute("data-field");
-    showInfoModal(field, `${fieldSourceText(field)}\n\n${dict()[field] || "该字段来自当前分析库，页面仅做业务化展示。"}`);
+    showInfoModal(field, `${fieldSourceText(field)}\n\n${dict()[field] || fallbackFieldDescription(field)}`);
   });
   document.addEventListener("click", (event) => {
     if (event.target.id === "fieldModal" || event.target.id === "fieldModalClose") {

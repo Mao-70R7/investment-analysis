@@ -345,6 +345,13 @@ tr:last-child td { border-bottom: 0; }
 .holding-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px; }
 .holding-head h3 { margin:0; }
 .holding-head p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+.rebalance-research { border:1px solid #dbe4ee; border-left:4px solid var(--brand); border-radius:8px; background:#fbfdff; padding:10px 12px; margin:0 0 10px; }
+.rebalance-research-meta { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+.rebalance-research-meta span { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; background:#fff; padding:2px 8px; color:#405063; font-size:12px; }
+.rebalance-research-grid { display:grid; grid-template-columns:minmax(0, .9fr) minmax(0, 1.1fr); gap:10px; }
+.rebalance-research-grid div { min-width:0; }
+.rebalance-research-grid strong { display:block; color:#24364a; font-size:12px; margin-bottom:4px; }
+.rebalance-research-grid p { margin:0; color:#526174; line-height:1.65; font-size:12px; overflow-wrap:anywhere; white-space:normal; }
 .compact-table th, .compact-table td { padding:8px 9px; }
 .modal {
   position: fixed;
