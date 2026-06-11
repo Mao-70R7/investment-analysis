@@ -37,16 +37,21 @@
   let selectedGlobalBenchmarkCode = "";
   let selectedContributionGlobalBenchmarkCode = "";
 
-  function heroKpi(labelName, rawValue, formatter = null) {
-    const tone = B.toneClass(labelName, rawValue);
-    const value = formatter && !String(labelName).includes("回撤") ? formatter(rawValue) : B.valueHtml(labelName, rawValue);
-    return `<div class="hero-kpi ${tone}"><span>${B.label(labelName)}</span><strong>${value}</strong></div>`;
-  }
   function topFact(labelName, value, extraClass = "") {
     return `<div class="date-card ${extraClass}"><span>${B.label(labelName)}</span><strong>${B.valueHtml(labelName, value)}</strong></div>`;
   }
   function isBlank(value) {
     return value === null || value === undefined || value === "" || value === "未披露";
+  }
+  function fundDetailUrl(row) {
+    const params = new URLSearchParams();
+    if (row.基金代码) params.set("code", row.基金代码);
+    if (row.基金名称) params.set("name", row.基金名称);
+    return `./fund.html?${params.toString()}`;
+  }
+  function fundLink(row, label) {
+    if (!row || (!row.基金代码 && !row.基金名称)) return B.esc(label || "未命名基金");
+    return `<a class="link" href="${B.esc(fundDetailUrl(row))}">${B.esc(label || row.基金名称 || row.基金代码 || "未命名基金")}</a>`;
   }
   function num(value) {
     if (value === null || value === undefined || value === "") return null;
@@ -76,30 +81,23 @@
   }
   function coreMetrics() {
     return `<div class="core-metric-board">
-      ${coreLine("披露业绩", [
-        ["官方单位净值", performanceMap.官方单位净值],
-        ["官方累计收益", detail.summary.官方累计收益, B.pctSigned],
-        ["近1年", detail.summary.近1年, B.pctSigned],
-        ["最大回撤", detail.summary.最大回撤, B.pctSigned]
+      ${coreLine("风险收益", [
+        ["最大回撤", detail.summary.最大回撤, B.pctSigned],
+        ["当前回撤", detail.summary.当前回撤, B.pctSigned],
+        ["波动率", performanceMap.波动率, B.pct],
+        ["夏普比率", performanceMap.夏普比率]
       ])}
-      ${coreLine("评价口径", [
+      ${coreLine("分类口径", [
         ["研报产品类型", classificationMap.研报产品类型 || detail.summary.研报产品类型],
         ["风险等级", classificationMap.风险等级 || detail.summary.风险等级],
         ["业务分类", classificationMap.业务分类 || detail.summary.业务分类],
-        ["天天当前对客展示", classificationMap.天天当前对客展示 || detail.summary.天天当前对客展示],
-        ["基础数据等级", classificationMap.基础数据等级]
+        ["天天当前对客展示", classificationMap.天天当前对客展示 || detail.summary.天天当前对客展示]
       ])}
-      ${coreLine("分类指标", [
-        ["权益基金权重", classificationMap.权益基金权重, B.pct],
-        ["债券基金权重", classificationMap.债券基金权重, B.pct],
-        ["QDII权重", classificationMap.QDII权重, B.pct],
-        ["指数基金权重", classificationMap.指数基金权重, B.pct]
-      ])}
-      ${coreLine("风险交易", [
-        ["波动率", performanceMap.波动率, B.pct],
-        ["夏普比率", performanceMap.夏普比率],
+      ${coreLine("持仓交易", [
+        ["持仓基金数", detail.holdingMeta.持仓基金数],
+        ["最近调仓日", latestRebalanceText()],
         ["年化换手率", performanceMap.年化换手率, B.pct],
-        ["调仓频率", performanceMap.调仓频率]
+        ["基础数据等级", classificationMap.基础数据等级]
       ])}
     </div>`;
   }
@@ -160,6 +158,56 @@
     if (history) return B.fmt(history.日期);
     if (!isBlank(detail.holdingMeta.最新持仓日)) return `${B.esc(detail.holdingMeta.最新持仓日)}（无历史调仓事件）`;
     return "无历史调仓事件";
+  }
+  function signedReturnText(value) {
+    const n = num(value);
+    if (n === null) return "未披露";
+    const sign = n > 0 ? "+" : "";
+    return `${sign}${n.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}%`;
+  }
+  function returnTone(value) {
+    const n = num(value);
+    if (n === null || Math.abs(n) < 0.0001) return "is-zero";
+    return n > 0 ? "is-pos" : "is-neg";
+  }
+  function riskPeerRows() {
+    const risk = classificationMap.风险等级 || detail.summary.风险等级 || "";
+    return (B.state.summary.strategies || []).filter((row) => {
+      if (!risk || row.风险等级 !== risk) return false;
+      if (row.风险等级 === "D0 持仓缺失") return false;
+      return row.数据完整性 === "完整";
+    });
+  }
+  function returnRank(field, value) {
+    const currentValue = num(value);
+    if (currentValue === null) return "未排名";
+    if (detail.summary.数据完整性 !== "完整") return "数据不全";
+    const peers = riskPeerRows().map((row) => num(row[field])).filter((peerValue) => peerValue !== null);
+    if (!peers.length) return "未排名";
+    const rank = peers.filter((peerValue) => peerValue > currentValue).length + 1;
+    return `${rank}/${peers.length}`;
+  }
+  function returnCell(labelName, fieldName) {
+    const value = detail.summary[fieldName];
+    return `<div class="return-cell ${returnTone(value)}">
+      <span>${B.esc(labelName)}</span>
+      <strong>${signedReturnText(value)}</strong>
+      <em>${B.esc(returnRank(fieldName, value))}</em>
+    </div>`;
+  }
+  function returnGrid() {
+    const items = [
+      ["日涨跌幅", "日涨跌幅"],
+      ["近一周", "近一周"],
+      ["近一月", "近一月"],
+      ["近3月", "近三月"],
+      ["近6月", "近6月"],
+      ["今年以来", "今年以来"],
+      ["近一年", "近1年"],
+      ["累计收益率", "累计收益率"],
+      ["年化收益率", "年化收益"]
+    ];
+    return `<div class="return-grid">${items.map(([labelName, fieldName]) => returnCell(labelName, fieldName)).join("")}</div>`;
   }
   function sourceCards() {
     const sources = detail.curveSources || {};
@@ -261,27 +309,6 @@
   function decisionCard(title, value, body, tone = "") {
     return `<div class="focus-decision-card ${tone}"><strong>${value}</strong><p><b>${B.esc(title)}：</b>${body}</p></div>`;
   }
-  function businessDecisionPanel() {
-    const d = strategyDecision();
-    const rankText = d.rank > 0 ? `${d.rank}/${d.rankPeers.length}` : `未进入${d.reportType}近1年可比排名`;
-    const gapText = d.retGap === null ? "收益差未披露" : `相对同类中位${d.retGap >= 0 ? "+" : ""}${d.retGap.toFixed(2)}pct`;
-    const drawdownText = d.drawdownGap === null ? "回撤差未披露" : `回撤差${d.drawdownGap >= 0 ? "+" : ""}${d.drawdownGap.toFixed(2)}pct`;
-    const issueText = gateText(d.issues);
-    const scopeParam = isGfSummary() ? "gf" : "nonGf";
-    const signalParams = { reportType: d.reportType, businessSignal: d.action, pageSize: 50 };
-    if (d.action === "可进候选" || d.action === "能力复盘") signalParams.strategyScope = scopeParam;
-    if (d.action !== "先补数据") signalParams.clientScope = "client";
-    return `<section class="panel">
-      <div class="panel-head"><div><h2>负责人先看</h2><p class="desc">单个产品先回答能不能放入候选、是否需要复盘，以及本页哪些数据不能直接用。</p></div></div>
-      <div class="focus-section-grid">
-        ${decisionCard("经营动作", B.esc(d.action), B.esc(d.actionText), d.tone)}
-        ${decisionCard("同类位置", B.esc(rankText), `${B.esc(d.reportType)}完整可比池${d.peers.length.toLocaleString("zh-CN")}个，近1年排名样本${d.rankPeers.length.toLocaleString("zh-CN")}个；${gapText}。`, d.retGap !== null && d.retGap >= 0 ? "is-good" : "is-warn")}
-        ${decisionCard("风险边界", B.pct(detail.summary.最大回撤), `${drawdownText}；回撤差为正表示高于同类中位。`, d.drawdownGap !== null && d.drawdownGap <= 0 ? "is-good" : "is-warn")}
-        ${decisionCard("经营门禁", d.issues.length ? `${d.issues.length}项` : "可用", B.esc(issueText), blockingIssues(d.issues).length ? "is-bad" : (d.issues.length ? "is-warn" : "is-good"))}
-      </div>
-      <div class="source-method"><strong>核验入口</strong> <a class="link" href="${B.esc(strategyPoolUrl(signalParams))}">查看同类同信号策略</a>｜<a class="link" href="${B.esc(strategyPoolUrl({ reportType: d.reportType }))}">查看同类策略</a>｜<a class="link" href="${B.esc(strategyPoolUrl({ business: classificationMap.业务分类 || detail.summary.业务分类 || "" }))}">查看同业务分类</a></div>
-    </section>`;
-  }
   function rangeButtons() {
     return `<div class="range-tabs">${ranges.map(([key, text]) => `<button type="button" data-range="${key}" class="${key === activeRange ? "is-active" : ""}">${B.esc(text)}</button>`).join("")}</div>`;
   }
@@ -351,7 +378,8 @@
     renderPerformanceTable();
   }
   function holdingValue(row, h) {
-    if (h === "基金代码") return `<strong>${B.esc(row[h] || "")}</strong>`;
+    if (h === "基金代码") return `<strong>${fundLink(row, row[h] || "")}</strong>`;
+    if (h === "基金名称") return fundLink(row, row[h] || "未命名基金");
     if (["权重", "上次调仓后权重"].includes(h)) return B.pct(row[h]);
     if (["权重变化", "日涨幅", "调仓后收益率", "调仓后收益贡献"].includes(h)) return B.pctSigned(row[h]);
     return B.fmt(row[h]);
@@ -382,7 +410,7 @@
   function renderMainChart() {
     const selectedName = selectedGlobalBenchmarkSeriesName();
     const defaultSeries = selectedName ? ["披露业绩", selectedName] : ["披露业绩"];
-    B.drawReturnChart(B.byId("navChart"), mainChartSeries(), { range: activeRange, title: "净值曲线", defaultVisibleSeries: defaultSeries });
+    B.drawReturnChart(B.byId("navChart"), mainChartSeries(), { range: activeRange, title: "净值曲线", defaultVisibleSeries: defaultSeries, maxGapDays: 45 });
     const sourceHost = B.byId("sourceCards");
     if (sourceHost) sourceHost.innerHTML = sourceCards();
   }
@@ -473,7 +501,6 @@
       </div>
       <span class="pill">${B.label("统一策略ID")} ${B.esc(detail.id)}</span>
     </section>
-    ${businessDecisionPanel()}
     <section class="panel hero-panel">
       <div class="strategy-hero">
         <div>
@@ -506,15 +533,7 @@
           </div>
           <p class="desc">${B.esc(detail.summary.运作状态 || "未披露运作状态")}｜最新业绩日 ${B.esc(detail.summary.最新业绩日期 || detail.summary.收益数据截至 || "未披露")}｜最新持仓日 ${B.esc(detail.holdingMeta.最新持仓日 || "未披露")}｜持仓来源 ${B.esc(detail.holdingMeta.持仓来源 || "未披露")}</p>
         </div>
-        <div class="hero-kpis">
-          ${heroKpi("官方累计收益", detail.summary.官方累计收益, B.pctSigned)}
-          ${heroKpi("近1年", detail.summary.近1年, B.pctSigned)}
-          ${heroKpi("最大回撤", detail.summary.最大回撤, B.pctSigned)}
-          ${heroKpi("研报产品类型", classificationMap.研报产品类型 || detail.summary.研报产品类型 || "未披露")}
-          ${heroKpi("业务分类", classificationMap.业务分类 || detail.summary.业务分类 || "未披露")}
-          ${heroKpi("持仓基金数", detail.holdingMeta.持仓基金数)}
-          ${heroKpi("最近调仓日", latestRebalanceText())}
-        </div>
+        ${returnGrid()}
       </div>
       <div class="hero-support profile-compact">
         <div class="profile-block strategy-info-block">

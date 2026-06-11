@@ -59,10 +59,12 @@
   state.rebalanceMode = initParams.get("rebalanceMode") || state.rebalanceMode;
   state.rebalanceMonth = initParams.get("rebalanceMonth") || state.rebalanceMonth;
   state.reportType = initParams.get("reportType") || state.reportType;
-  const allPoints = (insight.策略表现点 || []);
-  const masterStrategies = summary.strategies || [];
+  const allPoints = (insight.策略表现点 || []).filter(isDisplayableInsightRow);
+  const masterStrategies = (summary.strategies || []).filter(isDisplayableInsightRow);
   const rawPoints = allPoints.filter((row) => row.风险等级 && row.风险等级 !== "D0 持仓缺失");
   const rawPointById = new Map(rawPoints.map((row) => [row.统一策略ID, row]));
+  const displayStrategyIds = new Set(rawPoints.map((row) => row.统一策略ID).filter(Boolean));
+  const signalDetailStore = new Map();
   const risks = riskOrder.filter((name) => rawPoints.some((row) => row.风险等级 === name));
   const businesses = [...new Set(rawPoints.map((row) => row.业务分类).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const regions = [...new Set(rawPoints.map((row) => row.市场地域).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
@@ -82,6 +84,13 @@
 
   function raw(value) {
     return value === null || value === undefined ? "" : String(value);
+  }
+
+  function isDisplayableInsightRow(row) {
+    return !!row
+      && (!row.数据完整性 || row.数据完整性 === "完整")
+      && row.风险等级 !== "D0 持仓缺失"
+      && row.研报产品类型 !== "持仓缺失/不入池";
   }
 
   function sum(rows, field) {
@@ -183,6 +192,16 @@
     return state.clientScope !== "client" || isClientFacing(row);
   }
 
+  function displayScopeMatch(row) {
+    if (!row) return false;
+    const id = raw(row.统一策略ID);
+    if (id && !displayStrategyIds.has(id)) return false;
+    if (row.数据完整性 && row.数据完整性 !== "完整") return false;
+    if (row.风险等级 === "D0 持仓缺失") return false;
+    if (row.研报产品类型 === "持仓缺失/不入池") return false;
+    return true;
+  }
+
   function scopedStrategyMatch(row, scope) {
     if (scope === "gf") return isGf(row);
     if (scope === "nonGf") return !isGf(row);
@@ -232,6 +251,15 @@
     return `<a class="link" href="./strategy.html?id=${encodeURIComponent(row.统一策略ID || "")}">${B.esc(row.策略名称 || "未命名策略")}</a>`;
   }
 
+  function fundLabel(row) {
+    return row?.基金名称 || row?.基金代码 || "未命名基金";
+  }
+
+  function fundLink(row, label = "") {
+    if (!row || (!row.基金代码 && !row.基金名称)) return B.esc(label || fundLabel(row));
+    return `<a class="link" href="${B.esc(fundDetailUrl(row))}">${B.esc(label || fundLabel(row))}</a>`;
+  }
+
   function kpi(label, value, sub = "", tone = "") {
     return `<section class="insight-kpi ${tone}"><span>${B.esc(label)}</span><strong>${value}</strong>${sub ? `<small>${B.esc(sub)}</small>` : ""}</section>`;
   }
@@ -240,6 +268,109 @@
     const head = headers.map((h) => `<th>${B.label(h)}</th>`).join("");
     const body = rows.length ? rows.map((row) => `<tr>${headers.map((h) => `<td>${formatter ? formatter(row, h) : B.fmt(row[h])}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}"><div class="empty">暂无数据</div></td></tr>`;
     return `<div class="table-wrap insight-table"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
+  function signalDirectionText(value) {
+    const n = num(value) || 0;
+    if (n > .0001) return "增配";
+    if (n < -.0001) return "减配";
+    return "变化不明显";
+  }
+
+  function groupedFundAdjustments(rows) {
+    return [...groupBy(rows || [], (row) => `${row.基金代码 || ""}｜${row.基金名称 || ""}`).entries()].map(([, list]) => {
+      const base = list[0] || {};
+      const before = sum(list, "调前权重");
+      const after = sum(list, "调后权重");
+      const change = sum(list, "权重变化");
+      return {
+        基金代码: base.基金代码,
+        基金名称: base.基金名称,
+        基金公司: base.基金公司,
+        基金类型: base.基金类型,
+        调前权重: before,
+        调后权重: after,
+        权重变化: change
+      };
+    }).filter((row) => Math.abs(num(row.权重变化) || 0) > .0001)
+      .sort((a, b) => Math.abs(num(b.权重变化) || 0) - Math.abs(num(a.权重变化) || 0));
+  }
+
+  function fundAdjustmentSummary(rows, limit = 4) {
+    const grouped = groupedFundAdjustments(rows);
+    if (!grouped.length) return rebalanceFundDetailEmptyText();
+    const adds = grouped.filter((row) => (num(row.权重变化) || 0) > 0).slice(0, limit);
+    const reduces = grouped.filter((row) => (num(row.权重变化) || 0) < 0).slice(0, limit);
+    const item = (row) => `${row.基金名称 || "未命名基金"} ${weightPct(row.调前权重)}→${weightPct(row.调后权重)}（${weightPoint(row.权重变化)}）`;
+    return [
+      adds.length ? `调增：${adds.map(item).join("；")}` : "",
+      reduces.length ? `调减：${reduces.map(item).join("；")}` : ""
+    ].filter(Boolean).join("；") || "基金级净变化接近0";
+  }
+
+  function strategyAdjustmentSummary(row) {
+    const detail = [...(row?._策略明细 || [])]
+      .filter((item) => Math.abs(num(item.净变化) || 0) > .0001 || Math.abs(num(item.调仓强度) || 0) > .0001)
+      .sort((a, b) => Math.abs(num(b.净变化) || 0) - Math.abs(num(a.净变化) || 0) || Math.abs(num(b.调仓强度) || 0) - Math.abs(num(a.调仓强度) || 0));
+    const top = detail[0];
+    if (!top) return "当前分类下暂无策略级变化";
+    const change = num(top.净变化) || 0;
+    const action = change > 0 ? "增配" : (change < 0 ? "减配" : "调整");
+    const institution = top.投顾机构 || "未识别机构";
+    const name = top.策略名称 || "未命名策略";
+    return `${institution}｜${name} ${action}${weightPoint(change)}，${weightPct(top.调前权重)}→${weightPct(top.调后权重)}`;
+  }
+
+  function fundAdjustmentCell(rows) {
+    const grouped = groupedFundAdjustments(rows);
+    if (!grouped.length) return `<span class="small">${B.esc(rebalanceFundDetailEmptyText())}</span>`;
+    const visible = grouped.slice(0, 6);
+    return `<div class="fund-adjust-list">${visible.map((row) => {
+      const change = num(row.权重变化) || 0;
+      return `<span class="${change > 0 ? "is-add" : "is-reduce"}"><b>${fundLink(row)}</b><em>${weightPct(row.调前权重)}→${weightPct(row.调后权重)}</em><strong>${weightPoint(change)}</strong></span>`;
+    }).join("")}${grouped.length > visible.length ? `<small>另${countText(grouped.length - visible.length)}只</small>` : ""}</div>`;
+  }
+
+  function signalDetailButton(label, row) {
+    const detail = row._策略明细 || [];
+    if (!detail.length) return '<span class="small">无明细</span>';
+    const id = `signal-detail-${signalDetailStore.size}`;
+    signalDetailStore.set(id, { label, row, detail });
+    return `<button type="button" class="detail-button" data-signal-detail="${B.esc(id)}">查看${countText(detail.length)}个</button>`;
+  }
+
+  function showSignalDetail(id) {
+    const payload = signalDetailStore.get(id);
+    if (!payload) return;
+    const { label, row, detail } = payload;
+    const sorted = [...detail].sort((a, b) => Math.abs(num(b.净变化) || 0) - Math.abs(num(a.净变化) || 0) || raw(a.策略名称).localeCompare(raw(b.策略名称), "zh-CN"));
+    const html = `
+      <div class="modal-summary">
+        <span>分类<b>${B.esc(row.分类 || "未分类")}</b></span>
+        <span>判断<b>${B.esc(row.判断 || "方向分歧")}</b></span>
+        <span>参与策略<b>${countText(row.参与策略数)}个</b></span>
+        <span>增/减策略<b>${countText(row.增持策略数)} / ${countText(row.减持策略数)}</b></span>
+        <span>中位净变化<b>${weightPoint(row.中位净变化 ?? row.典型变化)}</b></span>
+        <span>累计净变化<b>${weightPoint(row.净变化)}</b></span>
+      </div>
+      <div class="detail-table">
+        <table>
+          <thead><tr><th>策略</th><th>投顾机构</th><th>方向</th><th>净变化</th><th>调前权重</th><th>调后权重</th><th>调仓强度</th><th>基金调整</th></tr></thead>
+          <tbody>${sorted.map((item) => `<tr>
+            <td>${strategyLink(item)}</td>
+            <td>${B.esc(item.投顾机构 || "未识别机构")}</td>
+            <td><span class="insight-chip ${directionTone(signalDirectionText(item.净变化))}">${signalDirectionText(item.净变化)}</span></td>
+            <td>${weightPoint(item.净变化)}</td>
+            <td>${weightPct(item.调前权重)}</td>
+            <td>${weightPct(item.调后权重)}</td>
+            <td>${weightPoint(item.调仓强度)}</td>
+            <td>${fundAdjustmentCell(item.基金明细)}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+      <p class="detail-note">参与策略表示当前观察窗口内在“${B.esc(label)}=${B.esc(row.分类 || "未分类")}”下发生基金级调增或调减的策略；基金调整列展示具体调增/调减基金及调前、调后仓位。</p>
+    `;
+    B.showHtmlModal(`${label}｜${row.分类 || "未分类"}｜参与策略明细`, html);
   }
 
   function barList(rows, labelField, valueField, options = {}) {
@@ -262,6 +393,7 @@
   }
 
   function dimensionMatch(row) {
+    if (!displayScopeMatch(row)) return false;
     if (row.风险等级 === "D0 持仓缺失") return false;
     if (!strategyScopeMatch(row)) return false;
     if (!clientScopeMatch(row)) return false;
@@ -272,6 +404,7 @@
   }
 
   function dataQualityScopeMatch(row) {
+    if (!displayScopeMatch(row)) return false;
     if (!strategyScopeMatch(row)) return false;
     if (!clientScopeMatch(row)) return false;
     if (state.risk && row.风险等级 !== state.risk) return false;
@@ -290,6 +423,7 @@
   }
 
   function preRiskMatch(row) {
+    if (!displayScopeMatch(row)) return false;
     if (row.风险等级 === "D0 持仓缺失") return false;
     if (!strategyScopeMatch(row)) return false;
     if (!clientScopeMatch(row)) return false;
@@ -679,6 +813,11 @@
     return `${sign}${n.toLocaleString("zh-CN", { maximumFractionDigits: 1 })}点`;
   }
 
+  function weightPct(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return "未披露";
+    return `${Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}%`;
+  }
+
   function isMarketInstitutionName(name) {
     return raw(name) === "全市场汇总";
   }
@@ -757,8 +896,10 @@
       const sub = options.sub ? options.sub(row) : "";
       const value = options.value ? options.value(row) : "";
       const meta = options.meta ? options.meta(row) : "";
+      const href = options.href ? options.href(row) : "";
+      const titleHtml = href ? `<a class="link" href="${B.esc(href)}">${B.esc(title)}</a>` : B.esc(title);
       return `<div class="rank-row">
-        <div><strong title="${B.esc(title)}">${B.esc(title)}</strong>${sub ? `<span>${B.esc(sub)}</span>` : ""}</div>
+        <div><strong title="${B.esc(title)}">${titleHtml}</strong>${sub ? `<span>${B.esc(sub)}</span>` : ""}</div>
         <div class="rank-value">${value}</div>
         <div class="small">${meta}</div>
       </div>`;
@@ -834,6 +975,34 @@
   }
 
   const reportAIndustryThemes = new Set([
+    "电子",
+    "计算机",
+    "通信",
+    "传媒",
+    "电力设备",
+    "机械设备",
+    "汽车",
+    "国防军工",
+    "医药生物",
+    "食品饮料",
+    "家用电器",
+    "商贸零售",
+    "社会服务",
+    "农林牧渔",
+    "银行",
+    "非银金融",
+    "房地产",
+    "有色金属",
+    "基础化工",
+    "钢铁",
+    "煤炭",
+    "石油石化",
+    "公用事业",
+    "交通运输",
+    "建筑材料",
+    "建筑装饰",
+    "纺织服饰",
+    "美容护理",
     "医药生物",
     "电力设备/新能源",
     "电子/半导体",
@@ -921,6 +1090,13 @@
 
   function filteredStrategyAssetChangeRows(applyReportType = true) {
     const rows = (insight.策略资产变化明细 || [])
+      .filter(dimensionMatch)
+      .filter((row) => !applyReportType || reportTypeMatch(row));
+    return rebalanceRangeRows(rows, "调仓日期");
+  }
+
+  function filteredRebalanceFundCategoryRows(applyReportType = true) {
+    const rows = rebalanceFundCategoryRows()
       .filter(dimensionMatch)
       .filter((row) => !applyReportType || reportTypeMatch(row));
     return rebalanceRangeRows(rows, "调仓日期");
@@ -1196,6 +1372,88 @@
     return holdingSnapshotRowsCache;
   }
 
+  let rebalanceFundCategoryRowsCache = null;
+  let rebalanceFundCategoryPackPromise = null;
+  function loadedRebalanceFundCategoryPack() {
+    const inlinePack = insight.调仓基金分类明细;
+    if (inlinePack && Array.isArray(inlinePack.rows) && inlinePack.dict) return inlinePack;
+    return window.__BASIC_REBALANCE_FUND_CATEGORY_PACK__ || null;
+  }
+
+  function ensureRebalanceFundCategoryPack() {
+    if (loadedRebalanceFundCategoryPack()) return true;
+    const meta = insight.调仓基金分类明细 || {};
+    if (!meta.external || typeof fetch !== "function") return false;
+    if (!rebalanceFundCategoryPackPromise) {
+      rebalanceFundCategoryPackPromise = fetch(meta.external, { cache: "no-store" })
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        })
+        .then((pack) => {
+          window.__BASIC_REBALANCE_FUND_CATEGORY_PACK__ = pack;
+          rebalanceFundCategoryRowsCache = null;
+          render();
+        })
+        .catch((error) => {
+          window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__ = error?.message || String(error);
+          render();
+        });
+    }
+    return false;
+  }
+
+  function rebalanceFundDetailEmptyText() {
+    if (loadedRebalanceFundCategoryPack()) return "当前筛选下无基金级变化";
+    if (window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__) return `基金明细包加载失败：${window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__}`;
+    return "基金明细加载中";
+  }
+
+  function rebalanceFundCategoryRows() {
+    if (rebalanceFundCategoryRowsCache) return rebalanceFundCategoryRowsCache;
+    const pack = loadedRebalanceFundCategoryPack();
+    if (!pack) {
+      ensureRebalanceFundCategoryPack();
+      return [];
+    }
+    if (Array.isArray(pack)) {
+      rebalanceFundCategoryRowsCache = pack;
+      return rebalanceFundCategoryRowsCache;
+    }
+    const dict = pack.dict || {};
+    const fields = pack.fields || [];
+    rebalanceFundCategoryRowsCache = (pack.rows || []).map((row) => {
+      const strategy = dict.strategies?.[row[1]] || [];
+      const fund = dict.funds?.[row[13]] || [];
+      return {
+        调仓日期: row[0],
+        月份: raw(row[0]).slice(0, 7),
+        统一策略ID: strategy[0] || "",
+        策略名称: strategy[1] || "",
+        投顾机构: dict.institutions?.[row[2]] || "",
+        是否广发策略: row[3] ? "是" : "否",
+        风险等级: dict.risks?.[row[4]] || "",
+        业务分类: dict.businesses?.[row[5]] || "",
+        研报产品类型: dict.reportTypes?.[row[6]] || "",
+        研报股票子类型: dict.reportSubTypes?.[row[7]] || "",
+        市场地域: dict.regions?.[row[8]] || "",
+        天天当前对客展示: dict.clients?.[row[9]] || "",
+        天天展示状态: dict.statuses?.[row[10]] || "",
+        分类字段: fields[row[11]] || "",
+        分类: dict.categories?.[row[12]] || "",
+        基金代码: fund[0] || "",
+        基金名称: fund[1] || "",
+        基金公司: dict.companies?.[row[14]] || "",
+        基金类型: dict.fundTypes?.[row[15]] || "",
+        调前权重: num(row[16]) || 0,
+        调后权重: num(row[17]) || 0,
+        权重变化: num(row[18]) || 0,
+        调仓动作: dict.actions?.[row[19]] || ""
+      };
+    });
+    return rebalanceFundCategoryRowsCache;
+  }
+
   function filteredHoldingSnapshotRows() {
     return holdingSnapshotRows().filter(dimensionMatch).filter(reportTypeMatch);
   }
@@ -1321,6 +1579,17 @@
     }).filter((row) => row.期初占比 !== null && row.期末占比 !== null);
   }
 
+  function periodFallbackSignalTable(field, label, reason) {
+    const options = field === "研报大类资产" ? {} : { requireField: true };
+    if (field === "研报A股行业") options.onlyReportAIndustry = true;
+    const rows = strategyAssetSignalRows(filteredStrategyAssetChangeRows(true), field, options);
+    if (rows.length) {
+      return `<div class="source-method"><strong>调仓变化口径</strong> ${B.esc(reason)} 当前改用同一观察窗口内的策略级净变化展示${B.esc(label)}方向：先按单只策略合并同一分类的调前/调后权重变化，再统计增配策略数、减配策略数和中位变化。</div>
+        ${assetSignalTable(rows, label, 10)}`;
+    }
+    return `<div class="source-method"><strong>调仓变化口径</strong> 当前筛选下没有可识别的${B.esc(label)}调仓变化；这通常表示该类策略本期主要调仓发生在债券、现金、宽基或主动权益等无法进一步拆行业的基金上。</div>`;
+  }
+
   function industryPeriodHeatmap(rows, field, label) {
     const scopedRows = field === "研报A股行业" ? (rows || []).filter((row) => isReportAIndustryTheme(rowCategoryForField(row, field))) : (rows || []);
     if (!scopedRows.length && !loadedHoldingSnapshotPack()) {
@@ -1331,11 +1600,18 @@
     const rawPeriods = hasDateSnapshots
       ? [...new Set(scopedRows.filter((row) => row.分类字段 === field).map((row) => row.快照日期).filter(Boolean))].sort()
       : [...new Set(scopedRows.map((row) => row.月份).filter(Boolean))].sort();
-    if (rawPeriods.length < 2) {
-      const periodText = rawPeriods.length ? `当前区间只有 ${rawPeriods[0]} 一个持仓快照日期` : "当前区间没有可用持仓快照";
-      return `<div class="empty">${B.esc(periodText)}，无法计算期初期末占比变化。</div>`;
-    }
     const data = industryPeriodRows(scopedRows, field);
+    if (!data.length) {
+      if (!scopedRows.length) {
+        return periodFallbackSignalTable(field, label, `持仓快照已加载，但当前筛选下没有可识别的${label}仓位。`);
+      }
+      const fieldRows = hasDateSnapshots ? scopedRows.filter((row) => row.分类字段 === field) : scopedRows;
+      if (!fieldRows.length) {
+        return periodFallbackSignalTable(field, label, `可用持仓快照存在，但${label}分类口径没有覆盖到当前样本。`);
+      }
+      const periodText = rawPeriods.length ? `${rawPeriods[0]} 至 ${rawPeriods.at(-1)}` : "无可识别日期";
+      return periodFallbackSignalTable(field, label, `${label}没有形成可比期初期末占比，可用快照范围：${periodText}。`);
+    }
     const firstPeriodForColumns = data[0]?.期初日期 || data[0]?.期初月份 || rawPeriods[0];
     const lastPeriodForColumns = data[0]?.期末日期 || data[0]?.期末月份 || rawPeriods.at(-1);
     const sourceRows = hasDateSnapshots
@@ -1950,6 +2226,20 @@
     return `${row.基金代码 || ""}｜${row.基金名称 || ""}`;
   }
 
+  function fundDetailUrl(row) {
+    const params = new URLSearchParams();
+    if (row.基金代码) params.set("code", row.基金代码);
+    if (row.基金名称) params.set("name", row.基金名称);
+    return `./fund.html?${params.toString()}`;
+  }
+
+  function fundNameCell(row, key) {
+    return `<div class="fund-name-actions">
+      ${fundLink(row)}
+      <button class="mini-link link-button fund-toggle" type="button" data-fund-key="${B.esc(key)}">持仓策略</button>
+    </div>`;
+  }
+
   function rollupHoldingDetails(rows, keyFields) {
     return [...groupBy(rows || [], (row) => keyFields.map((field) => row[field] || "").join("｜")).entries()].map(([, list]) => {
       const base = list[0] || {};
@@ -2142,19 +2432,21 @@
       <td>${pct(row.期末持仓比例)}</td>
     </tr>`).join("") : `<tr><td colspan="${headers.length}"><div class="empty">当前筛选下暂无持有策略明细。</div></td></tr>`;
     return `<div class="fund-detail-block">
-      <div class="fund-detail-title">${B.esc(fundRow.基金名称 || "未命名基金")}｜按期末持仓比例排序</div>
+      <div class="fund-detail-title">${fundLink(fundRow)}｜按期末持仓比例排序</div>
       <div class="table-wrap insight-table"><table><thead><tr>${headers.map((h) => `<th>${B.label(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>
     </div>`;
   }
 
   function fundHoldingTable(rows) {
-    const headers = ["基金名称", "基金类型", "区间收益率", "权重占比", "中位权重", "增持策略数", "减持策略数", "持仓策略数"];
+    const headers = ["基金名称", "基金类型", "资产暴露", "基金分类置信度", "区间收益率", "权重占比", "中位权重", "增持策略数", "减持策略数", "持仓策略数"];
     const body = rows.length ? rows.slice(0, 10).map((row) => {
       const key = holdingKey(row);
       const expanded = state.expandedFundKey === key;
       const main = `<tr class="fund-row ${expanded ? "is-open" : ""}" data-fund-key="${B.esc(key)}">
-        <td><button class="link-button fund-toggle" type="button" data-fund-key="${B.esc(key)}">${B.esc(row.基金名称 || "未命名基金")}</button></td>
+        <td>${fundNameCell(row, key)}</td>
         <td>${B.fmt(row.基金类型)}</td>
+        <td>${B.fmt(row.资产暴露)}</td>
+        <td>${B.fmt(row.基金分类置信度)}</td>
         <td>${signedPct(row.区间收益率)}</td>
         <td>${pct(row.权重占比)}</td>
         <td>${pct(row.中位权重)}</td>
@@ -2206,12 +2498,12 @@
   }
 
   function gfFundOpportunityTable(rows) {
-    const headers = ["基金名称", "基金类型", "区间收益率", "外部策略权重占比", "全策略权重占比", "中位权重", "外部持仓策略数", "外部增减策略数", "外部净增配中位数"];
+    const headers = ["基金名称", "基金类型", "资产暴露", "基金分类置信度", "区间收益率", "外部策略权重占比", "全策略权重占比", "中位权重", "外部持仓策略数", "外部增减策略数", "外部净增配中位数"];
     const body = rows.length ? rows.slice(0, 10).map((row) => {
       const key = holdingKey(row);
       const expanded = state.expandedFundKey === key;
       const main = `<tr class="fund-row ${expanded ? "is-open" : ""}" data-fund-key="${B.esc(key)}">${headers.map((h) => {
-        if (h === "基金名称") return `<td><button class="link-button fund-toggle" type="button" data-fund-key="${B.esc(key)}">${B.esc(row.基金名称 || "未命名基金")}</button></td>`;
+        if (h === "基金名称") return `<td>${fundNameCell(row, key)}</td>`;
         if (h === "区间收益率") return `<td>${signedPct(row[h])}</td>`;
         if (h === "外部策略权重占比") return `<td>${pct(row.非广发策略权重占比)}</td>`;
         if (h === "全策略权重占比") return `<td>${pct(row.权重占比)}</td>`;
@@ -2363,9 +2655,16 @@
   }
 
   function strategyAssetSignalRows(rows, field = "基金类型", options = {}) {
+    const detailFieldSupported = ["研报大类资产", "权益行业主题", "研报A股行业"].includes(field);
+    const detailRows = detailFieldSupported
+      ? filteredRebalanceFundCategoryRows(true)
+        .filter((row) => row.分类字段 === field)
+        .filter((row) => !options.onlyReportAIndustry || isReportAIndustryTheme(row.分类))
+      : [];
+    const detailMap = groupBy(detailRows, (row) => `${row.统一策略ID || ""}｜${row.分类 || ""}`);
     const normalizedRows = (rows || []).map((row) => ({
       ...row,
-      _signalCategory: field === "研报大类资产" ? reliableReportAsset(row) : raw(row[field] || row.基金类型 || "未分类")
+      _signalCategory: field === "研报大类资产" ? reliableReportAsset(row) : (options.requireField ? raw(row[field]) : raw(row[field] || row.基金类型 || "未分类"))
     })).filter((row) => {
       const value = row._signalCategory;
       return value && value !== "待核验";
@@ -2377,15 +2676,21 @@
       .map(([, list]) => {
         const base = list[0] || {};
         const net = sum(list, "净增配");
+        const before = sum(list, "调前权重");
+        const after = sum(list, "调后权重");
+        const strength = sum(list, "总点位");
+        const fundDetails = detailMap.get(`${base.统一策略ID || ""}｜${base._signalCategory || ""}`) || [];
         return {
           统一策略ID: base.统一策略ID,
           策略名称: base.策略名称,
           投顾机构: base.投顾机构,
           分类: base._signalCategory,
           净变化: net,
-          调仓强度: sum(list, "总点位"),
-          调前权重: sum(list, "调前权重"),
-          调后权重: sum(list, "调后权重")
+          调仓强度: strength,
+          调前权重: before,
+          调后权重: after,
+          基金明细: fundDetails,
+          命中原因: fundAdjustmentSummary(fundDetails)
         };
       })
       .filter((row) => Math.abs(num(row.净变化) || 0) > .0001 || (num(row.调仓强度) || 0) > .0001);
@@ -2412,13 +2717,24 @@
         增持策略数: add.length,
         减持策略数: reduce.length,
         增持策略占比: addRatio,
+        减持策略占比: active ? reduce.length / active * 100 : null,
+        增持中位净变化: median(add.map((row) => row.净变化)),
+        减持中位净变化: median(reduce.map((row) => row.净变化)),
         典型变化: medianChange,
+        中位净变化: medianChange,
         净变化: net,
         调仓强度: strength,
         信号评分: score,
-        解释: `${countText(add.length)}个策略增配、${countText(reduce.length)}个策略减配；中位变化${weightPoint(medianChange)}。`
+        解释: `${countText(add.length)}个策略增配、${countText(reduce.length)}个策略减配；中位变化${weightPoint(medianChange)}。`,
+        _策略明细: list.sort((a, b) => Math.abs(num(b.净变化) || 0) - Math.abs(num(a.净变化) || 0))
       };
-    }).sort((a, b) => b.信号评分 - a.信号评分 || b.参与策略数 - a.参与策略数);
+    }).sort((a, b) => {
+      const absChange = Math.abs(num(b.中位净变化 ?? b.典型变化) || 0) - Math.abs(num(a.中位净变化 ?? a.典型变化) || 0);
+      if (Math.abs(absChange) > .0001) return absChange;
+      const absNet = Math.abs(num(b.净变化) || 0) - Math.abs(num(a.净变化) || 0);
+      if (Math.abs(absNet) > .0001) return absNet;
+      return b.参与策略数 - a.参与策略数;
+    });
   }
 
   function directionTone(judgment) {
@@ -2578,19 +2894,63 @@
         return n ? `${effectPct(row.胜率)}｜${countText(n)}个` : "待观察";
       }
       if (h === "调仓超额") return signedPct(row[h]);
-      if (h === "主资产方向") return `<span class="small">${B.esc(row.主资产方向)}${num(row.主资产典型变化) !== null ? `，典型变化${weightPoint(row.主资产典型变化)}` : ""}</span>`;
+      if (h === "主资产方向") return `<span class="small">${B.esc(row.主资产方向)}${num(row.主资产典型变化) !== null ? `，中位净变化${weightPoint(row.主资产典型变化)}` : ""}</span>`;
       return B.fmt(row[h]);
     });
   }
 
+  function signalDirectionChart(rows, label = "研报大类资产", limit = 10) {
+    const source = rows || [];
+    const data = [...source]
+      .filter((row) => Number.isFinite(num(row.中位净变化 ?? row.典型变化)))
+      .slice(0, limit || source.length);
+    if (!data.length) return '<div class="empty">当前筛选下暂无可绘制的调仓方向。</div>';
+    const maxAbs = Math.max(.5, ...data.map((row) => Math.abs(num(row.中位净变化 ?? row.典型变化) || 0)));
+    const axisTicks = [-maxAbs, -maxAbs / 2, 0, maxAbs / 2, maxAbs];
+    return `<div class="signal-direction-chart" role="img" aria-label="${B.esc(label)}调仓方向柱状图">
+      <div class="signal-chart-axis"><span>${B.esc(label)}</span><span>横轴：仓位变化，0为不变</span></div>
+      <div class="signal-x-axis">
+        <div></div>
+        <div class="signal-x-track">
+          <i class="signal-zero"></i>
+          ${axisTicks.map((tick, index) => `<span style="left:${(index * 25).toFixed(2)}%">${weightPoint(tick)}</span>`).join("")}
+        </div>
+        <div></div>
+      </div>
+      ${data.map((row) => {
+        const change = num(row.中位净变化 ?? row.典型变化) || 0;
+        const width = Math.max(2, Math.min(50, Math.abs(change) / maxAbs * 50));
+        const left = change >= 0 ? 50 : 50 - width;
+        const addMedian = num(row.增持中位净变化);
+        const reduceMedian = num(row.减持中位净变化);
+        const addLabel = addMedian === null ? "无" : weightPoint(addMedian);
+        const reduceLabel = reduceMedian === null ? "无" : weightPoint(reduceMedian);
+        const title = `${row.分类}｜中位净变化${weightPoint(change)}｜增配${countText(row.增持策略数)}个，增配中位${addLabel}｜减配${countText(row.减持策略数)}个，减配中位${reduceLabel}｜参与${countText(row.参与策略数)}个`;
+        return `<div class="signal-chart-row" title="${B.esc(title)}">
+          <div class="signal-chart-label">${B.esc(row.分类 || "未分类")}</div>
+          <div class="signal-chart-track">
+            <i class="signal-zero"></i>
+            <i class="signal-bar ${change >= 0 ? "is-add" : "is-reduce"}" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></i>
+          </div>
+          <div class="signal-chart-meta">
+            <b>${weightPoint(change)}</b>
+            <span>增${countText(row.增持策略数)}(${addLabel})｜减${countText(row.减持策略数)}(${reduceLabel})｜共${countText(row.参与策略数)}</span>
+          </div>
+        </div>`;
+      }).join("")}
+      <div class="source-method"><strong>读法</strong> 红色向右表示参与策略的中位净增配，绿色向左表示中位净减配；右侧括号为增配策略、减配策略各自的中位净变化。</div>
+    </div>`;
+  }
+
   function assetSignalTable(rows, label = "研报大类资产", limit = 8) {
-    return tableBlock([label, "判断", "参与策略", "增/减策略", "典型变化", "累计净变化", "业务读法"], (rows || []).slice(0, limit), (row, h) => {
+    return tableBlock([label, "判断", "参与策略", "增/减策略", "中位净变化", "累计净变化", "策略调整摘要", "详情"], (rows || []).slice(0, limit), (row, h) => {
       if (h === label) return B.fmt(row.分类);
       if (h === "判断") return `<span class="insight-chip ${directionTone(row.判断)}">${B.esc(row.判断)}</span>`;
       if (h === "参与策略") return countText(row.参与策略数);
       if (h === "增/减策略") return `${countText(row.增持策略数)} / ${countText(row.减持策略数)}`;
-      if (h === "典型变化" || h === "累计净变化") return weightPoint(h === "典型变化" ? row.典型变化 : row.净变化);
-      if (h === "业务读法") return `<span class="small">${B.esc(row.解释)}</span>`;
+      if (h === "中位净变化" || h === "累计净变化") return weightPoint(h === "中位净变化" ? (row.中位净变化 ?? row.典型变化) : row.净变化);
+      if (h === "策略调整摘要") return `<span class="small">${B.esc(strategyAdjustmentSummary(row))}</span>`;
+      if (h === "详情") return signalDetailButton(label, row);
       return B.fmt(row[h]);
     });
   }
@@ -2605,13 +2965,13 @@
     const items = [];
     if (topAdd) items.push({
       title: "多数策略增配",
-      value: weightPoint(topAdd.典型变化),
-      body: `${topAdd.分类}有${countText(topAdd.参与策略数)}个策略参与调仓，${countText(topAdd.增持策略数)}增、${countText(topAdd.减持策略数)}减，典型策略变化${weightPoint(topAdd.典型变化)}。`
+      value: weightPoint(topAdd.中位净变化 ?? topAdd.典型变化),
+      body: `${topAdd.分类}有${countText(topAdd.参与策略数)}个策略参与调仓，${countText(topAdd.增持策略数)}增、${countText(topAdd.减持策略数)}减，中位净变化${weightPoint(topAdd.中位净变化 ?? topAdd.典型变化)}。`
     });
     if (topReduce) items.push({
       title: "多数策略减配",
-      value: weightPoint(topReduce.典型变化),
-      body: `${topReduce.分类}有${countText(topReduce.参与策略数)}个策略参与调仓，${countText(topReduce.增持策略数)}增、${countText(topReduce.减持策略数)}减，典型策略变化${weightPoint(topReduce.典型变化)}。`
+      value: weightPoint(topReduce.中位净变化 ?? topReduce.典型变化),
+      body: `${topReduce.分类}有${countText(topReduce.参与策略数)}个策略参与调仓，${countText(topReduce.增持策略数)}增、${countText(topReduce.减持策略数)}减，中位净变化${weightPoint(topReduce.中位净变化 ?? topReduce.典型变化)}。`
     });
     if (!topAdd && !topReduce && topSplit) items.push({
       title: "方向不够集中",
@@ -2662,6 +3022,7 @@
       const companySummaryRows = companyDirectionSummary(companyAssetRows);
       const strategyAssetChangeRows = filteredStrategyAssetChangeRows(true);
       const assetSignalRows = strategyAssetSignalRows(strategyAssetChangeRows, "研报大类资产");
+      const themeSignalRows = strategyAssetSignalRows(strategyAssetChangeRows, "权益行业主题", { requireField: true });
       const industrySignalRows = strategyAssetSignalRows(strategyAssetChangeRows, "研报A股行业", { onlyReportAIndustry: true });
       const advisorAssetRows = rollupAdvisorAssetDirection(strategyAssetChangeRows);
       const institutionRows = institutionBehaviorRows(events, advisorAssetRows);
@@ -2681,7 +3042,7 @@
           ${kpi("研报类型", B.esc(selectedType || "暂无类型"), "同类策略内比较")}
           ${kpi("同类产品数", countText(typeOverview.产品数 || 0), "当前全局筛选后")}
           ${kpi("调仓产品数", countText(typeOverview.调仓产品数 || 0), `覆盖率 ${pct(typeOverview.调仓覆盖率)}`)}
-          ${kpi("主资产方向", topDirection ? B.esc(topDirection.分类) : "方向分歧", topDirection ? `${topDirection.判断}，典型变化${weightPoint(topDirection.典型变化)}` : "当前同类策略增减方向不集中")}
+          ${kpi("主资产方向", topDirection ? B.esc(topDirection.分类) : "方向分歧", topDirection ? `${topDirection.判断}，中位净变化${weightPoint(topDirection.中位净变化 ?? topDirection.典型变化)}` : "当前同类策略增减方向不集中")}
           ${kpi("广发外部机会", countText(gfExternalCount), "非广发策略增配广发基金")}
         </section>
         <section class="panel" id="rebalance-overview">
@@ -2690,21 +3051,29 @@
         </section>
         <section class="panel">
           <div class="panel-head"><div><h2>${B.esc(selectedType || "选中类型")}：大类资产调仓方向</h2><p class="desc">按策略级口径汇总：同一策略同一研报大类资产先合并区间变化，再统计增配策略数、减配策略数和中位变化。</p></div></div>
-          ${assetSignalTable(assetSignalRows, "研报大类资产", 10)}
+          ${signalDirectionChart(assetSignalRows, "研报大类资产", assetSignalRows.length)}
+          ${assetSignalTable(assetSignalRows, "研报大类资产", assetSignalRows.length)}
         </section>
         <section class="panel">
           <div class="panel-head"><div><h2>${B.esc(selectedType || "选中类型")}：A股行业变化</h2><p class="desc">仅统计能从基金名称或主题明确识别行业的A股基金；宽基指数、主动权益和均衡混合不强行拆行业。</p></div></div>
-          ${assetSignalTable(industrySignalRows, "研报A股行业", 10)}
-          <div class="source-method"><strong>${B.label("研报A股行业")}</strong> 行业图是覆盖样本口径，不代表全量股票穿透；暂无行业时通常表示该类型主要调仓债券、现金、宽基指数或主动权益基金。</div>
+          ${signalDirectionChart(industrySignalRows, "研报A股行业", industrySignalRows.length)}
+          ${assetSignalTable(industrySignalRows, "研报A股行业", industrySignalRows.length)}
+          <div class="source-method"><strong>${B.label("研报A股行业")}</strong> 行业图按基金A股暴露和可识别行业主题拆分；宽基指数、主动权益和均衡混合基金没有底层股票/基准行业权重时不强行拆行业。</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>${B.esc(selectedType || "选中类型")}：权益主题变化</h2><p class="desc">作为研报行业变化的补充视角：宽基、主动权益、海外权益和明确主题基金都纳入，能解释“A股行业变化”覆盖不足的样本。</p></div></div>
+          ${signalDirectionChart(themeSignalRows, "权益行业主题", themeSignalRows.length)}
+          ${assetSignalTable(themeSignalRows, "权益行业主题", themeSignalRows.length)}
+          <div class="source-method"><strong>${B.label("权益行业主题")}</strong> 该表仍按策略级净变化统计，不做底层股票穿透；宽基指数和主动权益基金归入宽基/主动权益。</div>
         </section>
         <section class="insight-grid">
           <div class="panel">
             <div class="panel-head"><div><h2>基金调入摘要</h2><p class="desc">只展示净增配靠前的少量基金，用于定位需要追踪的底层产品。</p></div></div>
-            ${rankList(addRows, { limit: 5, title: (row) => row.基金名称, sub: (row) => `${row.基金公司 || ""}｜${row.研报大类资产 || row.基金类型 || ""}`, value: (row) => weightPoint(row.净增配), meta: (row) => `中位${weightPoint(row.中位净增配)}｜${countText(row.调仓策略数)}策` })}
+            ${rankList(addRows, { limit: 5, title: (row) => row.基金名称, href: fundDetailUrl, sub: (row) => `${row.基金公司 || ""}｜${row.研报大类资产 || row.基金类型 || ""}`, value: (row) => weightPoint(row.净增配), meta: (row) => `中位${weightPoint(row.中位净增配)}｜${countText(row.调仓策略数)}策` })}
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>基金调出摘要</h2><p class="desc">只展示净减配靠前的少量基金，先看是否为同类策略共同行为。</p></div></div>
-            ${rankList(reduceRows, { limit: 5, title: (row) => row.基金名称, sub: (row) => `${row.基金公司 || ""}｜${row.研报大类资产 || row.基金类型 || ""}`, value: (row) => weightPoint(row.净增配), meta: (row) => `中位${weightPoint(row.中位净增配)}｜${countText(row.调仓策略数)}策` })}
+            ${rankList(reduceRows, { limit: 5, title: (row) => row.基金名称, href: fundDetailUrl, sub: (row) => `${row.基金公司 || ""}｜${row.研报大类资产 || row.基金类型 || ""}`, value: (row) => weightPoint(row.净增配), meta: (row) => `中位${weightPoint(row.中位净增配)}｜${countText(row.调仓策略数)}策` })}
           </div>
         </section>
         <section class="panel">
@@ -2726,7 +3095,7 @@
             if (h.includes("策略数")) return countText(row[h]);
             return B.fmt(row[h]);
           })}
-          <div class="source-method"><strong>广发基金机会</strong> ${gfOpportunityRows.slice(0, 5).map((row) => `${B.esc(row.基金名称)}（${row.机会类型}，非广发净增配${weightPoint(row.非广发策略净增配)}）`).join("；") || "当前筛选下暂无广发基金调仓机会样本。"}</div>
+          <div class="source-method"><strong>广发基金机会</strong> ${gfOpportunityRows.slice(0, 5).map((row) => `${fundLink(row)}（${B.esc(row.机会类型)}，非广发净增配${weightPoint(row.非广发策略净增配)}）`).join("；") || "当前筛选下暂无广发基金调仓机会样本。"}</div>
         </section>
         <details class="fold-block">
           <summary>验证区：调仓逻辑、热力图和基金级大表</summary>
@@ -2754,7 +3123,7 @@
             ${activeAssetBeforeAfterHeatmap(strategyAssetChangeRows)}
           </section>
           <section class="panel">
-            <div class="panel-head"><div><h2>期初期末研报大类资产变化</h2><p class="desc">按策略匹配区间起止附近最近可用快照，不把缺失月份当作0仓位。</p></div></div>
+            <div class="panel-head"><div><h2>期初期末研报大类资产变化</h2><p class="desc">按策略匹配区间起止附近最近可用快照，并按基金资产暴露拆分，不把缺失月份当作0仓位。</p></div></div>
             ${industryPeriodHeatmap(holdingSnapshotRows, "研报大类资产", "研报大类资产")}
           </section>
           <section class="panel">
@@ -2765,6 +3134,7 @@
             <div class="panel">
               <div class="panel-head"><div><h2>基金调入榜</h2><p class="desc">基金级明细用于核验，不直接生成市场方向结论。</p></div></div>
               ${tableBlock(["基金名称", "基金公司", "研报大类资产", "净增配", "中位净增配", "调仓策略数"], addRows.slice(0, 10), (row, h) => {
+                if (h === "基金名称") return fundLink(row);
                 if (h.includes("策略数")) return countText(row[h]);
                 if (h.includes("净增配")) return weightPoint(row[h]);
                 return B.fmt(row[h]);
@@ -2773,6 +3143,7 @@
             <div class="panel">
               <div class="panel-head"><div><h2>基金调出榜</h2><p class="desc">基金级明细用于核验，不直接生成市场方向结论。</p></div></div>
               ${tableBlock(["基金名称", "基金公司", "研报大类资产", "净增配", "中位净增配", "调仓策略数"], reduceRows.slice(0, 10), (row, h) => {
+                if (h === "基金名称") return fundLink(row);
                 if (h.includes("策略数")) return countText(row[h]);
                 if (h.includes("净增配")) return weightPoint(row[h]);
                 return B.fmt(row[h]);
@@ -2826,7 +3197,7 @@
         ${kpi("可评价事件", countText(evaluated.length), "用于验证调仓后效果")}
         ${kpi("调仓胜率", effectPct(winRate), "已到观察窗口的事件")}
         ${kpi("平均调仓超额", effectSigned(avgExtra), "调仓后收益相对评价口径")}
-        ${kpi("方向信号", directionSignal ? B.esc(directionSignal.分类) : "方向分歧", directionSignal ? `${directionSignal.判断}，典型变化${weightPoint(directionSignal.典型变化)}` : "当前策略增减方向不集中")}
+        ${kpi("方向信号", directionSignal ? B.esc(directionSignal.分类) : "方向分歧", directionSignal ? `${directionSignal.判断}，中位净变化${weightPoint(directionSignal.中位净变化 ?? directionSignal.典型变化)}` : "当前策略增减方向不集中")}
         ${kpi("广发外部机会", countText(gfExternalCount), "非广发策略增配广发基金")}
       </section>
       <section class="panel">
@@ -2836,13 +3207,13 @@
       </section>
       <section class="panel">
         <div class="panel-head"><div><h2>市场方向：策略级资产变化</h2><p class="desc">每一行先看“判断”和“增/减策略数”。只有多数策略同向、且典型策略变化不接近0，才视为有效市场信号；累计净变化仅作辅助。</p></div></div>
-        ${tableBlock(["资产类型", "判断", "参与策略", "增/减策略", "典型变化", "累计净变化", "业务读法"], assetSignalRows.slice(0, 7), (row, h) => {
+        ${tableBlock(["资产类型", "判断", "参与策略", "增/减策略", "中位净变化", "累计净变化", "策略调整摘要"], assetSignalRows.slice(0, 7), (row, h) => {
           if (h === "资产类型") return B.fmt(row.分类);
           if (h === "判断") return `<span class="insight-chip ${directionTone(row.判断)}">${B.esc(row.判断)}</span>`;
           if (h === "参与策略") return countText(row.参与策略数);
           if (h === "增/减策略") return `${countText(row.增持策略数)} / ${countText(row.减持策略数)}`;
-          if (h === "典型变化" || h === "累计净变化") return weightPoint(h === "典型变化" ? row.典型变化 : row.净变化);
-          if (h === "业务读法") return `<span class="small">${B.esc(row.解释)}</span>`;
+          if (h === "中位净变化" || h === "累计净变化") return weightPoint(h === "中位净变化" ? (row.中位净变化 ?? row.典型变化) : row.净变化);
+          if (h === "策略调整摘要") return `<span class="small">${B.esc(strategyAdjustmentSummary(row))}</span>`;
           return B.fmt(row[h]);
         })}
       </section>
@@ -2886,6 +3257,7 @@
       <section class="panel">
         <div class="panel-head"><div><h2>广发产品机会</h2><p class="desc">优先看非广发策略是否主动增配广发基金；净增配为跨策略累计仓位变化百分点，若只由广发策略贡献，则标记为内部配置为主。</p></div></div>
         ${tableBlock(["基金名称", "基金类型", "机会类型", "非广发净增配", "广发净增配", "调仓策略", "业务读法"], gfOpportunityRows.slice(0, 8), (row, h) => {
+          if (h === "基金名称") return fundLink(row);
           if (h === "非广发净增配") return weightPoint(row.非广发策略净增配);
           if (h === "广发净增配") return weightPoint(row.广发策略净增配);
           if (h === "调仓策略") return countText(row.调仓策略数);
@@ -2900,6 +3272,7 @@
           <div class="panel">
             <div class="panel-head"><div><h2>基金调入榜</h2><p class="desc">按区间净增配排序，显示全市场投顾明显增配的基金。</p></div></div>
             ${tableBlock(["基金名称", "基金公司", "基金类型", "净增配", "中位净增配", "调仓策略数"], addRows.slice(0, 10), (row, h) => {
+              if (h === "基金名称") return fundLink(row);
               if (h.includes("策略数")) return countText(row[h]);
               if (h.includes("净增配")) return weightPoint(row[h]);
               return B.fmt(row[h]);
@@ -2908,6 +3281,7 @@
           <div class="panel">
             <div class="panel-head"><div><h2>基金调出榜</h2><p class="desc">按区间净减配排序，识别被明显降低配置的基金。</p></div></div>
             ${tableBlock(["基金名称", "基金公司", "基金类型", "净增配", "中位净增配", "调仓策略数"], reduceRows.slice(0, 10), (row, h) => {
+              if (h === "基金名称") return fundLink(row);
               if (h.includes("策略数")) return countText(row[h]);
               if (h.includes("净增配")) return weightPoint(row[h]);
               return B.fmt(row[h]);
@@ -2968,6 +3342,9 @@
 
   function render() {
     const displayCount = strategyRows().length;
+    const holdingDisplayCount = filteredHoldingStrategyRows().length;
+    const rebalanceDisplayCount = rebalanceEvents(false).length;
+    signalDetailStore.clear();
     root.innerHTML = `
       <section class="page-title">
         <div>
@@ -2976,8 +3353,8 @@
         </div>
         <div class="title-pills">
           <span class="pill">产品 ${countText(displayCount)} 个</span>
-          <span class="pill">持仓明细 ${countText(insight.持仓明细行数 || 0)} 行</span>
-          <span class="pill">调仓 ${countText((insight.调仓事件 || []).length)} 条</span>
+          <span class="pill">持仓明细 ${countText(holdingDisplayCount)} 行</span>
+          <span class="pill">调仓 ${countText(rebalanceDisplayCount)} 条</span>
         </div>
       </section>
       <section class="panel insight-sticky-controls">
@@ -2991,7 +3368,7 @@
           ${filterField("投顾机构", institutionSelect("insightInstitution", state.institution))}
         </div>
         <div class="insight-tabs">${tabs.map(([key, label]) => `<button type="button" class="insight-tab-button ${key === state.tab ? "is-active" : ""}" data-tab="${key}">${B.esc(label)}</button>`).join("")}</div>
-        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于市场总览、仓位分析、调仓分析的所有图表和表格；对客范围可剔除天天投顾明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；持仓缺失样本不参与洞察展示；时间区间同时用于区间收益、仓位时间序列和调仓事件；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
+        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于市场总览、仓位分析、调仓分析的所有图表和表格；默认仅展示数据完整、非D0、非持仓缺失/不入池策略；对客范围可剔除天天投顾明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；时间区间同时用于区间收益、仓位时间序列和调仓事件；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
       </section>
       <div class="insight-panel-stack">${renderContent()}</div>
     `;
@@ -3073,6 +3450,11 @@
     if (rebalanceMode) rebalanceMode.addEventListener("change", () => { state.rebalanceMode = rebalanceMode.value || "month"; state.rebalancePage = 1; render(); });
     if (rebalanceMonth) rebalanceMonth.addEventListener("change", () => { state.rebalanceMonth = rebalanceMonth.value || ""; state.rebalancePage = 1; render(); });
     if (rebalanceReportType) rebalanceReportType.addEventListener("change", () => { state.reportType = rebalanceReportType.value || ""; state.rebalancePage = 1; render(); });
+    root.querySelectorAll("[data-signal-detail]").forEach((button) => {
+      button.addEventListener("click", () => {
+        showSignalDetail(button.dataset.signalDetail || "");
+      });
+    });
     root.querySelectorAll("[data-report-type-select]").forEach((button) => {
       button.addEventListener("click", () => {
         state.reportType = button.dataset.reportTypeSelect || "";

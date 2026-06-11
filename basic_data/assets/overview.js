@@ -52,19 +52,13 @@
   const masterStrategies = summary.strategies || [];
   const evidenceRecords = points.length;
   const hiddenGap = Math.max(0, sourceTotal - evidenceRecords);
-  const validRecords = points.filter((row) => row.风险等级 !== "D0 持仓缺失");
-  const operatingRows = collapseTargetSeries(validRecords);
+  const operatingRows = collapseTargetSeries(points);
   const targetSeriesRows = operatingRows.filter((row) => row.业务分类 === "目标盈系列产品");
   const targetPeriodRecords = targetSeriesRows.reduce((sum, row) => sum + Number(row.期次数 || 1), 0);
   const targetMerged = Math.max(0, targetPeriodRecords - targetSeriesRows.length);
   const gfRows = operatingRows.filter(isGf);
   const clientRows = operatingRows.filter(isClientFacing);
-  const d0Records = points.filter((row) => row.风险等级 === "D0 持仓缺失").length;
-  const incompleteRecords = Number(listStats.不完整策略数 || 0);
   const hiddenChannels = Number(listStats.隐藏渠道数 || 0);
-  const missingFee = masterStrategies.filter((row) => row.费率状态 === "缺失" || row.年化投顾费率 === null || row.年化投顾费率 === "").length;
-  const missingManager = masterStrategies.filter((row) => !raw(row.投资经理) || row.投资经理 === "未披露").length;
-  const missingDisclosedRisk = masterStrategies.filter((row) => !raw(row.披露风险等级) || row.披露风险等级 === "未披露").length;
 
   function count(value) {
     return Number(value || 0).toLocaleString("zh-CN");
@@ -92,11 +86,10 @@
 
     <section class="insight-hero">
       ${B.metric("源表策略总数", sourceTotal, "数据接入规模")}
-      ${B.metric("可核验策略记录", evidenceRecords, `未进入明细 ${count(hiddenGap)} 条`)}
-      ${B.metric("经营有效样本", operatingRows.length, `不含D0；目标盈 ${count(targetPeriodRecords)} 期压缩为 ${count(targetSeriesRows.length)} 系列`)}
-      ${B.metric("广发经营样本", gfRows.length, `覆盖 ${operatingRows.length ? (gfRows.length / operatingRows.length * 100).toFixed(2) : "0.00"}%`)}
-      ${B.metric("对客经营样本", clientRows.length, "用于销售/营销优先判断")}
-      ${B.metric("D0持仓缺失", d0Records, "只进数据补齐，不进主图")}
+      ${B.metric("完整可展示策略", evidenceRecords, `默认过滤数据不全、D0和持仓缺失；未进入明细 ${count(hiddenGap)} 条`)}
+      ${B.metric("系列归并样本", operatingRows.length, `目标盈 ${count(targetPeriodRecords)} 期压缩为 ${count(targetSeriesRows.length)} 系列`)}
+      ${B.metric("广发可展示样本", gfRows.length, `覆盖 ${operatingRows.length ? (gfRows.length / operatingRows.length * 100).toFixed(2) : "0.00"}%`)}
+      ${B.metric("对客可展示样本", clientRows.length, "用于销售/营销优先判断")}
     </section>
 
     <section class="panel">
@@ -106,19 +99,15 @@
         ${actionRow("市场竞争力", "按研报产品类型看广发在哪些同类池有销售话术、哪里货架薄。", "./insights.html?tab=market&clientScope=client#market-competition", "看市场", "同类可比")}
         ${actionRow("广发基金外部验证", "只看非广发策略仓位中广发基金被持有和增配情况，剔除自家配置干扰。", "./insights.html?tab=holding&strategyScope=nonGf#gf-fund-opportunity", "看机会", "外部验证")}
         ${actionRow("月度调仓复盘", "默认进入最近完整调仓月份，按研报产品类型分池看调仓方向。", "./insights.html?tab=rebalance#rebalance-overview", "看调仓", "研判信号")}
-        ${actionRow("数据缺口核验", `阻断结论 ${count(d0Records + incompleteRecords)} 条；销售/披露前待补字段涉及费率 ${count(missingFee)}、经理 ${count(missingManager)}、披露风险 ${count(missingDisclosedRisk)} 条。`, "./insights.html?tab=cockpit#data-risk", "看风险", "先补数据")}
-        ${actionRow("策略证据页", "按经营动作、业务分类、研报产品类型或数据缺口直接核验具体策略。", "./strategies.html?clientScope=client&pageSize=50", "查策略", "逐条核验")}
-        ${actionRow("D0补齐清单", "持仓缺失策略不进入洞察主图，先补数据再谈分类和业务结论。", "./strategies.html?dataIssue=d0", "补数据", "阻断")}
+        ${actionRow("策略证据页", "按业务分类、研报产品类型、风险等级和机构直接核验完整可展示策略。", "./strategies.html?clientScope=client&pageSize=50", "查策略", "逐条核验")}
       </div>
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>当前口径风险</h2><p class="desc">这些不是经营结论，而是解释哪些数据可以用、哪些不能用。</p></div></div>
+      <div class="panel-head"><div><h2>当前展示口径</h2><p class="desc">页面默认只展示完整可比策略，数据不全、D0和持仓缺失样本不进入列表、图表和调仓分析。</p></div></div>
       <div class="rank-list">
-        <div class="rank-row"><div><strong>源表不等于可核验明细</strong><span>源表 ${count(sourceTotal)} 条；策略列表和洞察明细 ${count(evidenceRecords)} 条；${count(hiddenGap)} 条来自 ${count(hiddenChannels)} 个暂不展示渠道，不能下钻核验。</span></div><span class="rank-value">全局口径</span></div>
-        <div class="rank-row"><div><strong>经营样本不等于策略记录</strong><span>目标盈按系列归并，D0剔除后 ${count(targetPeriodRecords)} 条目标盈期次压缩为 ${count(targetSeriesRows.length)} 个系列，合并掉 ${count(targetMerged)} 条重复期次，经营样本为 ${count(operatingRows.length)} 个。</span></div><a class="link" href="./insights.html?tab=cockpit#data-risk">看驾驶舱</a></div>
-        <div class="rank-row"><div><strong>销售动作不等于同类判断</strong><span>费率、投资经理、披露风险缺失不阻断同类比较，但会阻断销售材料、经理画像和适当性披露核验。</span></div><a class="link" href="./insights.html?tab=cockpit#data-risk">看门禁</a></div>
-        <div class="rank-row"><div><strong>经理画像暂不可做</strong><span>投资经理字段当前缺失，负责人只能做产品、机构、分类和底层基金视角分析。</span></div><a class="link" href="./strategies.html?dataIssue=manager">核验缺失</a></div>
+        <div class="rank-row"><div><strong>源表不等于展示样本</strong><span>源表 ${count(sourceTotal)} 条；完整可展示策略 ${count(evidenceRecords)} 条；${count(hiddenGap)} 条来自 ${count(hiddenChannels)} 个暂不展示渠道或非当前展示口径。</span></div><span class="rank-value">全局口径</span></div>
+        <div class="rank-row"><div><strong>系列样本不等于策略记录</strong><span>目标盈按系列归并，${count(targetPeriodRecords)} 条目标盈期次压缩为 ${count(targetSeriesRows.length)} 个系列，合并掉 ${count(targetMerged)} 条重复期次，系列归并后样本为 ${count(operatingRows.length)} 个。</span></div><a class="link" href="./insights.html?tab=market">看市场总览</a></div>
       </div>
     </section>
 

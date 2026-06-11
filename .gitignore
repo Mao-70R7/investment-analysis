@@ -3,6 +3,8 @@
 
 output/playwright/
 
+advisor_update.local.bat
+
 *.log
 *.err.log
 
