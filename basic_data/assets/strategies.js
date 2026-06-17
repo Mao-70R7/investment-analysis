@@ -110,6 +110,7 @@
     if (weightHeaders.includes(field)) return B.pct(row[field]);
     if (field === "夏普比率") return B.fmt(row[field]);
     if (field === "最近调仓日" && !row[field]) return '<span class="value-muted">无历史调仓事件</span>';
+    if (field === "业绩基准说明") return row[field] ? `<span class="small">${B.esc(row[field])}</span>` : '<span class="value-muted">未披露</span>';
     return B.fmt(row[field]);
   }
 
@@ -126,10 +127,10 @@
   function renderTable(rows) {
     const headers = [
       "策略名称", "渠道", "投顾机构", "研报产品类型", "研报股票子类型", "风险等级", "业务分类", "市场地域", "主动被动",
-      "披露策略类型", "天天当前对客展示", "天天展示状态", "最新业绩日期",
+      "披露策略类型", "天天当前对客展示", "天天展示状态", "基准可用状态", "业绩基准说明", "最新业绩日期",
       ...returnHeaders, ...riskHeaders, "夏普比率", ...weightHeaders, ...dateHeaders.filter((field) => field !== "最新业绩日期"), "调仓次数"
     ];
-    const wideFields = new Set(["投顾机构", "研报产品类型", "研报股票子类型", "风险等级", "业务分类", "主动被动", "披露策略类型", "天天当前对客展示", "天天展示状态"]);
+    const wideFields = new Set(["投顾机构", "研报产品类型", "研报股票子类型", "风险等级", "业务分类", "主动被动", "披露策略类型", "天天当前对客展示", "天天展示状态", "基准可用状态", "业绩基准说明"]);
     const head = headers.map((field, index) => {
       const cls = index === 0 ? "sticky-name" : index === 1 ? "sticky-channel" : returnHeaders.includes(field) || riskHeaders.includes(field) || weightHeaders.includes(field) ? "narrow" : wideFields.has(field) ? "wide" : "";
       return sortHeader(field, cls);

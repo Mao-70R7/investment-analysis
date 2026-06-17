@@ -1,7 +1,13 @@
 (() => {
   const B = window.BasicData;
   const summary = B.state.summary || {};
-  const insight = summary.insightData || {};
+  const insight = { ...(summary.insightData || {}) };
+  if (!Array.isArray(insight.策略表现点) || !insight.策略表现点.length) {
+    insight.策略表现点 = summary.strategies || [];
+  }
+  if (!Array.isArray(insight.调仓事件) || !insight.调仓事件.length) {
+    insight.调仓事件 = summary.rebalanceEvents || [];
+  }
   const root = B.byId("insightsPage");
   const riskOrder = ["低风险", "R0 现金/超低波", "中低风险", "中低风险(R2)", "R1 低波", "R2 稳健收益", "中风险", "中风险(R3)", "R3 均衡稳健", "中高风险", "中高风险(R4)", "R4 均衡成长", "高风险", "R5 权益/进取", "未披露"];
   const riskOrderMap = new Map(riskOrder.map((risk, index) => [risk, index]));
@@ -16,12 +22,14 @@
   const tabs = [
     ["market", "市场总览"],
     ["holding", "仓位分析"],
-    ["rebalance", "调仓分析"]
+    ["rebalance", "调仓分析"],
+    ["compare", "策略对比"]
   ];
   const xAxisOptions = ["最大回撤", "波动率", "夏普比率", "卡玛比率"];
   const reportTypeOrder = ["纯债型", "固收+型", "股债混合型", "股票型", "多元配置型", "持仓缺失/不入池"];
   const reportAssetOrder = ["A股", "港股", "美股", "债券", "黄金", "货币及现金", "海外债券", "新兴市场", "其他发达市场", "海外REIT", "其他商品"];
   const reportAssetSet = new Set(reportAssetOrder);
+  const highFrequencyHoldingThreshold = 0.5;
   const state = {
     tab: "market",
     risk: "",
@@ -40,11 +48,31 @@
     businessPages: {},
     openBusiness: "",
     expandedFundKey: "",
+    holdingFundPage: 1,
+    holdingFundPageSize: 20,
+    holdingFundType: "",
+    gfHoldingFundPage: 1,
+    gfHoldingFundPageSize: 20,
+    gfHoldingFundType: "",
+    gfOpportunityPage: 1,
+    gfOpportunityPageSize: 20,
+    gfOpportunityFundType: "",
     rebalancePage: 1,
     rebalancePageSize: 20,
+    rebalanceFundRankType: "netIn",
+    rebalanceFundSecondaryCategory: "",
+    rebalanceFundCompany: "",
     rebalanceMode: "month",
     rebalanceMonth: "",
-    reportType: ""
+    reportType: "",
+    compareQuery: "",
+    compareQueryInput: "",
+    compareSelectedIds: [],
+    comparePeerMode: "reportType",
+    compareScatterX: "最大回撤",
+    compareSelectedPointId: "",
+    compareOverlapDetailKey: "",
+    compareBenchmarkCode: ""
   };
   const initParams = new URLSearchParams(window.location.search);
   const initTab = initParams.get("tab");
@@ -64,6 +92,15 @@
   const masterStrategies = (summary.strategies || []).filter(isDisplayableInsightRow);
   const rawPoints = allPoints.filter((row) => row.风险等级 && row.风险等级 !== "D0 持仓缺失");
   const rawPointById = new Map(rawPoints.map((row) => [row.统一策略ID, row]));
+  const masterStrategyById = new Map(masterStrategies.map((row) => [row.统一策略ID, row]));
+  const allStrategyById = new Map((summary.strategies || []).map((row) => [row.统一策略ID, row]));
+  const globalBenchmarks = summary.globalBenchmarks || [];
+  const compareDetailStore = new Map();
+  const compareLoadTasks = new Map();
+  const compareMaxCount = 5;
+  const comparePalette = ["#d92d20", "#1570ef", "#039855", "#7a5af8", "#dc6803", "#0e9384", "#c11574", "#4e5ba6", "#b42318", "#175cd3"];
+  let compareSearchTimer = null;
+  let compareSearchComposing = false;
   const displayStrategyIds = new Set(rawPoints.map((row) => row.统一策略ID).filter(Boolean));
   const signalDetailStore = new Map();
   const risks = orderedRiskValues(rawPoints);
@@ -76,6 +113,46 @@
       const bi = reportTypeOrder.indexOf(b);
       return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi) || a.localeCompare(b, "zh-CN");
     });
+  const initialCompareIds = (initParams.get("compare") || initParams.get("ids") || "")
+    .split(/[,\s|]+/)
+    .map((id) => id.trim())
+    .filter((id) => masterStrategyById.has(id) || allStrategyById.has(id));
+  state.compareSelectedIds = [...new Set(initialCompareIds)].slice(0, compareMaxCount);
+  state.compareQuery = initParams.get("q") || state.compareQuery;
+  state.compareQueryInput = state.compareQuery;
+  state.comparePeerMode = initParams.get("peer") || state.comparePeerMode;
+  state.compareBenchmarkCode = initParams.get("benchmark") || state.compareBenchmarkCode;
+  Object.assign(summary.fieldDictionary = summary.fieldDictionary || {}, {
+    "策略对比": "同屏比较最多5只策略。策略基础指标来自 basic_summary.strategies；曲线、当前持仓、历史调仓、调仓原因和AI投研总结来自对应 data/details/<统一策略ID>.js；同类推荐和散点图按当前筛选条件重新计算。",
+    "对比篮子": "当前已选入策略对比的策略集合，最多5只。选择策略后页面会按需加载对应策略详情文件，不一次性加载全部详情。",
+    "同类推荐": "以第一只已选策略为锚点，按所选同类口径筛选同业务分类、研报产品类型、风险等级或投顾机构策略；再按当前时间区间收益、最大回撤和波动率排序，剔除已选策略后给出可加入对比的候选。",
+    "同类口径": "策略对比页自动推荐和风险收益散点使用的可比池。研报产品类型适合投研可比；业务分类适合运营货架；风险等级适合风险相近对比；投顾机构适合同机构内部产品比较。",
+    "持仓重合度": "两只策略当前正权重基金的重叠程度。计算公式为 sum(min(策略A基金权重, 策略B基金权重))，基金按基金代码优先、基金名称兜底匹配，单位为百分比点。",
+    "行业重合度": "两只策略最新仓位在研报A股行业上的暴露重叠程度。计算公式为 sum(min(策略A行业暴露, 策略B行业暴露))；若研报A股行业缺失，则退回权益行业大类。行业暴露来自 holding_snapshot_pack 的分类拆分结果。",
+    "资产重合度": "两只策略最新仓位在研报大类资产上的暴露重叠程度。计算公式为 sum(min(策略A资产暴露, 策略B资产暴露))；资产暴露来自 holding_snapshot_pack，支持一只基金拆分到多个资产类别。",
+    "调仓贡献对比": "选中策略最近一次历史调仓的基金级调仓后收益贡献汇总。正贡献和负贡献来自策略详情 holdings 中的调仓后收益贡献字段；若存在 contributionCurves，则同时展示调仓前仓位模拟与调仓后仓位实际的区间超额。",
+    "风险收益散点": "横轴为最大回撤或波动率，纵轴为当前时间区间收益；样本为当前筛选和同类口径下的可比策略，已选策略高亮显示。",
+    "风险收益点选": "点击散点只在图下方展示产品介绍、同类位置和加入按钮，不直接跳转；策略名称本身可进入策略详情页。",
+    "重合度明细": "点击重合度矩阵中的非自身单元格后展示明细。基金重合度列出共同基金及两边权重；资产和行业重合度列出共同暴露分类及两边比例。",
+    "对比基准": "策略对比曲线可叠加全局指数基准。默认按已选策略披露收益曲线与可用指数日收益相关性选择；有效样本不足时按策略组合资产结构选择股票、债券、货币或混合基准。",
+    "大类资产配置对比": "按 holding_snapshot_pack 最新持仓快照的研报大类资产分类聚合；一只基金可按拆分规则进入多个资产大类，页面展示每只策略的权重结构。",
+    "行业配置对比": "按 holding_snapshot_pack 最新持仓快照的研报A股行业分类聚合。行业暴露来自基金分类和拆分规则，不等同于基金公司披露的股票明细行业持仓。",
+    "权益主题配置对比": "按 holding_snapshot_pack 最新持仓快照的权益行业主题分类聚合，用于观察权益方向主题集中度；缺少主题拆分的数据不强行归类。",
+    "选基效果": "展示两类结果：历史调仓胜率按可评价调仓事件胜负计算；当前持仓基金近1月、近3月、近6月、近1年同类收益排名前50%的仓位占比按基金权重加总。",
+    "历史调仓胜率": "按策略历史调仓事件的调仓评价或调仓超额收益判断胜负。跑赢、胜、正超额记为胜；跑输、负超额记为负；无收益窗口或评价不足的事件不纳入分母。",
+    "前50%仓位占比": "当前持仓正权重基金中，同类收益排名处于前50%的基金权重合计除以当前持仓正权重合计。同类分组来自基金标准分类字典，排名来自基金日度净值复权收益。",
+    "历史盈利概率": "基于策略披露业绩曲线优先、模拟业绩曲线兜底，滚动计算任一历史日期买入并持有1月、3月、6月、1年后的收益是否大于0。",
+    "费率对比": "年化投顾费率优先取结构化字段；缺失时展示原始投顾费率文本或未披露。费率缺失不做推算，避免误导定价比较。",
+    "高频持仓基金门槛": "全市场高频持仓基金、广发基金高频持仓基金两张表，只有单策略期末持仓比例大于0.5%的基金才计为有效持仓。低于等于0.5%的尾部仓位保留在策略详情，但不纳入高频统计，避免大量试探性小仓位放大噪声。",
+    "基金类型筛选": "仓位分析中的基金列表可按基金类型筛选。筛选发生在当前全局条件和单策略持仓比例大于0.5%的高频门槛之后，只改变表格展示和分页，不改变上方资产分布结论。",
+    "基金二级分类筛选": "调仓分析中的基金调仓榜单和基金公司机会共用该筛选。页面先按当前时间、研报产品类型、投顾机构等条件取调仓基金明细，再按基金二级分类筛选，最后现场重算基金榜单、全市场权重变化和基金公司流向。",
+    "基金公司筛选": "调仓分析中的基金调仓榜单和基金公司机会共用该筛选。基金公司来自基金标准化信息或调仓明细补全字段；底层数据更新后，筛选选项和命中数量随最新明细重新聚合。",
+    "基金调仓榜单类型": "调仓分析的基金级榜单统一在一个表格中切换。净调入/净调出按全市场权重变化排序；策略数热榜按发生调整的策略数排序；调整强度热榜按每只基金所有调增和调减比例的绝对值合计排序。",
+    "全市场权重变化": "对当前调仓筛选窗口内的基金级明细，先计算该基金调前总权重/所有基金调前总权重、调后总权重/所有基金调后总权重，再取调后占比减调前占比。它用于识别全市场层面的仓位占比变化，避免单一策略大幅调仓掩盖多策略共同行为。",
+    "基金调整强度": "同一基金在当前调仓筛选窗口内，所有策略调仓权重变化绝对值的合计。该指标同时计入调入和调出，用于衡量该基金被调整的活跃程度，不代表净流入方向。",
+    "前十大基金": "每只策略当前快照中正权重最高的10只基金，基金权重来自策略详情 current 持仓或第一条当前持仓快照；基金名称可跳转基金详情页。",
+    "AI投研总结": "由加工脚本根据调仓前后资产、行业、基金权重变化和披露调仓原因生成的投研摘要。页面仅展示已写入策略详情文件的结果，不在浏览器端重新生成。"
+  });
 
   function num(value) {
     if (value === null || value === undefined || value === "") return null;
@@ -116,8 +193,10 @@
   }
 
   function isDisplayableInsightRow(row) {
+    const scope = raw(row?.洞察评价对象).trim();
+    const insightEvaluable = scope ? scope !== "仅列表保留" : (!row?.数据完整性 || row.数据完整性 === "完整");
     return !!row
-      && (!row.数据完整性 || row.数据完整性 === "完整")
+      && insightEvaluable
       && row.风险等级 !== "D0 持仓缺失"
       && row.研报产品类型 !== "持仓缺失/不入池";
   }
@@ -225,7 +304,7 @@
     if (!row) return false;
     const id = raw(row.统一策略ID);
     if (id && !displayStrategyIds.has(id)) return false;
-    if (row.数据完整性 && row.数据完整性 !== "完整") return false;
+    if (!isDisplayableInsightRow(row)) return false;
     if (row.风险等级 === "D0 持仓缺失") return false;
     if (row.研报产品类型 === "持仓缺失/不入池") return false;
     return true;
@@ -264,6 +343,88 @@
     return `<label class="filter-field"><span>${B.esc(label)}</span>${html}</label>`;
   }
 
+  function fundTypeValue(row) {
+    return raw(row?.基金类型 || row?.资产暴露 || "未分类").trim() || "未分类";
+  }
+
+  function fundTypeOptions(rows) {
+    return [...new Set((rows || []).map(fundTypeValue).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }
+
+  function normalizeFundTypeFilter(value, rows) {
+    const options = fundTypeOptions(rows);
+    return value && options.includes(value) ? value : "";
+  }
+
+  function filterByFundType(rows, value) {
+    if (!value) return rows || [];
+    return (rows || []).filter((row) => fundTypeValue(row) === value);
+  }
+
+  function fundTypeFilterSelect(id, value, rows) {
+    const options = fundTypeOptions(rows);
+    return `<select id="${id}" class="control compact-control">
+      <option value="" ${value ? "" : "selected"}>全部基金类型</option>
+      ${options.map((type) => `<option value="${B.esc(type)}" ${type === value ? "selected" : ""}>${B.esc(type)}</option>`).join("")}
+    </select>`;
+  }
+
+  function fundTypeFilterNote(value, total, filtered) {
+    const suffix = value ? `当前仅看“${B.esc(value)}”，命中 ${countText(filtered)} / ${countText(total)} 只基金。` : `当前展示全部基金类型，共 ${countText(total)} 只基金。`;
+    return `<span>${B.label("基金类型筛选")}：${suffix}</span>`;
+  }
+
+  function rebalanceFundSecondaryCategoryValue(row) {
+    return raw(fundSecondaryCategory(row) || row?.二级分类 || row?.基金同类分组 || row?.行业主题 || "未分类").trim() || "未分类";
+  }
+
+  function rebalanceFundCompanyValue(row) {
+    return raw(row?.基金公司 || "基金公司待补全").trim() || "基金公司待补全";
+  }
+
+  function facetOptions(rows, getter) {
+    return [...new Set((rows || []).map(getter).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }
+
+  function normalizeFacetFilter(value, rows, getter) {
+    const options = facetOptions(rows, getter);
+    return value && options.includes(value) ? value : "";
+  }
+
+  function filterRebalanceFundFacetRows(rows) {
+    return (rows || []).filter((row) => {
+      if (state.rebalanceFundSecondaryCategory && rebalanceFundSecondaryCategoryValue(row) !== state.rebalanceFundSecondaryCategory) return false;
+      if (state.rebalanceFundCompany && rebalanceFundCompanyValue(row) !== state.rebalanceFundCompany) return false;
+      return true;
+    });
+  }
+
+  function rebalanceFacetSelect(id, value, rows, getter, allLabel, dataAttr) {
+    const options = facetOptions(rows, getter);
+    return `<select id="${id}" class="control compact-control" ${dataAttr}>
+      <option value="" ${value ? "" : "selected"}>${B.esc(allLabel)}</option>
+      ${options.map((option) => `<option value="${B.esc(option)}" ${option === value ? "selected" : ""}>${B.esc(option)}</option>`).join("")}
+    </select>`;
+  }
+
+  function rebalanceFundFacetControls(rows, suffix = "") {
+    return `
+      ${filterField("基金二级分类", rebalanceFacetSelect(`rebalanceFundSecondaryCategory${suffix}`, state.rebalanceFundSecondaryCategory, rows, rebalanceFundSecondaryCategoryValue, "全部二级分类", "data-rebalance-fund-secondary"))}
+      ${filterField("基金公司", rebalanceFacetSelect(`rebalanceFundCompany${suffix}`, state.rebalanceFundCompany, rows, rebalanceFundCompanyValue, "全部基金公司", "data-rebalance-fund-company"))}
+    `;
+  }
+
+  function rebalanceFundFacetNote(total, filtered) {
+    const filters = [
+      state.rebalanceFundSecondaryCategory ? `二级分类=${state.rebalanceFundSecondaryCategory}` : "",
+      state.rebalanceFundCompany ? `基金公司=${state.rebalanceFundCompany}` : "",
+    ].filter(Boolean);
+    if (!filters.length) return `当前使用全部基金明细，共 ${countText(total)} 条调仓基金记录。`;
+    return `当前筛选 ${B.esc(filters.join("，"))}，命中 ${countText(filtered)} / ${countText(total)} 条调仓基金记录；榜单和基金公司机会均按筛选后的明细重新聚合。`;
+  }
+
   function rangeConfig() {
     return dateRanges.find((item) => item.key === state.range) || dateRanges.find((item) => item.key === "1y") || dateRanges[0];
   }
@@ -277,7 +438,11 @@
   }
 
   function strategyLink(row) {
-    return `<a class="link" href="./strategy.html?id=${encodeURIComponent(row.统一策略ID || "")}">${B.esc(row.策略名称 || "未命名策略")}</a>`;
+    return strategyLinkById(row?.统一策略ID || "", row?.策略名称 || "未命名策略");
+  }
+
+  function strategyLinkById(id, name = "未命名策略") {
+    return `<a class="link" href="./strategy.html?id=${encodeURIComponent(id || "")}">${B.esc(name || id || "未命名策略")}</a>`;
   }
 
   function fundLabel(row) {
@@ -953,9 +1118,17 @@
   }
 
   function rollupMonthlyFunds(rows, onlyGf = false) {
-    return [...groupBy((rows || []).filter((row) => !onlyGf || row.是否广发基金 === "是"), (row) => `${row.基金代码}｜${row.基金名称}`).entries()].map(([, list]) => {
+    const scoped = (rows || []).filter((row) => !onlyGf || row.是否广发基金 === "是");
+    const marketBeforeTotal = scoped.reduce((total, row) => total + Math.max(0, num(row.调前权重) || 0), 0);
+    const marketAfterTotal = scoped.reduce((total, row) => total + Math.max(0, num(row.调后权重) || 0), 0);
+    return [...groupBy(scoped, (row) => `${row.基金代码}｜${row.基金名称}`).entries()].map(([, list]) => {
       const base = list[0] || {};
       const netChanges = list.map((row) => num(row.净增配)).filter((value) => value !== null);
+      const beforeWeight = list.reduce((total, row) => total + Math.max(0, num(row.调前权重) || 0), 0);
+      const afterWeight = list.reduce((total, row) => total + Math.max(0, num(row.调后权重) || 0), 0);
+      const beforeShare = marketBeforeTotal > 0 ? beforeWeight / marketBeforeTotal * 100 : null;
+      const afterShare = marketAfterTotal > 0 ? afterWeight / marketAfterTotal * 100 : null;
+      const adjustmentIntensity = list.reduce((total, row) => total + Math.abs(num(row.净增配) ?? num(row.权重变化) ?? 0), 0);
       return {
         ...base,
         明细数: sum(list, "明细数"),
@@ -972,9 +1145,83 @@
         非广发策略净增配: sum(list, "非广发策略净增配"),
         调仓后收益贡献: sum(list, "调仓后收益贡献"),
         中位净增配: median(netChanges),
+        调前全市场权重占比: beforeShare,
+        调后全市场权重占比: afterShare,
+        全市场权重变化: beforeShare === null || afterShare === null ? null : afterShare - beforeShare,
+        调仓强度: adjustmentIntensity,
         绝对净增配: Math.abs(sum(list, "净增配"))
       };
-    }).sort((a, b) => b.绝对净增配 - a.绝对净增配);
+    }).sort((a, b) => (num(b.调仓强度) || 0) - (num(a.调仓强度) || 0));
+  }
+
+  const rebalanceFundRankOptions = [
+    ["netIn", "基金净调入榜"],
+    ["netOut", "基金净调出榜"],
+    ["strategyCount", "基金调整策略数热榜"],
+    ["intensity", "基金调整强度热榜"]
+  ];
+
+  function rebalanceFundRankLabel() {
+    return rebalanceFundRankOptions.find(([key]) => key === state.rebalanceFundRankType)?.[1] || "基金净调入榜";
+  }
+
+  function rebalanceFundRankSelect() {
+    return `<select id="rebalanceFundRankType" class="control">
+      ${rebalanceFundRankOptions.map(([key, label]) => `<option value="${key}" ${state.rebalanceFundRankType === key ? "selected" : ""}>${B.esc(label)}</option>`).join("")}
+    </select>`;
+  }
+
+  function rebalanceFundRankRows(rows) {
+    const data = rows || [];
+    if (state.rebalanceFundRankType === "netOut") {
+      return [...data]
+        .filter((row) => (num(row.全市场权重变化) ?? num(row.净增配) ?? 0) < -0.0001)
+        .sort((a, b) => (num(a.全市场权重变化) ?? num(a.净增配) ?? 0) - (num(b.全市场权重变化) ?? num(b.净增配) ?? 0)
+          || (num(b.调仓策略数) || 0) - (num(a.调仓策略数) || 0));
+    }
+    if (state.rebalanceFundRankType === "strategyCount") {
+      return [...data].sort((a, b) => (num(b.调仓策略数) || 0) - (num(a.调仓策略数) || 0)
+        || (num(b.调仓强度) || 0) - (num(a.调仓强度) || 0)
+        || Math.abs(num(b.全市场权重变化) || 0) - Math.abs(num(a.全市场权重变化) || 0));
+    }
+    if (state.rebalanceFundRankType === "intensity") {
+      return [...data].sort((a, b) => (num(b.调仓强度) || 0) - (num(a.调仓强度) || 0)
+        || (num(b.调仓策略数) || 0) - (num(a.调仓策略数) || 0));
+    }
+    return [...data]
+      .filter((row) => (num(row.全市场权重变化) ?? num(row.净增配) ?? 0) > 0.0001)
+      .sort((a, b) => (num(b.全市场权重变化) ?? num(b.净增配) ?? 0) - (num(a.全市场权重变化) ?? num(a.净增配) ?? 0)
+        || (num(b.调仓策略数) || 0) - (num(a.调仓策略数) || 0));
+  }
+
+  function rebalanceFundRankTable(rows) {
+    const rankedRows = rebalanceFundRankRows(rows).slice(0, 20);
+    const headers = ["基金名称", "二级分类", "基金公司", "基金类型", "净增配", "全市场调前占比", "全市场调后占比", "全市场权重变化", "中位净增配", "调仓策略数", "调整强度"];
+    return tableBlock(headers, rankedRows, (row, h) => {
+      if (h === "基金名称") return fundLink(row);
+      if (h === "二级分类") return B.esc(fundSecondaryCategory(row));
+      if (h === "全市场调前占比") return pct(row.调前全市场权重占比);
+      if (h === "全市场调后占比") return pct(row.调后全市场权重占比);
+      if (h === "全市场权重变化") return weightPoint(row.全市场权重变化);
+      if (h === "调整强度") return weightPoint(row.调仓强度);
+      if (h.includes("策略数")) return countText(row[h]);
+      if (h.includes("净增配")) return weightPoint(row[h]);
+      return B.fmt(row[h]);
+    });
+  }
+
+  function rebalanceFundRankPanel(fundRows, sourceRows = [], filteredSourceRows = []) {
+    return `<section class="panel" id="rebalance-fund-rank">
+      <div class="panel-head">
+        <div><h2>基金调仓榜单</h2><p class="desc">基金净调入、净调出、调整策略数和调整强度统一在这里切换；排序优先体现全市场仓位占比变化和多策略共同行为。</p></div>
+        <div class="chart-actions">
+          ${filterField("榜单类型", rebalanceFundRankSelect())}
+          ${rebalanceFundFacetControls(sourceRows, "Rank")}
+        </div>
+      </div>
+      ${rebalanceFundRankTable(fundRows)}
+      <div class="source-method"><strong>${B.label("基金调仓榜单类型")}</strong> 当前为“${B.esc(rebalanceFundRankLabel())}”。${B.label("基金二级分类筛选")} ${B.label("基金公司筛选")} ${rebalanceFundFacetNote(sourceRows.length, filteredSourceRows.length)} ${B.label("全市场权重变化")}：表内“全市场调前占比/调后占比/权重变化”按筛选后的基金明细重新归一；${B.label("基金调整强度")} 为调增和调减比例绝对值合计。</div>
+    </section>`;
   }
 
   function fundTheme(row) {
@@ -1596,6 +1843,19 @@
 
   function filteredHoldingSnapshotRows() {
     return holdingSnapshotRows().filter(dimensionMatch).filter(reportTypeMatch);
+  }
+
+  function latestHoldingSnapshotRows(field) {
+    const rows = filteredHoldingSnapshotRows()
+      .filter((row) => row.分类字段 === field && row.分类 && (num(row.总权重) || 0) > 0);
+    const latestByStrategy = new Map();
+    rows.forEach((row) => {
+      const key = row.统一策略ID;
+      const date = row.快照日期 || "";
+      if (!key || !date) return;
+      if (!latestByStrategy.has(key) || date > latestByStrategy.get(key)) latestByStrategy.set(key, date);
+    });
+    return rows.filter((row) => row.快照日期 && latestByStrategy.get(row.统一策略ID) === row.快照日期);
   }
 
   function industryPeriodRows(rows, field) {
@@ -2351,7 +2611,20 @@
   }
 
   function filteredHoldingRows() {
-    return (insight.当前持仓基金风险明细 || []).filter(dimensionMatch);
+    const rows = (insight.当前持仓基金风险明细 || []).filter(dimensionMatch);
+    if (rows.length) return rows;
+    return latestHoldingSnapshotRows("研报大类资产").map((row) => ({
+      基金类型: row.分类 || "未识别",
+      总权重: num(row.总权重) || 0,
+      持仓策略数: 1,
+      广发策略持仓数: row.是否广发策略 === "是" ? 1 : 0,
+      非广发策略持仓数: row.是否广发策略 === "是" ? 0 : 1,
+      广发策略权重: row.是否广发策略 === "是" ? (num(row.总权重) || 0) : 0,
+      非广发策略权重: row.是否广发策略 === "是" ? 0 : (num(row.总权重) || 0),
+      广发产品权重: 0,
+      中位权重: num(row.总权重) || 0,
+      非广发净增配中位数: null
+    }));
   }
 
   function filteredCompanyRows() {
@@ -2557,6 +2830,7 @@
     const key = holdingKey(fundRow);
     return filteredHoldingStrategyRows()
       .filter((row) => holdingKey(row) === key)
+      .filter((row) => (num(row.期末持仓比例) || 0) > highFrequencyHoldingThreshold)
       .sort((a, b) => (num(b.期末持仓比例) || 0) - (num(a.期末持仓比例) || 0));
   }
 
@@ -2577,16 +2851,23 @@
     </div>`;
   }
 
-  function fundHoldingTable(rows) {
-    const headers = ["基金名称", "基金类型", "资产暴露", "基金分类置信度", "区间收益率", "权重占比", "中位权重", "增持策略数", "减持策略数", "持仓策略数"];
-    const body = rows.length ? rows.slice(0, 10).map((row) => {
+  function fundHoldingTable(rows, options = {}) {
+    const kind = options.kind || "market";
+    const pageSize = kind === "gf" ? state.gfHoldingFundPageSize : state.holdingFundPageSize;
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    const page = Math.max(1, Math.min(totalPages, kind === "gf" ? state.gfHoldingFundPage : state.holdingFundPage));
+    if (kind === "gf") state.gfHoldingFundPage = page;
+    else state.holdingFundPage = page;
+    const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
+    const headers = ["基金名称", "基金类型", "二级分类", "资产暴露", "区间收益率", "权重占比", "中位权重", "增持策略数", "减持策略数", "持仓策略数"];
+    const body = pageRows.length ? pageRows.map((row) => {
       const key = holdingKey(row);
       const expanded = state.expandedFundKey === key;
       const main = `<tr class="fund-row ${expanded ? "is-open" : ""}" data-fund-key="${B.esc(key)}">
         <td>${fundNameCell(row, key)}</td>
         <td>${B.fmt(row.基金类型)}</td>
+        <td>${B.esc(fundSecondaryCategory(row))}</td>
         <td>${B.fmt(row.资产暴露)}</td>
-        <td>${B.fmt(row.基金分类置信度)}</td>
         <td>${signedPct(row.区间收益率)}</td>
         <td>${pct(row.权重占比)}</td>
         <td>${pct(row.中位权重)}</td>
@@ -2597,7 +2878,8 @@
       const detail = expanded ? `<tr class="insight-secondary-row"><td colspan="${headers.length}">${fundStrategyDetailTable(row)}</td></tr>` : "";
       return `${main}${detail}`;
     }).join("") : `<tr><td colspan="${headers.length}"><div class="empty">暂无数据</div></td></tr>`;
-    return `<div class="table-wrap insight-table fund-holding-table"><table><thead><tr>${headers.map((h) => `<th>${B.label(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+    const prefix = kind === "gf" ? "gfHoldingFund" : "holdingFund";
+    return `<div class="table-wrap insight-table fund-holding-table"><table><thead><tr>${headers.map((h) => `<th>${B.label(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>${pagerControls(prefix, page, totalPages, pageSize, rows.length)}`;
   }
 
   function holdingConclusionCards(assetRows, companyRows, gfFundRows) {
@@ -2638,12 +2920,18 @@
   }
 
   function gfFundOpportunityTable(rows) {
-    const headers = ["基金名称", "基金类型", "资产暴露", "基金分类置信度", "区间收益率", "外部策略权重占比", "全策略权重占比", "中位权重", "外部持仓策略数", "外部增减策略数", "外部净增配中位数"];
-    const body = rows.length ? rows.slice(0, 10).map((row) => {
+    const pageSize = state.gfOpportunityPageSize;
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    const page = Math.max(1, Math.min(totalPages, state.gfOpportunityPage));
+    state.gfOpportunityPage = page;
+    const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
+    const headers = ["基金名称", "基金类型", "二级分类", "资产暴露", "区间收益率", "外部策略权重占比", "全策略权重占比", "中位权重", "外部持仓策略数", "外部增减策略数", "外部净增配中位数"];
+    const body = pageRows.length ? pageRows.map((row) => {
       const key = holdingKey(row);
       const expanded = state.expandedFundKey === key;
       const main = `<tr class="fund-row ${expanded ? "is-open" : ""}" data-fund-key="${B.esc(key)}">${headers.map((h) => {
         if (h === "基金名称") return `<td>${fundNameCell(row, key)}</td>`;
+        if (h === "二级分类") return `<td>${B.esc(fundSecondaryCategory(row))}</td>`;
         if (h === "区间收益率") return `<td>${signedPct(row[h])}</td>`;
         if (h === "外部策略权重占比") return `<td>${pct(row.非广发策略权重占比)}</td>`;
         if (h === "全策略权重占比") return `<td>${pct(row.权重占比)}</td>`;
@@ -2657,25 +2945,33 @@
       const detail = expanded ? `<tr class="insight-secondary-row"><td colspan="${headers.length}">${fundStrategyDetailTable(row)}</td></tr>` : "";
       return `${main}${detail}`;
     }).join("") : `<tr><td colspan="${headers.length}"><div class="empty">暂无数据</div></td></tr>`;
-    return `<div class="table-wrap insight-table fund-holding-table"><table><thead><tr>${headers.map((h) => `<th>${B.label(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+    return `<div class="table-wrap insight-table fund-holding-table"><table><thead><tr>${headers.map((h) => `<th>${B.label(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>${pagerControls("gfOpportunityFund", page, totalPages, pageSize, rows.length)}`;
   }
 
   function holdingTab() {
     const holdingDetails = filteredHoldingStrategyRows();
+    const hasFundHoldingDetails = holdingDetails.length > 0;
+    const effectiveHoldingDetails = holdingDetails.filter((row) => (num(row.期末持仓比例) || 0) > highFrequencyHoldingThreshold);
     const detailRows = filteredHoldingRows();
-    const assetRows = addShare(holdingDetails.length ? rollupHoldingDetails(holdingDetails, ["基金类型"]) : rollupHolding(detailRows, ["基金类型"]));
-    const fundRows = addShare(holdingDetails.length ? rollupHoldingDetails(holdingDetails, ["基金代码", "基金名称"]) : rollupHolding(detailRows, ["基金代码", "基金名称"]));
-    const companyRows = addShare(holdingDetails.length ? rollupHoldingDetails(holdingDetails, ["基金公司"]) : rollupHolding(filteredCompanyRows(), ["基金公司"]));
-    const assetCompanyRows = assetCompanyBreakdown(holdingDetails);
+    const assetRows = addShare(hasFundHoldingDetails ? rollupHoldingDetails(holdingDetails, ["基金类型"]) : rollupHolding(detailRows, ["基金类型"]));
+    const fundRows = hasFundHoldingDetails ? addShare(rollupHoldingDetails(effectiveHoldingDetails, ["基金代码", "基金名称"])) : [];
+    const companyRows = hasFundHoldingDetails ? addShare(rollupHoldingDetails(holdingDetails, ["基金公司"])) : addShare(rollupHolding(filteredCompanyRows(), ["基金公司"]));
+    const assetCompanyRows = hasFundHoldingDetails ? assetCompanyBreakdown(holdingDetails) : [];
     const gfFundRows = fundRows.filter((row) => row.广发基金产品 === "是");
     const gfOpportunityRows = gfFundHoldingOpportunityRows(gfFundRows);
+    state.holdingFundType = normalizeFundTypeFilter(state.holdingFundType, fundRows);
+    state.gfHoldingFundType = normalizeFundTypeFilter(state.gfHoldingFundType, gfFundRows);
+    state.gfOpportunityFundType = normalizeFundTypeFilter(state.gfOpportunityFundType, gfOpportunityRows);
+    const filteredFundRows = filterByFundType(fundRows, state.holdingFundType);
+    const filteredGfFundRows = filterByFundType(gfFundRows, state.gfHoldingFundType);
+    const filteredGfOpportunityRows = filterByFundType(gfOpportunityRows, state.gfOpportunityFundType);
     const externalGfShare = sum(gfFundRows, "非广发策略权重占比");
     const internalGfShare = sum(gfFundRows, "广发策略权重占比");
     const topAsset = assetRows[0]?.基金类型 || "未识别";
     return `
       <section class="insight-hero">
-        ${kpi("持仓基金样本", countText(fundRows.length), "当前仓位聚合")}
-        ${kpi("基金公司数", countText(companyRows.length), "当前仓位聚合")}
+        ${kpi(hasFundHoldingDetails ? "持仓基金样本" : "持仓快照分类", countText(hasFundHoldingDetails ? fundRows.length : detailRows.length), hasFundHoldingDetails ? "当前仓位聚合" : "来自holding_snapshot_pack")}
+        ${kpi("基金公司数", hasFundHoldingDetails ? countText(companyRows.length) : "未生成", hasFundHoldingDetails ? "当前仓位聚合" : "当前生成物无基金公司明细")}
         ${kpi("主持仓类型", B.esc(topAsset), "按权重占比排序")}
         ${kpi("广发基金产品数", countText(gfFundRows.length), "被全市场策略持有")}
         ${kpi("外部持有广发基金", pct(externalGfShare), "非广发策略仓位口径")}
@@ -2701,9 +2997,12 @@
         </div>
       </section>
       <section class="panel" id="gf-fund-opportunity">
-        <div class="panel-head"><div><h2>广发基金机会</h2><p class="desc">只看底层基金公司为广发基金的产品，优先观察是否被非广发策略持有或在区间内被增配。</p></div></div>
-        <div class="source-method"><strong>读法</strong> 默认按外部策略权重占比排序。外部策略权重占比表示非广发投顾策略仓位中有多少配置到该广发基金；外部净增配中位数只看非广发策略对该基金的单策略权重变化中位数，避免用跨策略合计点位制造夸大结论。</div>
-        ${gfFundOpportunityTable(gfOpportunityRows)}
+        <div class="panel-head">
+          <div><h2>广发基金机会</h2><p class="desc">只看底层基金公司为广发基金的产品，优先观察是否被非广发策略持有或在区间内被增配。</p></div>
+          <div class="chart-actions">${filterField("基金类型筛选", fundTypeFilterSelect("gfOpportunityFundType", state.gfOpportunityFundType, gfOpportunityRows))}</div>
+        </div>
+        <div class="source-method"><strong>读法</strong> 默认按外部策略权重占比排序。外部策略权重占比表示非广发投顾策略仓位中有多少配置到该广发基金；外部净增配中位数只看非广发策略对该基金的单策略权重变化中位数，避免用跨策略合计点位制造夸大结论。${fundTypeFilterNote(state.gfOpportunityFundType, gfOpportunityRows.length, filteredGfOpportunityRows.length)} 此表分页展示全部命中基金。</div>
+        ${gfFundOpportunityTable(filteredGfOpportunityRows)}
       </section>
       <details class="fold-block">
         <summary>验证区：类型下基金公司、全市场高频基金和广发基金持有策略</summary>
@@ -2712,12 +3011,20 @@
           ${assetCompanyMatrixBlock(assetCompanyRows)}
         </section>
         <section class="panel">
-          <div class="panel-head"><div><h2>全市场高频持仓基金</h2><p class="desc">按当前筛选范围内的持仓权重占比排序；点击基金行查看持有该基金的策略明细。</p></div></div>
-          ${fundHoldingTable(fundRows)}
+          <div class="panel-head">
+            <div><h2>全市场高频持仓基金</h2><p class="desc">只统计单策略期末持仓比例大于${highFrequencyHoldingThreshold}%的基金，再按当前筛选范围内的持仓权重占比排序；点击基金行查看持有该基金的策略明细。</p></div>
+            <div class="chart-actions">${filterField("基金类型筛选", fundTypeFilterSelect("holdingFundType", state.holdingFundType, fundRows))}</div>
+          </div>
+          <div class="source-method"><strong>${B.label("高频持仓基金门槛")}</strong> ${fundTypeFilterNote(state.holdingFundType, fundRows.length, filteredFundRows.length)}</div>
+          ${fundHoldingTable(filteredFundRows, { kind: "market" })}
         </section>
         <section class="panel">
-          <div class="panel-head"><div><h2>广发基金高频持仓基金</h2><p class="desc">只看基金公司为广发基金的底层产品，便于识别已被全市场策略高频配置的广发基金。</p></div></div>
-          ${fundHoldingTable(gfFundRows)}
+          <div class="panel-head">
+            <div><h2>广发基金高频持仓基金</h2><p class="desc">只看基金公司为广发基金、且单策略期末持仓比例大于${highFrequencyHoldingThreshold}%的底层产品，便于识别已被全市场策略高频配置的广发基金。</p></div>
+            <div class="chart-actions">${filterField("基金类型筛选", fundTypeFilterSelect("gfHoldingFundType", state.gfHoldingFundType, gfFundRows))}</div>
+          </div>
+          <div class="source-method"><strong>${B.label("高频持仓基金门槛")}</strong> ${fundTypeFilterNote(state.gfHoldingFundType, gfFundRows.length, filteredGfFundRows.length)}</div>
+          ${fundHoldingTable(filteredGfFundRows, { kind: "gf" })}
         </section>
       </details>`;
   }
@@ -3172,11 +3479,14 @@
       const events = rebalanceEvents(true);
       const evaluated = events.map(winValue).filter((value) => value !== null);
       const monthlyFunds = filteredRebalanceMonthlyFundRows(true);
-      const fundRows = rollupMonthlyFunds(monthlyFunds);
+      state.rebalanceFundSecondaryCategory = normalizeFacetFilter(state.rebalanceFundSecondaryCategory, monthlyFunds, rebalanceFundSecondaryCategoryValue);
+      state.rebalanceFundCompany = normalizeFacetFilter(state.rebalanceFundCompany, monthlyFunds, rebalanceFundCompanyValue);
+      const filteredMonthlyFunds = filterRebalanceFundFacetRows(monthlyFunds);
+      const fundRows = rollupMonthlyFunds(filteredMonthlyFunds);
       const addRows = [...fundRows].filter((row) => row.净增配 > 0).sort((a, b) => b.净增配 - a.净增配);
       const reduceRows = [...fundRows].filter((row) => row.净增配 < 0).sort((a, b) => a.净增配 - b.净增配);
-      const gfOpportunityRows = gfRebalanceOpportunityRows(monthlyFunds);
-      const companyAssetRows = rollupCompanyAssetDirection(monthlyFunds);
+      const gfOpportunityRows = gfRebalanceOpportunityRows(filteredMonthlyFunds);
+      const companyAssetRows = rollupCompanyAssetDirection(filteredMonthlyFunds);
       const companySummaryRows = companyDirectionSummary(companyAssetRows);
       const strategyAssetChangeRows = filteredStrategyAssetChangeRows(true);
       const assetSignalRows = strategyAssetSignalRows(strategyAssetChangeRows, "研报大类资产");
@@ -3224,16 +3534,7 @@
           ${assetSignalTable(themeSignalRows, "权益行业主题", themeSignalRows.length)}
           <div class="source-method"><strong>${B.label("权益行业主题")}</strong> 该表仍按策略级净变化统计，不做底层股票穿透；宽基指数和主动权益基金归入宽基/主动权益。</div>
         </section>
-        <section class="insight-grid">
-          <div class="panel">
-            <div class="panel-head"><div><h2>基金调入摘要</h2><p class="desc">只展示净增配靠前的少量基金，用于定位需要追踪的底层产品。</p></div></div>
-            ${rankList(addRows, { limit: 5, title: (row) => row.基金名称, href: fundDetailUrl, sub: (row) => `${row.基金公司 || ""}｜${row.研报大类资产 || row.基金类型 || ""}`, value: (row) => weightPoint(row.净增配), meta: (row) => `中位${weightPoint(row.中位净增配)}｜${countText(row.调仓策略数)}策` })}
-          </div>
-          <div class="panel">
-            <div class="panel-head"><div><h2>基金调出摘要</h2><p class="desc">只展示净减配靠前的少量基金，先看是否为同类策略共同行为。</p></div></div>
-            ${rankList(reduceRows, { limit: 5, title: (row) => row.基金名称, href: fundDetailUrl, sub: (row) => `${row.基金公司 || ""}｜${row.研报大类资产 || row.基金类型 || ""}`, value: (row) => weightPoint(row.净增配), meta: (row) => `中位${weightPoint(row.中位净增配)}｜${countText(row.调仓策略数)}策` })}
-          </div>
-        </section>
+        ${rebalanceFundRankPanel(fundRows, monthlyFunds, filteredMonthlyFunds)}
         <section class="panel">
           <div class="panel-head"><div><h2>投顾机构差异</h2><p class="desc">同一研报类型内比较机构调仓频率、可评价效果和主加减仓方向；机构维度用于对标投顾管理人，不等同于底层基金公司。</p></div></div>
           ${tableBlock(["投顾机构", "事件数", "可评价事件数", "调仓胜率", "平均调仓超额", "平均单次换手率", "业务读法"], institutionRows.slice(0, 10), (row, h) => {
@@ -3246,14 +3547,17 @@
           })}
         </section>
         <section class="panel" id="fund-company-opportunity">
-          <div class="panel-head"><div><h2>基金公司机会</h2><p class="desc">这里看的是底层基金所属公司被投顾组合增配或减配的方向，用于产品流向和营销机会判断；广发基金单独高亮。</p></div></div>
+          <div class="panel-head">
+            <div><h2>基金公司机会</h2><p class="desc">这里看的是底层基金所属公司被投顾组合增配或减配的方向，用于产品流向和营销机会判断；广发基金单独高亮。</p></div>
+            <div class="chart-actions">${rebalanceFundFacetControls(monthlyFunds, "Company")}</div>
+          </div>
           ${tableBlock(["基金公司", "净方向", "主加仓资产", "主减仓资产", "净增配", "加仓权重", "减仓权重", "调仓强度", "调仓策略数"], companySummaryRows.slice(0, 12), (row, h) => {
             if (h === "基金公司") return /广发/.test(raw(row[h])) ? `<span class="insight-chip action-attack">${B.esc(row[h])}</span>` : B.fmt(row[h]);
             if (h.includes("权重") || h.includes("净增配") || h === "调仓强度") return weightPoint(row[h]);
             if (h.includes("策略数")) return countText(row[h]);
             return B.fmt(row[h]);
           })}
-          <div class="source-method"><strong>广发基金机会</strong> ${gfOpportunityRows.slice(0, 5).map((row) => `${fundLink(row)}（${B.esc(row.机会类型)}，非广发净增配${weightPoint(row.非广发策略净增配)}）`).join("；") || "当前筛选下暂无广发基金调仓机会样本。"}</div>
+          <div class="source-method"><strong>广发基金机会</strong> ${rebalanceFundFacetNote(monthlyFunds.length, filteredMonthlyFunds.length)} ${gfOpportunityRows.slice(0, 5).map((row) => `${fundLink(row)}（${B.esc(row.机会类型)}，非广发净增配${weightPoint(row.非广发策略净增配)}）`).join("；") || "当前筛选下暂无广发基金调仓机会样本。"}</div>
         </section>
         <details class="fold-block">
           <summary>验证区：调仓逻辑、热力图和基金级大表</summary>
@@ -3281,32 +3585,8 @@
             ${activeAssetBeforeAfterHeatmap(strategyAssetChangeRows)}
           </section>
           <section class="panel">
-            <div class="panel-head"><div><h2>期初期末研报大类资产变化</h2><p class="desc">按策略匹配区间起止附近最近可用快照，并按基金资产暴露拆分，不把缺失月份当作0仓位。</p></div></div>
-            ${industryPeriodHeatmap(holdingSnapshotRows, "研报大类资产", "研报大类资产")}
-          </section>
-          <section class="panel">
             <div class="panel-head"><div><h2>期初期末A股行业变化</h2><p class="desc">仅统计明确行业主题基金，按全市场期末占比排序。</p></div></div>
             ${industryPeriodHeatmap(holdingSnapshotRows, "研报A股行业", "研报A股行业")}
-          </section>
-          <section class="insight-grid">
-            <div class="panel">
-              <div class="panel-head"><div><h2>基金调入榜</h2><p class="desc">基金级明细用于核验，不直接生成市场方向结论。</p></div></div>
-              ${tableBlock(["基金名称", "基金公司", "研报大类资产", "净增配", "中位净增配", "调仓策略数"], addRows.slice(0, 10), (row, h) => {
-                if (h === "基金名称") return fundLink(row);
-                if (h.includes("策略数")) return countText(row[h]);
-                if (h.includes("净增配")) return weightPoint(row[h]);
-                return B.fmt(row[h]);
-              })}
-            </div>
-            <div class="panel">
-              <div class="panel-head"><div><h2>基金调出榜</h2><p class="desc">基金级明细用于核验，不直接生成市场方向结论。</p></div></div>
-              ${tableBlock(["基金名称", "基金公司", "研报大类资产", "净增配", "中位净增配", "调仓策略数"], reduceRows.slice(0, 10), (row, h) => {
-                if (h === "基金名称") return fundLink(row);
-                if (h.includes("策略数")) return countText(row[h]);
-                if (h.includes("净增配")) return weightPoint(row[h]);
-                return B.fmt(row[h]);
-              })}
-            </div>
           </section>
         </details>
         <details class="fold-block">
@@ -3328,11 +3608,14 @@
     const winRate = evaluated.length ? evaluated.filter(Boolean).length / evaluated.length * 100 : null;
     const avgExtra = avg(events.map((row) => row.调仓超额 ?? row.方向性超额));
     const monthlyFunds = filteredMonthlyFundRows();
-    const fundRows = rollupMonthlyFunds(monthlyFunds);
+    state.rebalanceFundSecondaryCategory = normalizeFacetFilter(state.rebalanceFundSecondaryCategory, monthlyFunds, rebalanceFundSecondaryCategoryValue);
+    state.rebalanceFundCompany = normalizeFacetFilter(state.rebalanceFundCompany, monthlyFunds, rebalanceFundCompanyValue);
+    const filteredMonthlyFunds = filterRebalanceFundFacetRows(monthlyFunds);
+    const fundRows = rollupMonthlyFunds(filteredMonthlyFunds);
     const addRows = [...fundRows].filter((row) => row.净增配 > 0).sort((a, b) => b.净增配 - a.净增配);
     const reduceRows = [...fundRows].filter((row) => row.净增配 < 0).sort((a, b) => a.净增配 - b.净增配);
-    const gfOpportunityRows = gfRebalanceOpportunityRows(monthlyFunds);
-    const companyAssetRows = rollupCompanyAssetDirection(monthlyFunds);
+    const gfOpportunityRows = gfRebalanceOpportunityRows(filteredMonthlyFunds);
+    const companyAssetRows = rollupCompanyAssetDirection(filteredMonthlyFunds);
     const companySummaryRows = companyDirectionSummary(companyAssetRows);
     const strategyAssetChangeRows = filteredStrategyAssetChangeRows();
     const assetSignalRows = strategyAssetSignalRows(strategyAssetChangeRows);
@@ -3414,8 +3697,9 @@
       </details>
       <section class="panel">
         <div class="panel-head"><div><h2>广发产品机会</h2><p class="desc">优先看非广发策略是否主动增配广发基金；净增配为跨策略累计仓位变化百分点，若只由广发策略贡献，则标记为内部配置为主。</p></div></div>
-        ${tableBlock(["基金名称", "基金类型", "机会类型", "非广发净增配", "广发净增配", "调仓策略", "业务读法"], gfOpportunityRows.slice(0, 8), (row, h) => {
+        ${tableBlock(["基金名称", "二级分类", "基金类型", "机会类型", "非广发净增配", "广发净增配", "调仓策略", "业务读法"], gfOpportunityRows.slice(0, 8), (row, h) => {
           if (h === "基金名称") return fundLink(row);
+          if (h === "二级分类") return B.esc(fundSecondaryCategory(row));
           if (h === "非广发净增配") return weightPoint(row.非广发策略净增配);
           if (h === "广发净增配") return weightPoint(row.广发策略净增配);
           if (h === "调仓策略") return countText(row.调仓策略数);
@@ -3425,34 +3709,19 @@
         })}
       </section>
       <details class="fold-block">
-        <summary>基金级交易验证：调入、调出和底层基金公司产品流向</summary>
-        <section class="insight-grid">
-          <div class="panel">
-            <div class="panel-head"><div><h2>基金调入榜</h2><p class="desc">按区间净增配排序，显示全市场投顾明显增配的基金。</p></div></div>
-            ${tableBlock(["基金名称", "基金公司", "基金类型", "净增配", "中位净增配", "调仓策略数"], addRows.slice(0, 10), (row, h) => {
-              if (h === "基金名称") return fundLink(row);
-              if (h.includes("策略数")) return countText(row[h]);
-              if (h.includes("净增配")) return weightPoint(row[h]);
-              return B.fmt(row[h]);
-            })}
-          </div>
-          <div class="panel">
-            <div class="panel-head"><div><h2>基金调出榜</h2><p class="desc">按区间净减配排序，识别被明显降低配置的基金。</p></div></div>
-            ${tableBlock(["基金名称", "基金公司", "基金类型", "净增配", "中位净增配", "调仓策略数"], reduceRows.slice(0, 10), (row, h) => {
-              if (h === "基金名称") return fundLink(row);
-              if (h.includes("策略数")) return countText(row[h]);
-              if (h.includes("净增配")) return weightPoint(row[h]);
-              return B.fmt(row[h]);
-            })}
-          </div>
-        </section>
+        <summary>基金级交易验证：统一榜单和底层基金公司产品流向</summary>
+        ${rebalanceFundRankPanel(fundRows, monthlyFunds, filteredMonthlyFunds)}
         <section class="panel">
-          <div class="panel-head"><div><h2>底层基金公司产品流向</h2><p class="desc">这里统计的是被投顾组合买卖的底层基金所属公司，不是投顾机构；用于看哪些基金公司的产品被系统性增配或减配。</p></div></div>
+          <div class="panel-head">
+            <div><h2>底层基金公司产品流向</h2><p class="desc">这里统计的是被投顾组合买卖的底层基金所属公司，不是投顾机构；用于看哪些基金公司的产品被系统性增配或减配。</p></div>
+            <div class="chart-actions">${rebalanceFundFacetControls(monthlyFunds, "CompanyLegacy")}</div>
+          </div>
           ${tableBlock(["基金公司", "净方向", "主加仓资产", "主减仓资产", "净增配", "中位净增配", "加仓权重", "减仓权重", "调仓强度", "调仓策略数"], companySummaryRows.slice(0, 12), (row, h) => {
             if (h.includes("权重") || h.includes("净增配") || h === "调仓强度") return weightPoint(row[h]);
             if (h.includes("策略数")) return countText(row[h]);
             return B.fmt(row[h]);
           })}
+          <div class="source-method"><strong>${B.label("基金公司筛选")}</strong> ${rebalanceFundFacetNote(monthlyFunds.length, filteredMonthlyFunds.length)}</div>
         </section>
       </details>
       <details class="fold-block">
@@ -3485,7 +3754,1414 @@
       </details>`;
   }
 
+  function compareSelectedRows() {
+    return state.compareSelectedIds
+      .map((id) => masterStrategyById.get(id) || allStrategyById.get(id))
+      .filter(Boolean);
+  }
+
+  function compareColorFor(value) {
+    const text = raw(value) || "未分类";
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+    return comparePalette[hash % comparePalette.length];
+  }
+
+  function compareRowColor(row) {
+    return compareColorFor(row?.研报产品类型 || row?.业务分类 || row?.投顾机构 || row?.策略名称);
+  }
+
+  function compareSelectedColor(id) {
+    const index = state.compareSelectedIds.indexOf(id);
+    return index >= 0 ? comparePalette[index % comparePalette.length] : compareColorFor(id);
+  }
+
+  function comparePeerScatterColor(row) {
+    const base = compareRowColor(row).replace("#", "");
+    if (base.length !== 6) return "#cbd5e1";
+    const r = parseInt(base.slice(0, 2), 16);
+    const g = parseInt(base.slice(2, 4), 16);
+    const b = parseInt(base.slice(4, 6), 16);
+    const mix = (value) => Math.round(value * 0.08 + 226 * 0.92).toString(16).padStart(2, "0");
+    return `#${mix(r)}${mix(g)}${mix(b)}`;
+  }
+
+  function scheduleCompareSearchCommit(delay = 650) {
+    if (compareSearchTimer) clearTimeout(compareSearchTimer);
+    compareSearchTimer = setTimeout(() => {
+      compareSearchTimer = null;
+      state.compareQuery = state.compareQueryInput || "";
+      render();
+      requestAnimationFrame(() => {
+        const input = B.byId("compareSearch");
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+    }, delay);
+  }
+
+  function compareDetail(id) {
+    return compareDetailStore.get(id) || B.state.details?.[id] || null;
+  }
+
+  function ensureCompareDetails(ids = state.compareSelectedIds) {
+    ids.forEach((id) => {
+      if (!id || compareDetail(id) || compareLoadTasks.has(id)) return;
+      const row = masterStrategyById.get(id) || allStrategyById.get(id);
+      if (!row?.detailFile) return;
+      const task = B.loadScript(row.detailFile)
+        .then(() => {
+          if (B.state.details?.[id]) compareDetailStore.set(id, B.state.details[id]);
+          compareLoadTasks.delete(id);
+          if (state.tab === "compare") render();
+        })
+        .catch((error) => {
+          compareLoadTasks.set(id, { error: error?.message || String(error) });
+          if (state.tab === "compare") render();
+        });
+      compareLoadTasks.set(id, task);
+    });
+  }
+
+  function compareCandidateRows() {
+    const scoped = strategyRows();
+    return scoped.length ? scoped : masterStrategies;
+  }
+
+  function compareSearchRows() {
+    const selected = new Set(state.compareSelectedIds);
+    const q = raw(state.compareQuery).trim().toLowerCase();
+    const rows = compareCandidateRows().filter((row) => !selected.has(row.统一策略ID));
+    const filtered = q ? rows.filter((row) => {
+      const text = [
+        row.统一策略ID,
+        row.策略代码,
+        row.策略名称,
+        row.投顾机构,
+        row.渠道,
+        row.业务分类,
+        row.研报产品类型,
+        row.风险等级,
+        row.searchText
+      ].map(raw).join(" ").toLowerCase();
+      return text.includes(q);
+    }) : compareRecommendedRows(rows);
+    return filtered
+      .sort((a, b) => (num(b[returnMetric()]) ?? -9999) - (num(a[returnMetric()]) ?? -9999)
+        || (num(a.最大回撤) ?? 9999) - (num(b.最大回撤) ?? 9999)
+        || raw(a.策略名称).localeCompare(raw(b.策略名称), "zh-CN"))
+      .slice(0, 12);
+  }
+
+  function comparePeerRows() {
+    const anchor = compareSelectedRows()[0];
+    const rows = compareCandidateRows();
+    if (!anchor) return rows;
+    const mode = state.comparePeerMode;
+    const field = mode === "business" ? "业务分类"
+      : mode === "risk" ? "风险等级"
+      : mode === "advisor" ? "投顾机构"
+      : mode === "channel" ? "渠道"
+      : "研报产品类型";
+    const value = raw(anchor[field]);
+    if (!value || mode === "all") return rows;
+    const peers = rows.filter((row) => raw(row[field]) === value);
+    return peers.length ? peers : rows;
+  }
+
+  function compareRecommendedRows(baseRows = null) {
+    const selected = new Set(state.compareSelectedIds);
+    const rows = baseRows || comparePeerRows().filter((row) => !selected.has(row.统一策略ID));
+    return rows
+      .filter((row) => row.统一策略ID && !selected.has(row.统一策略ID))
+      .sort((a, b) => {
+        const agf = isGf(a) ? 1 : 0;
+        const bgf = isGf(b) ? 1 : 0;
+        return bgf - agf
+          || (num(b[returnMetric()]) ?? -9999) - (num(a[returnMetric()]) ?? -9999)
+          || (num(a.最大回撤) ?? 9999) - (num(b.最大回撤) ?? 9999)
+          || raw(a.策略名称).localeCompare(raw(b.策略名称), "zh-CN");
+      });
+  }
+
+  function compareSelectorBlock() {
+    const selected = compareSelectedRows();
+    const searchRows = compareSearchRows();
+    const recommended = compareRecommendedRows().slice(0, 8);
+    return `<section class="panel compare-selector-panel">
+      <div class="panel-head">
+        <div><h2>策略对比</h2><p class="desc">搜索或从同类推荐中加入策略，最多同时比较${compareMaxCount}只。</p></div>
+        <div class="chart-actions">
+          <button id="compareClear" class="ghost-button" type="button">清空</button>
+        </div>
+      </div>
+      <div class="compare-search-row">
+        <label class="compare-search-box">
+          <span>${B.label("策略名称")}</span>
+          <input id="compareSearch" class="control" type="search" placeholder="搜索策略名称、代码、投顾机构、业务分类" value="${B.esc(state.compareQueryInput)}">
+        </label>
+        <label class="compare-peer-box">
+          <span>${B.label("同类口径")}</span>
+          <select id="comparePeerMode" class="control">
+            ${[
+              ["reportType", "研报产品类型"],
+              ["business", "业务分类"],
+              ["risk", "风险等级"],
+              ["advisor", "投顾机构"],
+              ["channel", "渠道"],
+              ["all", "当前筛选全部"]
+            ].map(([key, label]) => `<option value="${key}" ${state.comparePeerMode === key ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="compare-basket">
+        <div class="compare-basket-head"><strong>${B.label("对比篮子")}</strong><span>${selected.length}/${compareMaxCount}</span></div>
+        <div class="compare-chip-list">
+          ${selected.length ? selected.map((row) => `<span class="compare-chip">
+            <b>${strategyLink(row)}</b><em>${B.esc(row.投顾机构 || row.渠道 || "未识别")}</em>
+            <button type="button" data-compare-remove="${B.esc(row.统一策略ID)}" aria-label="移除">×</button>
+          </span>`).join("") : '<span class="empty-inline">请先加入策略</span>'}
+        </div>
+      </div>
+      <div class="compare-pick-grid">
+        ${(state.compareQuery ? searchRows : recommended).map((row) => `<article class="compare-pick-card">
+          <div><strong>${strategyLink(row)}</strong><span>${B.esc(row.投顾机构 || row.渠道 || "未识别")}｜${B.esc(row.研报产品类型 || row.业务分类 || "未分类")}</span></div>
+          <div class="compare-pick-metrics">
+            <b>${rangeLabel()} ${signedPct(row[returnMetric()])}</b>
+            <em>回撤 ${pct(row.最大回撤)}</em>
+          </div>
+          <button type="button" data-compare-add="${B.esc(row.统一策略ID)}" ${state.compareSelectedIds.length >= compareMaxCount ? "disabled" : ""}>加入</button>
+        </article>`).join("") || '<div class="empty">当前筛选下没有可加入的候选策略</div>'}
+      </div>
+    </section>`;
+  }
+
+  function compareCoreTable(rows) {
+    const headers = ["策略名称", "投顾机构", "渠道", "研报产品类型", "风险等级", returnMetric(), "近6月", "近1年", "最大回撤", "波动率", "夏普比率", "年化收益", "年化换手率", "最近调仓日", "最新持仓日", "数据完整性"];
+    return tableBlock(headers, rows, (row, h) => {
+      if (h === "策略名称") return strategyLink(row);
+      if (h === "数据完整性") return B.statusBadge(row[h]);
+      if (["最大回撤", "波动率", "年化收益", "年化换手率", "近6月", "近1年", returnMetric()].includes(h)) return B.valueHtml(h, row[h]);
+      return B.fmt(row[h]);
+    });
+  }
+
+  function compareFeeText(row, detail) {
+    const annual = compareProfileValue(row, detail, "年化投顾费率");
+    const rawFee = compareProfileValue(row, detail, "投顾费率");
+    if (num(annual) !== null) return pct(annual);
+    return raw(rawFee) || "未披露";
+  }
+
+  function compareAdvisorSummaryBlock(rows) {
+    const metric = returnMetric();
+    return `<div class="compare-advisor-grid">${rows.map((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      const snapshot = currentSnapshot(detail);
+      const fee = compareFeeText(row, detail);
+      const minAmount = compareProfileValue(row, detail, "起投金额") || "未披露";
+      const holdingDate = snapshot?.日期 || row.最新持仓日 || "未披露";
+      const holdingSource = snapshot?.说明 || "详情加载中";
+      const tags = [row.风险等级, row.研报产品类型 || row.业务分类, row.市场地域, row.主动被动].filter((item) => raw(item) && raw(item) !== "未披露").slice(0, 4);
+      return `<article class="compare-advisor-card">
+        <div class="compare-advisor-head">
+          <div><strong>${strategyLink(row)}</strong><span>${B.esc(row.投顾机构 || row.渠道 || "未识别机构")}</span></div>
+          <b>${B.esc(row.渠道 || "")}</b>
+        </div>
+        <div class="compare-advisor-tags">${tags.map((tag) => `<span>${B.esc(tag)}</span>`).join("") || "<span>未披露标签</span>"}</div>
+        <div class="compare-advisor-kpis">
+          <span>${B.label(metric)}<b>${signedPct(row[metric])}</b></span>
+          <span>${B.label("最大回撤")}<b>${pct(row.最大回撤)}</b></span>
+          <span>${B.label("夏普比率")}<b>${ratioText(row.夏普比率)}</b></span>
+        </div>
+        <div class="compare-advisor-meta">
+          <span>${B.label("投顾费率")}<b>${B.esc(fee)}</b></span>
+          <span>${B.label("起投金额")}<b>${B.esc(minAmount)}</b></span>
+          <span>${B.label("最新持仓日")}<b>${B.esc(holdingDate)}</b></span>
+        </div>
+        <p>${B.esc(holdingSource)}</p>
+      </article>`;
+    }).join("")}</div>`;
+  }
+
+  function currentSnapshot(detail) {
+    const snapshots = detail?.positionSnapshots || [];
+    return snapshots.find((snap) => snap.id === "current" || snap.类型 === "当前持仓" || snap.类型 === "当前仓位")
+      || snapshots.find((snap) => snap.holdings?.length)
+      || null;
+  }
+
+  function currentHoldings(detail) {
+    return (currentSnapshot(detail)?.holdings || [])
+      .filter((row) => (num(row.权重) || 0) > 0)
+      .sort((a, b) => (num(b.权重) || 0) - (num(a.权重) || 0));
+  }
+
+  function isMissingClass(value) {
+    const text = raw(value).trim();
+    return !text || text === "未披露" || text === "未分类" || text === "其他" || text === "空";
+  }
+
+  function classifyFundByName(row) {
+    const text = `${row?.基金名称 || ""} ${row?.基金类型 || ""} ${row?.分组 || ""} ${row?.资产类型 || ""}`;
+    if (/货币|现金|天天红|现金增利|理财/.test(text)) return "货币及现金";
+    if (/短债|中短债|纯债|信用债|债券|固收|可转债/.test(text)) return "债券";
+    if (/黄金|贵金属|商品|原油|能源/.test(text)) return "商品/黄金";
+    if (/QDII|美元债|亚太|海外|全球|港股|纳斯达克|标普|印度|越南|REIT/i.test(text)) return "海外/QDII";
+    if (/ETF|指数|联接|沪深|中证|创业板|科创|红利|医药|消费|新能源|半导体|人工智能|科技|军工/.test(text)) return "指数/行业主题";
+    if (/股票|权益|成长|价值|优选|精选|产业|行业/.test(text)) return "权益";
+    if (/混合|灵活配置|均衡|回报|稳健|FOF|养老/.test(text)) return "混合";
+    return "分类待补";
+  }
+
+  function rebalanceFundTypeLookup(row) {
+    const code = raw(row?.基金代码);
+    const name = raw(row?.基金名称);
+    const rows = rebalanceFundCategoryRows().filter((item) => (code && item.基金代码 === code) || (!code && name && item.基金名称 === name));
+    const typed = rows.find((item) => !isMissingClass(item.基金类型));
+    if (typed) return typed.基金类型;
+    const asset = rows.find((item) => item.分类字段 === "研报大类资产" && !isMissingClass(item.分类));
+    if (asset) return asset.分类;
+    return "";
+  }
+
+  function currentFundTypeLookup(strategyId, row) {
+    const detail = compareDetail(strategyId);
+    if (!detail) return "";
+    const code = raw(row?.基金代码);
+    const name = raw(row?.基金名称);
+    const hit = currentHoldings(detail).find((item) => (code && item.基金代码 === code) || (!code && name && item.基金名称 === name));
+    if (!hit) return "";
+    return !isMissingClass(hit.资产类型) ? hit.资产类型 : (!isMissingClass(hit.分组) ? hit.分组 : "");
+  }
+
+  function displayFundAssetType(row, strategyId = "") {
+    if (!isMissingClass(row?.资产类型)) return row.资产类型;
+    if (!isMissingClass(row?.分组)) return row.分组;
+    if (!isMissingClass(row?.基金类型)) return row.基金类型;
+    const currentType = currentFundTypeLookup(strategyId, row);
+    if (currentType) return currentType;
+    const rebalanceType = rebalanceFundTypeLookup(row);
+    if (rebalanceType) return rebalanceType;
+    return classifyFundByName(row);
+  }
+
+  function fundSecondaryCategory(row, strategyId = "") {
+    return raw(
+      row?.二级分类
+      || row?.基金同类分组
+      || row?.分组
+      || row?.权益行业主题
+      || row?.行业主题
+      || row?.基金类型
+      || row?.研报大类资产
+      || displayFundAssetType(row, strategyId)
+      || "未披露"
+    ).trim() || "未披露";
+  }
+
+  function compareProfileMap(detail) {
+    return new Map((detail?.profileFields || []).map((item) => [item.字段, item.值]));
+  }
+
+  function compareProfileValue(row, detail, field) {
+    const profile = compareProfileMap(detail);
+    return row?.[field] ?? detail?.summary?.[field] ?? profile.get(field) ?? null;
+  }
+
+  function displayFundCompany(row) {
+    if (!isMissingClass(row?.基金公司)) return row.基金公司;
+    const name = raw(row?.基金名称);
+    const hit = name.match(/^(广发|易方达|华夏|南方|嘉实|博时|富国|招商|汇添富|中欧|工银瑞信|华安|鹏华|景顺长城|兴证全球|兴全|银华|交银施罗德|国泰|建信|农银汇理|华泰柏瑞|民生加银|万家|泰康|诺安|长盛|摩根)/);
+    return hit ? `${hit[1]}基金` : "基金公司待补";
+  }
+
+  function currentHoldingsWithStrategy(rows) {
+    return rows.flatMap((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      return currentHoldings(detail).map((fund) => ({ ...fund, _strategy: row, _strategyId: row.统一策略ID }));
+    });
+  }
+
+  function compareContributionValue(fund) {
+    const direct = num(fund.调仓后收益贡献);
+    if (direct !== null) return direct;
+    const daily = num(fund.日涨幅);
+    const weight = num(fund.权重);
+    return daily !== null && weight !== null ? daily * weight / 100 : null;
+  }
+
+  function compareShareBars(items, labelField, valueField, options = {}) {
+    const total = Math.max(1, sum(items, valueField));
+    const rows = items
+      .filter((item) => (num(item[valueField]) || 0) > 0)
+      .sort((a, b) => (num(b[valueField]) || 0) - (num(a[valueField]) || 0))
+      .slice(0, options.limit || 8);
+    return `<div class="compare-share-list">${rows.map((item) => {
+      const value = num(item[valueField]) || 0;
+      const pctValue = value / total * 100;
+      return `<div class="compare-share-row">
+        <div><strong>${B.esc(item[labelField] || "未分类")}</strong><span>${options.meta ? options.meta(item) : ""}</span></div>
+        <div class="compare-share-bar"><i style="width:${Math.min(100, Math.max(0, pctValue)).toFixed(2)}%"></i></div>
+        <b>${pct(pctValue)}</b>
+      </div>`;
+    }).join("") || '<div class="empty">暂无可汇总持仓</div>'}</div>`;
+  }
+
+  const fundRankPeriods = [
+    { label: "近1月", prefix: "近一月" },
+    { label: "近3月", prefix: "近三月" },
+    { label: "近6月", prefix: "近6月" },
+    { label: "近1年", prefix: "近1年" }
+  ];
+
+  function fundRankText(fund, prefix) {
+    const rank = num(fund[`${prefix}同类排名`]);
+    const sample = num(fund[`${prefix}同类样本数`]);
+    return rank ? `${rank}/${sample || "-"}` : "未排名";
+  }
+
+  function isFundTop50(fund, prefix) {
+    const flag = fund[`${prefix}同类前50%`];
+    if (flag === true || flag === 1 || raw(flag) === "true" || raw(flag) === "是") return true;
+    const rank = num(fund[`${prefix}同类排名`]);
+    const sample = num(fund[`${prefix}同类样本数`]);
+    return rank !== null && sample !== null && sample > 0 && rank <= Math.ceil(sample * 0.5);
+  }
+
+  function top50ShareStats(holdings, prefix) {
+    const valid = holdings.filter((fund) => (num(fund.权重) || 0) > 0);
+    const totalWeight = sum(valid, "权重");
+    const ranked = valid.filter((fund) => num(fund[`${prefix}同类排名`]) !== null && num(fund[`${prefix}同类样本数`]) !== null);
+    const topWeight = sum(ranked.filter((fund) => isFundTop50(fund, prefix)), "权重");
+    return {
+      share: totalWeight > 0 ? topWeight / totalWeight * 100 : null,
+      topWeight,
+      totalWeight,
+      rankedCount: ranked.length,
+      fundCount: valid.length
+    };
+  }
+
+  function rebalanceOutcomeScore(snap, curve) {
+    const label = raw(curve?.调仓评价 || snap?.调仓评价 || snap?.胜负 || snap?.结果评价);
+    if (/不可|待|无|不足|缺/.test(label)) return null;
+    if (/胜|跑赢|正|领先|优秀|有效/.test(label)) return 1;
+    if (/负|跑输|落后|偏弱|无效/.test(label)) return 0;
+    if (/平|持平|中性/.test(label)) return 0.5;
+    const excess = num(curve?.调仓超额 ?? snap?.调仓超额 ?? snap?.方向性超额);
+    if (excess !== null) return excess > 0 ? 1 : excess < 0 ? 0 : 0.5;
+    return null;
+  }
+
+  function rebalanceWinStats(row) {
+    const detail = compareDetail(row.统一策略ID);
+    const snaps = historySnapshots(detail);
+    let wins = 0;
+    let losses = 0;
+    let draws = 0;
+    snaps.forEach((snap) => {
+      const score = rebalanceOutcomeScore(snap, latestContributionCurve(detail, snap));
+      if (score === null) return;
+      if (score === 1) wins += 1;
+      else if (score === 0) losses += 1;
+      else draws += 1;
+    });
+    const total = wins + losses + draws;
+    return {
+      wins,
+      losses,
+      draws,
+      total,
+      rate: total ? (wins + draws * 0.5) / total * 100 : null
+    };
+  }
+
+  function compareFundSelectionBlock(rows) {
+    const selectionRows = rows.map((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      const holdings = currentHoldings(detail);
+      const stats = Object.fromEntries(fundRankPeriods.map((period) => [period.prefix, top50ShareStats(holdings, period.prefix)]));
+      return { row, detail, holdings, win: rebalanceWinStats(row), stats };
+    });
+    const headers = ["策略名称", "历史调仓胜率", "可评价调仓", "近1月前50%仓位", "近3月前50%仓位", "近6月前50%仓位", "近1年前50%仓位", "排名覆盖"];
+    const summaryTable = tableBlock(headers, selectionRows, (item, h) => {
+      if (h === "策略名称") return strategyLink(item.row);
+      if (h === "历史调仓胜率") return item.win.rate === null ? "未评价" : pct(item.win.rate);
+      if (h === "可评价调仓") return item.win.total ? `${item.win.wins}胜/${item.win.losses}负/${item.win.draws}平` : "无可评价事件";
+      const period = fundRankPeriods.find((entry) => h.startsWith(entry.label));
+      if (period) return pct(item.stats[period.prefix]?.share);
+      if (h === "排名覆盖") {
+        const first = item.stats[fundRankPeriods[0].prefix];
+        return first ? `${countText(first.rankedCount)}/${countText(first.fundCount)}只基金` : "未覆盖";
+      }
+      return "";
+    });
+    const cards = selectionRows.map((item) => {
+      const topFunds = item.holdings
+        .filter((fund) => (num(fund.权重) || 0) > 0)
+        .sort((a, b) => (num(b.权重) || 0) - (num(a.权重) || 0))
+        .slice(0, 6);
+      return `<article class="compare-fund-card compare-selection-card">
+        <h3>${strategyLink(item.row)}</h3>
+        <div class="compare-rebalance-kpis">
+          <span>${B.label("历史调仓胜率")}<b>${item.win.rate === null ? "未评价" : pct(item.win.rate)}</b></span>
+          <span>可评价调仓<b>${countText(item.win.total)}</b></span>
+          <span>持仓基金<b>${countText(item.holdings.length)}</b></span>
+        </div>
+        <div class="compare-selection-bars">
+          ${fundRankPeriods.map((period) => {
+            const stat = item.stats[period.prefix];
+            const share = stat?.share;
+            return `<div><span>${period.label}</span><i style="width:${Math.max(2, Math.min(100, share || 0)).toFixed(2)}%;background:${compareColorFor(period.label)}"></i><b>${pct(share)}</b></div>`;
+          }).join("")}
+        </div>
+        ${tableBlock(["基金名称", "二级分类", "基金同类分组", "权重", "近1月", "近3月", "近6月", "近1年"], topFunds, (fund, h) => {
+          if (h === "基金名称") return fundLink(fund);
+          if (h === "二级分类") return B.esc(fundSecondaryCategory(fund, item.row.统一策略ID));
+          if (h === "基金同类分组") return B.esc(fund.基金同类分组 || displayFundAssetType(fund, item.row.统一策略ID));
+          if (h === "权重") return weightPct(fund.权重);
+          const period = fundRankPeriods.find((entry) => h === entry.label);
+          if (period) return `${fundRankText(fund, period.prefix)}${isFundTop50(fund, period.prefix) ? "｜前50%" : ""}`;
+          return B.fmt(fund[h]);
+        })}
+      </article>`;
+    }).join("");
+    return `${summaryTable}<div class="compare-fund-grid">${cards}</div>`;
+  }
+
+  function compareHoldingDistributionBlock(rows) {
+    const holdings = currentHoldingsWithStrategy(rows);
+    const assetColor = (name) => ({
+      权益类: "#d92d20",
+      权益: "#d92d20",
+      债券类: "#1570ef",
+      债券: "#1570ef",
+      货币现金: "#039855",
+      "货币及现金": "#039855",
+      混合类: "#7a5af8",
+      混合: "#7a5af8",
+      "商品/黄金": "#dc6803",
+      "海外/QDII": "#0e9384",
+      "指数/行业主题": "#c11574"
+    }[name] || compareColorFor(name));
+    const strategyCards = rows.map((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      const strategyHoldings = currentHoldings(detail);
+      const grouped = [...groupBy(strategyHoldings, (fund) => displayFundAssetType(fund, row.统一策略ID)).entries()].map(([name, list]) => ({
+        分类: name,
+        权重: sum(list, "权重"),
+        基金数: new Set(list.map((item) => item.基金代码 || item.基金名称)).size
+      })).sort((a, b) => (num(b.权重) || 0) - (num(a.权重) || 0));
+      const total = Math.max(1, sum(grouped, "权重"));
+      const topFunds = strategyHoldings.slice(0, 3).map((fund) => fundLink(fund)).join("、") || "暂无持仓";
+      return `<article class="compare-strategy-dist-card">
+        <div class="compare-row-title"><strong>${strategyLink(row)}</strong><span>${countText(strategyHoldings.length)}只基金</span></div>
+        <div class="compare-stack-bar is-thick">${grouped.map((item) => `<i style="width:${Math.max(0, (num(item.权重) || 0) / total * 100).toFixed(2)}%;background:${assetColor(item.分类)}" title="${B.esc(item.分类)} ${weightPoint(item.权重)}"></i>`).join("")}</div>
+        <div class="compare-asset-legend">${grouped.slice(0, 5).map((item) => `<span><i style="background:${assetColor(item.分类)}"></i>${B.esc(item.分类)} <b>${weightPoint(item.权重)}</b></span>`).join("") || '<span>分类待补</span>'}</div>
+        <div class="compare-dist-funds"><b>${B.label("前重仓")}</b><span>${topFunds}</span></div>
+      </article>`;
+    }).join("");
+    const byAsset = [...groupBy(holdings, (fund) => displayFundAssetType(fund, fund._strategyId)).entries()].map(([name, list]) => ({
+      分类: name,
+      权重: sum(list, "权重"),
+      策略数: new Set(list.map((item) => item._strategyId)).size
+    }));
+    const byCompany = [...groupBy(holdings, displayFundCompany).entries()].map(([name, list]) => ({
+      基金公司: name,
+      权重: sum(list, "权重"),
+      基金数: new Set(list.map((item) => item.基金代码 || item.基金名称)).size
+    }));
+    const gfWeight = sum(holdings.filter((fund) => /广发/.test(displayFundCompany(fund)) || /广发/.test(raw(fund.基金名称))), "权重");
+    return `<div class="compare-strategy-distribution">${strategyCards}</div>
+    <div class="compare-distribution-grid">
+      <article class="compare-distribution-card">
+        <h3>${B.label("持仓分布")}｜资产类型</h3>
+        ${compareShareBars(byAsset, "分类", "权重", { meta: (item) => `覆盖${countText(item.策略数)}策` })}
+      </article>
+      <article class="compare-distribution-card">
+        <h3>${B.label("持仓分布")}｜基金公司</h3>
+        ${compareShareBars(byCompany, "基金公司", "权重", { meta: (item) => `${countText(item.基金数)}只基金` })}
+      </article>
+      <article class="compare-distribution-card compare-distribution-note">
+        <h3>选基口径</h3>
+        <p>当前仓位仅展示正权重基金。最新调仓里已经卖出、调后权重为0的基金会保留在调仓明细中，但不会进入当前持仓分布。</p>
+        <div class="compare-point-kpis">
+          <span>已选策略<b>${countText(rows.length)}</b></span>
+          <span>持仓基金记录<b>${countText(holdings.length)}</b></span>
+          <span>广发基金权重<b>${weightPoint(gfWeight)}</b></span>
+        </div>
+      </article>
+    </div>`;
+  }
+
+  function compareFeeBlock(rows) {
+    const headers = ["策略名称", "投顾机构", "年化投顾费率", "费率状态", "起投金额", "建议持有时长", "基础数据等级", "费率读法"];
+    return tableBlock(headers, rows, (row, h) => {
+      const detail = compareDetail(row.统一策略ID);
+      if (h === "策略名称") return strategyLink(row);
+      if (h === "年化投顾费率") {
+        const structured = compareProfileValue(row, detail, "年化投顾费率");
+        const rawFee = compareProfileValue(row, detail, "投顾费率");
+        return num(structured) !== null ? pct(structured) : B.esc(rawFee || "未披露");
+      }
+      if (h === "起投金额" || h === "建议持有时长") return B.fmt(compareProfileValue(row, detail, h));
+      if (h === "费率读法") {
+        const status = raw(compareProfileValue(row, detail, "费率状态") || row.费率状态);
+        return status.includes("缺失") ? "未披露费率，不参与定价优劣判断" : "可进入同类费率和让利空间比较";
+      }
+      return B.fmt(compareProfileValue(row, detail, h));
+    });
+  }
+
+  function compareAssetBars(rows) {
+    const primary = ["权益基金权重", "债券基金权重", "货币基金权重", "混合基金权重"];
+    const tools = ["QDII权重", "指数基金权重", "主动基金权重"];
+    const colors = {
+      权益基金权重: "#d92d20",
+      债券基金权重: "#1570ef",
+      货币基金权重: "#039855",
+      混合基金权重: "#7a5af8"
+    };
+    return `<div class="compare-asset-list">${rows.map((row) => {
+      const vals = primary.map((field) => ({ field, value: Math.max(0, num(row[field]) || 0) }));
+      const total = Math.max(1, sum(vals, "value"));
+      return `<article class="compare-asset-row">
+        <div class="compare-row-title"><strong>${strategyLink(row)}</strong><span>${B.esc(row.研报产品类型 || row.业务分类 || "")}</span></div>
+        <div class="compare-stack-bar">${vals.map((item) => `<i style="width:${Math.max(0, item.value / total * 100).toFixed(2)}%;background:${colors[item.field]}" title="${B.esc(item.field)} ${pct(item.value)}"></i>`).join("")}</div>
+        <div class="compare-asset-legend">${primary.map((field) => `<span><i style="background:${colors[field]}"></i>${B.label(field)} <b>${pct(row[field])}</b></span>`).join("")}</div>
+        <div class="compare-tool-metrics">${tools.map((field) => `<span>${B.label(field)} <b>${pct(row[field])}</b></span>`).join("")}</div>
+      </article>`;
+    }).join("")}</div>`;
+  }
+
+  function holdingWeightMap(detail) {
+    const map = new Map();
+    currentHoldings(detail).forEach((row) => {
+      const key = raw(row.基金代码 || row.基金名称);
+      if (!key) return;
+      map.set(key, {
+        code: row.基金代码 || "",
+        name: row.基金名称 || row.基金代码 || "",
+        weight: (map.get(key)?.weight || 0) + (num(row.权重) || 0)
+      });
+    });
+    return map;
+  }
+
+  function latestExposureMap(strategyId, field) {
+    const rows = holdingSnapshotRows().filter((row) => row.统一策略ID === strategyId && row.分类字段 === field);
+    const latestDate = rows.map((row) => row.快照日期).filter(Boolean).sort().at(-1);
+    const map = new Map();
+    rows.filter((row) => row.快照日期 === latestDate).forEach((row) => {
+      const key = row.分类 || "未分类";
+      map.set(key, (map.get(key) || 0) + (num(row.总权重) || 0));
+    });
+    return map;
+  }
+
+  function latestExposureMapWithFallback(strategyId, fields) {
+    for (const field of fields) {
+      const map = latestExposureMap(strategyId, field);
+      const total = [...map.values()].reduce((acc, value) => acc + (num(value) || 0), 0);
+      if (total > 0) return { map, field };
+    }
+    return { map: new Map(), field: fields[0] };
+  }
+
+  function compareExposureConfigBlock(rows, fields, options = {}) {
+    const fieldList = Array.isArray(fields) ? fields : [fields];
+    const cards = rows.map((row) => {
+      const exposure = latestExposureMapWithFallback(row.统一策略ID, fieldList);
+      const entries = [...exposure.map.entries()]
+        .map(([name, value]) => ({ name, value: num(value) || 0 }))
+        .filter((item) => item.value > 0.0001)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, options.limit || 8);
+      const total = Math.max(1, entries.reduce((acc, item) => acc + item.value, 0));
+      return `<article class="compare-asset-row compare-exposure-row">
+        <div class="compare-row-title"><strong>${strategyLink(row)}</strong><span>${B.esc(exposure.field || fieldList[0])}</span></div>
+        <div class="compare-stack-bar is-thick">${entries.map((item) => `<i style="width:${Math.max(0, item.value / total * 100).toFixed(2)}%;background:${compareColorFor(item.name)}" title="${B.esc(item.name)} ${weightPoint(item.value)}"></i>`).join("")}</div>
+        <div class="compare-asset-legend">${entries.slice(0, 6).map((item) => `<span><i style="background:${compareColorFor(item.name)}"></i>${B.esc(item.name)} <b>${weightPoint(item.value)}</b></span>`).join("") || '<span>暂无可用拆分</span>'}</div>
+      </article>`;
+    }).join("");
+    return `<div class="compare-asset-list compare-exposure-list">${cards}</div>`;
+  }
+
+  function overlapValue(a, b) {
+    let total = 0;
+    a.forEach((item, key) => {
+      const av = typeof item === "number" ? item : item.weight;
+      const bvRaw = b.get(key);
+      const bv = typeof bvRaw === "number" ? bvRaw : bvRaw?.weight;
+      if (bv !== undefined) total += Math.min(av || 0, bv || 0);
+    });
+    return total;
+  }
+
+  function overlapBreakdown(a, b, kind) {
+    const rows = [];
+    a.forEach((item, key) => {
+      const av = typeof item === "number" ? item : item.weight;
+      const bvRaw = b.get(key);
+      if (bvRaw === undefined) return;
+      const bv = typeof bvRaw === "number" ? bvRaw : bvRaw?.weight;
+      const aWeight = num(av) || 0;
+      const bWeight = num(bv) || 0;
+      const overlap = Math.min(aWeight, bWeight);
+      if (overlap <= 0) return;
+      rows.push({
+        key,
+        code: kind === "fund" ? (item?.code || bvRaw?.code || "") : "",
+        name: kind === "fund" ? (item?.name || bvRaw?.name || key) : key,
+        策略A权重: aWeight,
+        策略B权重: bWeight,
+        重合权重: overlap,
+        权重差异: Math.abs(aWeight - bWeight)
+      });
+    });
+    return rows.sort((aRow, bRow) => (num(bRow.重合权重) || 0) - (num(aRow.重合权重) || 0));
+  }
+
+  function sumOverlap(rows) {
+    return rows.reduce((total, item) => total + (num(item.重合权重) || 0), 0);
+  }
+
+  function pairwiseOverlapRows(rows) {
+    const details = rows.map((row) => ({ row, detail: compareDetail(row.统一策略ID) })).filter((item) => item.detail);
+    const out = [];
+    for (let i = 0; i < details.length; i += 1) {
+      for (let j = i + 1; j < details.length; j += 1) {
+        const a = details[i];
+        const b = details[j];
+        const aFunds = holdingWeightMap(a.detail);
+        const bFunds = holdingWeightMap(b.detail);
+        const commonFunds = [...aFunds.keys()].filter((key) => bFunds.has(key));
+        const aIndustry = latestExposureMap(a.row.统一策略ID, "研报A股行业");
+        const bIndustry = latestExposureMap(b.row.统一策略ID, "研报A股行业");
+        const industryA = aIndustry.size ? aIndustry : latestExposureMap(a.row.统一策略ID, "权益行业大类");
+        const industryB = bIndustry.size ? bIndustry : latestExposureMap(b.row.统一策略ID, "权益行业大类");
+        const assetA = latestExposureMap(a.row.统一策略ID, "研报大类资产");
+        const assetB = latestExposureMap(b.row.统一策略ID, "研报大类资产");
+        const fundOverlap = overlapBreakdown(aFunds, bFunds, "fund");
+        const assetOverlap = overlapBreakdown(assetA, assetB, "exposure");
+        const industryOverlap = overlapBreakdown(industryA, industryB, "exposure");
+        out.push({
+          策略AID: a.row.统一策略ID,
+          策略BID: b.row.统一策略ID,
+          策略A: a.row.策略名称,
+          策略B: b.row.策略名称,
+          持仓重合度: sumOverlap(fundOverlap),
+          共同基金数: fundOverlap.length || commonFunds.length,
+          资产重合度: sumOverlap(assetOverlap),
+          行业重合度: sumOverlap(industryOverlap),
+          共同基金: fundOverlap.slice(0, 5).map((item) => item.name || item.key).join("、"),
+          持仓重合明细: fundOverlap,
+          资产重合明细: assetOverlap,
+          行业重合明细: industryOverlap
+        });
+      }
+    }
+    return out.sort((a, b) => (num(b.持仓重合度) || 0) - (num(a.持仓重合度) || 0));
+  }
+
+  function overlapKeyFromIds(metric, aId, bId) {
+    return [metric, aId, bId].map((part) => encodeURIComponent(raw(part))).join("|");
+  }
+
+  function overlapKey(metric, a, b) {
+    return overlapKeyFromIds(metric, a.统一策略ID, b.统一策略ID);
+  }
+
+  function parseOverlapKey(key) {
+    const parts = raw(key).split("|").map((part) => {
+      try { return decodeURIComponent(part); } catch (_) { return part; }
+    });
+    return { metric: parts[0] || "", aId: parts[1] || "", bId: parts[2] || "" };
+  }
+
+  function overlapPair(row, aId, bId) {
+    return row.find((item) => (item.策略AID === aId && item.策略BID === bId) || (item.策略AID === bId && item.策略BID === aId));
+  }
+
+  function overlapMetric(row, a, b, metric) {
+    if (a.统一策略ID === b.统一策略ID) return null;
+    const hit = overlapPair(row, a.统一策略ID, b.统一策略ID);
+    return hit ? num(hit[metric]) : null;
+  }
+
+  function activeOverlapKey(overlapRows) {
+    const parsed = parseOverlapKey(state.compareOverlapDetailKey);
+    if (parsed.metric && overlapPair(overlapRows, parsed.aId, parsed.bId)) return state.compareOverlapDetailKey;
+    const best = overlapRows.find((row) => (num(row.持仓重合度) || 0) > 0) || overlapRows[0];
+    return best ? overlapKeyFromIds("持仓重合度", best.策略AID, best.策略BID) : "";
+  }
+
+  function overlapHeatCell(value, context) {
+    if (context.isSelf) return '<td class="overlap-cell is-self">自身</td>';
+    if (value === null || value === undefined) return '<td class="overlap-cell is-empty">待加载</td>';
+    const clamped = Math.max(0, Math.min(100, Number(value) || 0));
+    const alpha = 0.08 + clamped / 100 * 0.72;
+    const color = clamped >= 55 ? "#fff" : "#17324d";
+    const selectedClass = context.key && context.key === context.activeKey ? " is-selected" : "";
+    return `<td class="overlap-cell${selectedClass}" style="background:rgba(21,112,239,${alpha.toFixed(3)});color:${color}"><button type="button" data-overlap-detail="${B.esc(context.key)}">${clamped.toFixed(1)}%</button></td>`;
+  }
+
+  function overlapHeatmap(rows, overlapRows, metric, title, activeKeyValue) {
+    if (rows.length < 2) return '<div class="empty">至少选择2只策略后展示重合度矩阵</div>';
+    return `<div class="overlap-matrix-card">
+      <h3>${B.label(title)}</h3>
+      <div class="overlap-matrix-wrap"><table class="overlap-matrix">
+        <thead><tr><th></th>${rows.map((row) => `<th>${strategyLink(row)}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map((a) => `<tr><th>${strategyLink(a)}</th>${rows.map((b) => overlapHeatCell(overlapMetric(overlapRows, a, b, metric), {
+          isSelf: a.统一策略ID === b.统一策略ID,
+          key: overlapKey(metric, a, b),
+          activeKey: activeKeyValue
+        })).join("")}</tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  function overlapDetailPanel(overlapRows) {
+    if (!overlapRows.length) return "";
+    const key = activeOverlapKey(overlapRows);
+    const { metric, aId, bId } = parseOverlapKey(key);
+    const row = overlapPair(overlapRows, aId, bId);
+    if (!row) return '<div class="overlap-detail-panel empty">点击矩阵中的非自身单元格查看重合明细。</div>';
+    const detailField = metric === "资产重合度" ? "资产重合明细" : metric === "行业重合度" ? "行业重合明细" : "持仓重合明细";
+    const rows = row[detailField] || [];
+    const isFund = metric === "持仓重合度";
+    const desc = isFund
+      ? "基金重合度按共同持有基金逐只取两边权重较小值后求和；下表列出主要共同基金及两边权重。"
+      : metric === "资产重合度"
+        ? "资产重合度按研报大类资产拆分结果逐类取两边暴露较小值后求和，一只基金可按规则拆到多个资产类别。"
+        : "行业重合度优先使用研报A股行业拆分，缺失时回退权益行业大类，逐行业取两边暴露较小值后求和。";
+    const tableRows = rows.slice(0, 12).map((item) => `<tr>
+      <td>${isFund ? fundLink({ 基金代码: item.code, 基金名称: item.name }) : B.esc(item.name || item.key)}</td>
+      <td>${weightPoint(item.策略A权重)}</td>
+      <td>${weightPoint(item.策略B权重)}</td>
+      <td>${weightPoint(item.重合权重)}</td>
+      <td>${weightPoint(item.权重差异)}</td>
+    </tr>`).join("");
+    return `<article class="overlap-detail-panel">
+      <div class="overlap-detail-head">
+        <div><strong>${B.label("重合度明细")}｜${B.esc(metric)}</strong><span>${strategyLinkById(row.策略AID, row.策略A)} vs ${strategyLinkById(row.策略BID, row.策略B)}</span></div>
+        <b>${weightPoint(row[metric])}</b>
+      </div>
+      <p>${B.esc(desc)}</p>
+      <div class="overlap-detail-table"><table>
+        <thead><tr><th>${isFund ? B.label("共同基金") : B.label("共同分类")}</th><th>${strategyLinkById(row.策略AID, row.策略A)}</th><th>${strategyLinkById(row.策略BID, row.策略B)}</th><th>${B.label("重合部分")}</th><th>${B.label("差异")}</th></tr></thead>
+        <tbody>${tableRows || '<tr><td colspan="5"><div class="empty">暂无可展开的共同明细</div></td></tr>'}</tbody>
+      </table></div>
+    </article>`;
+  }
+
+  function compareOverlapHeatmaps(rows, overlapRows) {
+    const activeKeyValue = activeOverlapKey(overlapRows);
+    return `<div class="overlap-matrix-grid">
+      ${overlapHeatmap(rows, overlapRows, "持仓重合度", "持仓重合度", activeKeyValue)}
+      ${overlapHeatmap(rows, overlapRows, "资产重合度", "资产重合度", activeKeyValue)}
+      ${overlapHeatmap(rows, overlapRows, "行业重合度", "行业重合度", activeKeyValue)}
+    </div>
+    ${overlapDetailPanel(overlapRows)}`;
+  }
+
+  function compareTopFundsBlock(rows) {
+    const cards = rows.map((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      const holdings = detail ? currentHoldings(detail).slice(0, 10) : [];
+      const body = holdings.length ? holdings.map((fund) => `<tr>
+        <td>${fundLink(fund)}</td>
+        <td>${B.esc(fundSecondaryCategory(fund, row.统一策略ID))}</td>
+        <td>${B.esc(displayFundAssetType(fund, row.统一策略ID))}</td>
+        <td>${weightPct(fund.权重)}</td>
+        <td>${B.valueHtml("日涨幅", fund.日涨幅)}</td>
+      </tr>`).join("") : '<tr><td colspan="5"><div class="empty">详情加载中或暂无当前持仓</div></td></tr>';
+      return `<article class="compare-fund-card">
+        <h3>${strategyLink(row)}</h3>
+        <table><thead><tr><th>${B.label("基金名称")}</th><th>${B.label("二级分类")}</th><th>${B.label("资产类型")}</th><th>${B.label("权重")}</th><th>${B.label("日涨幅")}</th></tr></thead><tbody>${body}</tbody></table>
+      </article>`;
+    }).join("");
+    return `<div class="compare-fund-grid">${cards}</div>`;
+  }
+
+  function historySnapshots(detail) {
+    return (detail?.positionSnapshots || [])
+      .filter((snap) => snap.id !== "current" && (snap.类型 === "历史调仓" || snap.调仓事件ID || snap.调仓原因))
+      .sort((a, b) => raw(b.日期).localeCompare(raw(a.日期)));
+  }
+
+  function latestContributionCurve(detail, snap) {
+    if (!detail?.contributionCurves || !snap) return null;
+    if (detail.contributionCurves[snap.id]) return detail.contributionCurves[snap.id];
+    const date = raw(snap.日期);
+    return Object.values(detail.contributionCurves).find((item) => raw(item.起始日期) === date) || null;
+  }
+
+  function contributionSummary(row) {
+    const detail = compareDetail(row.统一策略ID);
+    const snap = historySnapshots(detail)[0];
+    if (!snap) return { row, snap: null };
+    const holdings = snap.holdings || [];
+    const pos = holdings.filter((item) => (num(item.调仓后收益贡献) || 0) > 0).sort((a, b) => (num(b.调仓后收益贡献) || 0) - (num(a.调仓后收益贡献) || 0));
+    const neg = holdings.filter((item) => (num(item.调仓后收益贡献) || 0) < 0).sort((a, b) => (num(a.调仓后收益贡献) || 0) - (num(b.调仓后收益贡献) || 0));
+    const curve = latestContributionCurve(detail, snap);
+    return {
+      row,
+      snap,
+      调仓日期: snap.日期,
+      调仓原因: snap.调仓原因,
+      AI投研总结: snap.AI投研总结 || snap.投研摘要 || "",
+      正贡献: sum(pos, "调仓后收益贡献"),
+      负贡献: sum(neg, "调仓后收益贡献"),
+      调仓超额: curve?.调仓超额,
+      调仓评价: curve?.调仓评价 || "",
+      正贡献基金: pos.slice(0, 3).map((item) => item.基金名称 || item.基金代码).join("、"),
+      负贡献基金: neg.slice(0, 3).map((item) => item.基金名称 || item.基金代码).join("、"),
+      contributionCurve: curve
+    };
+  }
+
+  function compareRebalanceBlock(rows) {
+    const data = rows.map(contributionSummary);
+    return `<div class="compare-rebalance-grid">
+      ${data.map((item) => {
+        if (!item.snap) return `<article class="compare-rebalance-card"><h3>${strategyLink(item.row)}</h3><div class="empty">暂无历史调仓详情</div></article>`;
+        const holdings = (item.snap.holdings || [])
+          .filter((fund) => Math.abs(num(fund.权重变化) || 0) > 0.0001)
+          .sort((a, b) => Math.abs(num(b.权重变化) || 0) - Math.abs(num(a.权重变化) || 0))
+          .slice(0, 8);
+        return `<article class="compare-rebalance-card">
+          <div class="compare-row-title"><strong>${strategyLink(item.row)}</strong><span>${B.esc(item.调仓日期 || "未披露日期")}｜${B.esc(item.调仓评价 || "待评价")}</span></div>
+          <div class="compare-rebalance-kpis">
+            <span>${B.label("正贡献")}<b>${signedPct(item.正贡献)}</b></span>
+            <span>${B.label("负贡献")}<b>${signedPct(item.负贡献)}</b></span>
+            <span>${B.label("调仓超额")}<b>${signedPct(item.调仓超额)}</b></span>
+          </div>
+          <div class="compare-reason"><strong>${B.label("调仓原因")}</strong><span>${B.esc(item.调仓原因 || "未披露")}</span></div>
+          <div class="compare-ai-summary"><strong>${B.label("AI投研总结")}</strong><span>${B.esc(item.AI投研总结 || "暂无总结")}</span></div>
+          <table><thead><tr><th>${B.label("基金名称")}</th><th>${B.label("二级分类")}</th><th>${B.label("资产类型")}</th><th>${B.label("调仓动作")}</th><th>${B.label("权重变化")}</th><th>${B.label("调仓后收益贡献")}</th></tr></thead>
+            <tbody>${holdings.map((fund) => `<tr><td>${fundLink(fund)}</td><td>${B.esc(fundSecondaryCategory(fund, item.row.统一策略ID))}</td><td>${B.esc(displayFundAssetType(fund, item.row.统一策略ID))}</td><td>${B.esc(fund.调仓动作 || "")}</td><td>${weightPoint(fund.权重变化)}</td><td>${signedPct(fund.调仓后收益贡献)}</td></tr>`).join("") || '<tr><td colspan="6"><div class="empty">暂无基金级变化</div></td></tr>'}</tbody></table>
+        </article>`;
+      }).join("")}
+    </div>`;
+  }
+
+  function compareScatterDetail(peers) {
+    const selected = state.compareSelectedPointId ? (masterStrategyById.get(state.compareSelectedPointId) || allStrategyById.get(state.compareSelectedPointId)) : null;
+    if (!selected) return '<div class="compare-point-detail empty">点击散点查看产品介绍、同类位置和加入操作。</div>';
+    const metricValues = peers.map((row) => num(row[returnMetric()])).filter((value) => value !== null);
+    const peerMedian = median(metricValues);
+    const peerP75 = percentile(metricValues, 0.75);
+    const value = num(selected[returnMetric()]);
+    const rank = value === null ? null : peers.filter((row) => (num(row[returnMetric()]) ?? -9999) > value).length + 1;
+    const canAdd = !state.compareSelectedIds.includes(selected.统一策略ID) && state.compareSelectedIds.length < compareMaxCount;
+    const addAction = canAdd ? `<div class="compare-point-actions"><button type="button" data-compare-add="${B.esc(selected.统一策略ID)}">加入对比</button></div>` : "";
+    return `<article class="compare-point-detail">
+      <div>
+        <strong><a class="compare-point-title-link" href="./strategy.html?id=${encodeURIComponent(selected.统一策略ID)}">${B.esc(selected.策略名称)}</a></strong>
+        <span>${B.esc(selected.投顾机构 || selected.渠道 || "未识别")}｜${B.esc(selected.研报产品类型 || selected.业务分类 || "未分类")}｜${B.esc(selected.风险等级 || "未披露")}</span>
+      </div>
+      <div class="compare-point-kpis">
+        <span>${B.label(rangeLabel())}<b>${signedPct(value)}</b></span>
+        <span>${B.label("同类排名")}<b>${rank ? `${rank}/${peers.length}` : "未排名"}</b></span>
+        <span>${B.label("同类中位")}<b>${signedPct(peerMedian)}</b></span>
+        <span>${B.label("同类P75")}<b>${signedPct(peerP75)}</b></span>
+        <span>${B.label("最大回撤")}<b>${pct(selected.最大回撤)}</b></span>
+        <span>${B.label("波动率")}<b>${pct(selected.波动率)}</b></span>
+      </div>
+      <p>${B.esc(selected.分类依据 || selected.研报分类依据 || selected.业务分类依据 || "暂无产品说明")}</p>
+      ${addAction}
+    </article>`;
+  }
+
+  function compareRiskScatter(rows) {
+    const peers = comparePeerRows().filter((row) => num(row[returnMetric()]) !== null && num(row[state.compareScatterX]) !== null).slice(0, 240);
+    if (!peers.length) return '<div class="empty">当前同类口径下暂无可画散点</div>';
+    const selected = new Set(state.compareSelectedIds);
+    const width = 900;
+    const height = 380;
+    const pad = { left: 62, right: 30, top: 24, bottom: 48 };
+    const xs = peers.map((row) => num(row[state.compareScatterX]) || 0);
+    const ys = peers.map((row) => num(row[returnMetric()]) || 0);
+    let minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    if (minX === maxX) { minX -= 1; maxX += 1; }
+    if (minY === maxY) { minY -= 1; maxY += 1; }
+    const yPad = Math.max(1, (maxY - minY) * 0.15);
+    minY -= yPad; maxY += yPad;
+    const xPad = Math.max(1, (maxX - minX) * 0.12);
+    minX = Math.max(0, minX - xPad); maxX += xPad;
+    const xOf = (value) => pad.left + ((value - minX) / (maxX - minX)) * (width - pad.left - pad.right);
+    const yOf = (value) => height - pad.bottom - ((value - minY) / (maxY - minY)) * (height - pad.top - pad.bottom);
+    const medianY = median(ys);
+    const medianX = median(xs);
+    const categoryRows = [...new Map(peers.map((row) => [row.研报产品类型 || row.业务分类 || "未分类", row])).entries()].slice(0, 8);
+    const orderedPeers = [...peers].sort((a, b) => (selected.has(a.统一策略ID) ? 1 : 0) - (selected.has(b.统一策略ID) ? 1 : 0));
+    const points = orderedPeers.map((row) => {
+      const isSelected = selected.has(row.统一策略ID);
+      const isPointSelected = state.compareSelectedPointId === row.统一策略ID;
+      const cls = ["compare-scatter-point", isSelected ? "is-selected" : "is-background", isPointSelected ? "is-point-selected" : "", isGf(row) ? "is-gf" : ""].filter(Boolean).join(" ");
+      return `<circle class="${cls}" data-compare-point-id="${B.esc(row.统一策略ID)}" cx="${xOf(num(row[state.compareScatterX]) || 0).toFixed(1)}" cy="${yOf(num(row[returnMetric()]) || 0).toFixed(1)}" r="${isPointSelected ? 9 : isSelected ? 7.5 : 3.8}" fill="${isSelected ? compareSelectedColor(row.统一策略ID) : comparePeerScatterColor(row)}">
+          <title>${B.esc(row.策略名称)}｜${state.compareScatterX}${pct(row[state.compareScatterX])}｜${rangeLabel()}${signedPctText(row[returnMetric()])}</title>
+        </circle>`;
+    }).join("");
+    const selectedLabels = rows.filter((row) => selected.has(row.统一策略ID) && num(row[state.compareScatterX]) !== null && num(row[returnMetric()]) !== null)
+      .map((row) => `<text class="compare-scatter-label" x="${Math.min(width - pad.right - 8, xOf(num(row[state.compareScatterX]) || 0) + 10).toFixed(1)}" y="${Math.max(pad.top + 14, yOf(num(row[returnMetric()]) || 0) - 10).toFixed(1)}" fill="${compareSelectedColor(row.统一策略ID)}">${B.esc(raw(row.策略名称).slice(0, 10))}</text>`).join("");
+    const selectedLegend = rows.map((row) => `<span class="is-selected-strategy"><i style="background:${compareSelectedColor(row.统一策略ID)}"></i>${strategyLink(row)}</span>`).join("");
+    return `<div class="compare-scatter-wrap">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="策略风险收益散点">
+        <rect x="${pad.left}" y="${pad.top}" width="${width - pad.left - pad.right}" height="${height - pad.top - pad.bottom}" fill="#fff"/>
+        <line x1="${xOf(medianX)}" y1="${pad.top}" x2="${xOf(medianX)}" y2="${height - pad.bottom}" stroke="#d0d5dd" stroke-dasharray="4 4"/>
+        <line x1="${pad.left}" y1="${yOf(medianY)}" x2="${width - pad.right}" y2="${yOf(medianY)}" stroke="#d0d5dd" stroke-dasharray="4 4"/>
+        <text class="compare-quadrant-label" x="${pad.left + 12}" y="${pad.top + 18}">低${B.esc(state.compareScatterX)} / 高收益</text>
+        <text class="compare-quadrant-label" x="${width - pad.right - 12}" y="${pad.top + 18}" text-anchor="end">高${B.esc(state.compareScatterX)} / 高收益</text>
+        <text class="compare-quadrant-label" x="${pad.left + 12}" y="${height - pad.bottom - 10}">低${B.esc(state.compareScatterX)} / 低收益</text>
+        <text class="compare-quadrant-label" x="${width - pad.right - 12}" y="${height - pad.bottom - 10}" text-anchor="end">高${B.esc(state.compareScatterX)} / 低收益</text>
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" stroke="#cbd5e1"/>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" stroke="#cbd5e1"/>
+        <text class="axis-text" x="${width / 2}" y="${height - 12}" text-anchor="middle">${B.esc(state.compareScatterX)}（越左越低）</text>
+        <text class="axis-text" x="18" y="${height / 2}" transform="rotate(-90 18 ${height / 2})" text-anchor="middle">${B.esc(rangeLabel())}收益</text>
+        <text class="axis-text" x="${pad.left}" y="${height - 30}">${minX.toFixed(1)}%</text>
+        <text class="axis-text" x="${width - pad.right}" y="${height - 30}" text-anchor="end">${maxX.toFixed(1)}%</text>
+        <text class="axis-text" x="8" y="${yOf(maxY) + 4}">${maxY.toFixed(1)}%</text>
+        <text class="axis-text" x="8" y="${yOf(minY) + 4}">${minY.toFixed(1)}%</text>
+        ${points}
+        ${selectedLabels}
+      </svg>
+      <div class="compare-scatter-legend">${selectedLegend || '<span><i class="is-selected"></i>已选策略</span>'}<span class="is-peer-sample"><i></i>背景同类样本</span>${categoryRows.map(([label, row]) => `<span class="is-peer-category"><i style="background:${comparePeerScatterColor(row)}"></i>${B.esc(label)}</span>`).join("")}</div>
+      ${compareScatterDetail(peers)}
+    </div>`;
+  }
+
+  function pointDate(point) {
+    return point?.日期 || point?.date || "";
+  }
+
+  function pointValue(point) {
+    return num(point?.数值 ?? point?.value);
+  }
+
+  function normalizedReturnPoints(series) {
+    const points = (series?.points || []).map((point) => ({ date: pointDate(point), value: pointValue(point) })).filter((point) => point.date && point.value !== null).sort((a, b) => a.date.localeCompare(b.date));
+    if (!points.length) return [];
+    const mode = raw(series?.模式 || series?.mode);
+    if (mode === "nav") {
+      const base = points[0].value || 1;
+      return points.map((point) => ({ date: point.date, value: (point.value / base - 1) * 100 }));
+    }
+    return points;
+  }
+
+  const profitProbabilityPeriods = [
+    { label: "持有1月", days: 31 },
+    { label: "持有3月", days: 92 },
+    { label: "持有6月", days: 183 },
+    { label: "持有1年", days: 365 }
+  ];
+
+  function addDaysText(dateText, days) {
+    const date = new Date(`${dateText}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return "";
+    date.setDate(date.getDate() + days);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  function pointOnOrAfter(points, targetDate, startIndex) {
+    for (let i = Math.max(0, startIndex || 0); i < points.length; i += 1) {
+      if (points[i].date >= targetDate) return points[i];
+    }
+    return null;
+  }
+
+  function periodReturnFromCumulative(startValue, endValue) {
+    if (startValue === null || endValue === null || startValue <= -99.9) return null;
+    return ((1 + endValue / 100) / (1 + startValue / 100) - 1) * 100;
+  }
+
+  function profitProbabilityStats(detail, days) {
+    const series = detail?.curves?.披露业绩 || detail?.curves?.模拟业绩;
+    const points = normalizedReturnPoints(series);
+    let wins = 0;
+    const returns = [];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const targetDate = addDaysText(points[i].date, days);
+      if (!targetDate) continue;
+      const endPoint = pointOnOrAfter(points, targetDate, i + 1);
+      if (!endPoint) continue;
+      const periodReturn = periodReturnFromCumulative(points[i].value, endPoint.value);
+      if (periodReturn === null) continue;
+      returns.push(periodReturn);
+      if (periodReturn > 0) wins += 1;
+    }
+    return {
+      probability: returns.length ? wins / returns.length * 100 : null,
+      wins,
+      count: returns.length,
+      avgReturn: returns.length ? returns.reduce((acc, value) => acc + value, 0) / returns.length : null,
+      medianReturn: median(returns)
+    };
+  }
+
+  function compareProfitProbabilityBlock(rows) {
+    const data = rows.map((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      return {
+        row,
+        stats: Object.fromEntries(profitProbabilityPeriods.map((period) => [period.label, profitProbabilityStats(detail, period.days)]))
+      };
+    });
+    const headers = ["策略名称", "持有1月", "持有3月", "持有6月", "持有1年", "样本窗口", "中位收益"];
+    const table = tableBlock(headers, data, (item, h) => {
+      if (h === "策略名称") return strategyLink(item.row);
+      const period = profitProbabilityPeriods.find((entry) => entry.label === h);
+      if (period) return pct(item.stats[period.label]?.probability);
+      if (h === "样本窗口") {
+        const counts = profitProbabilityPeriods.map((periodItem) => item.stats[periodItem.label]?.count || 0);
+        return `${Math.min(...counts)}-${Math.max(...counts)}个`;
+      }
+      if (h === "中位收益") {
+        const values = profitProbabilityPeriods.map((periodItem) => item.stats[periodItem.label]?.medianReturn).filter((value) => value !== null && value !== undefined);
+        return values.length ? signedPct(values.reduce((acc, value) => acc + value, 0) / values.length) : "未计算";
+      }
+      return "";
+    });
+    const cards = data.map((item) => `<article class="compare-profit-card">
+      <div class="compare-row-title"><strong>${strategyLink(item.row)}</strong><span>${B.esc(item.row.研报产品类型 || item.row.业务分类 || "")}</span></div>
+      <div class="compare-selection-bars">
+        ${profitProbabilityPeriods.map((period) => {
+          const stat = item.stats[period.label];
+          const probability = stat?.probability;
+          return `<div><span>${period.label}</span><i style="width:${Math.max(2, Math.min(100, probability || 0)).toFixed(2)}%;background:${compareColorFor(period.label)}"></i><b>${pct(probability)}</b></div>`;
+        }).join("")}
+      </div>
+    </article>`).join("");
+    return `${table}<div class="compare-profit-grid">${cards}</div>`;
+  }
+
+  function seriesDeltaMap(series) {
+    const points = normalizedReturnPoints(series);
+    const out = new Map();
+    for (let i = 1; i < points.length; i += 1) {
+      out.set(points[i].date, points[i].value - points[i - 1].value);
+    }
+    return out;
+  }
+
+  function averageStrategyDeltaMap(rows) {
+    const byDate = new Map();
+    rows.forEach((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      const series = detail?.curves?.披露业绩 || detail?.curves?.模拟业绩;
+      const deltas = seriesDeltaMap(series);
+      deltas.forEach((value, date) => {
+        const bucket = byDate.get(date) || [];
+        bucket.push(value);
+        byDate.set(date, bucket);
+      });
+    });
+    const out = new Map();
+    byDate.forEach((values, date) => {
+      if (values.length) out.set(date, values.reduce((a, b) => a + b, 0) / values.length);
+    });
+    return out;
+  }
+
+  function pearsonFromMaps(aMap, bMap) {
+    const xs = [];
+    const ys = [];
+    aMap.forEach((value, date) => {
+      if (!bMap.has(date)) return;
+      xs.push(value);
+      ys.push(bMap.get(date));
+    });
+    if (xs.length < 20) return { corr: null, count: xs.length };
+    const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+    let nume = 0, denX = 0, denY = 0;
+    for (let i = 0; i < xs.length; i += 1) {
+      const dx = xs[i] - meanX;
+      const dy = ys[i] - meanY;
+      nume += dx * dy;
+      denX += dx * dx;
+      denY += dy * dy;
+    }
+    const den = Math.sqrt(denX * denY);
+    return { corr: den ? nume / den : null, count: xs.length };
+  }
+
+  function benchmarkByCode(code) {
+    return globalBenchmarks.find((row) => row.code === code) || null;
+  }
+
+  function assetDefaultBenchmark(rows) {
+    const avg = (field) => rows.length ? sum(rows, field) / rows.length : 0;
+    const equity = avg("权益基金权重");
+    const bond = avg("债券基金权重");
+    const cash = avg("货币基金权重");
+    const qdii = avg("QDII权重");
+    const reportTypes = rows.map((row) => raw(row.研报产品类型 || row.业务分类)).join(" ");
+    const preferred = cash >= 70 ? ["H11025.CSI", "H11015.CSI"]
+      : /短债/.test(reportTypes) ? ["H11015.CSI", "H11023.CSI"]
+      : bond + cash >= 80 ? ["H11023.CSI", "H11001.CSI", "930609.CSI"]
+      : qdii >= 20 ? ["000906.SH", "930950.CSI", "000300.SH"]
+      : equity >= 70 ? ["930950.CSI", "000906.SH", "000300.SH"]
+      : equity >= 35 ? ["000906.SH", "000300.SH", "H11023.CSI"]
+      : ["000906.SH", "H11023.CSI", "000300.SH"];
+    return preferred.map(benchmarkByCode).find(Boolean) || globalBenchmarks[0] || null;
+  }
+
+  function bestCompareBenchmark(rows) {
+    if (!globalBenchmarks.length) return null;
+    const strategyDeltas = averageStrategyDeltaMap(rows);
+    let best = null;
+    globalBenchmarks.forEach((benchmark) => {
+      const score = pearsonFromMaps(strategyDeltas, seriesDeltaMap({ 模式: "nav", points: benchmark.points || [] }));
+      if (score.corr === null) return;
+      if (!best || score.corr > best.corr) best = { ...benchmark, corr: score.corr, count: score.count, method: "相关性" };
+    });
+    if (best && best.count >= 30 && best.corr >= 0.15) return best;
+    const fallback = assetDefaultBenchmark(rows);
+    return fallback ? { ...fallback, corr: best?.corr ?? null, count: best?.count ?? 0, method: "资产结构" } : null;
+  }
+
+  function selectedCompareBenchmark(rows) {
+    return benchmarkByCode(state.compareBenchmarkCode) || bestCompareBenchmark(rows);
+  }
+
+  function compareBenchmarkSelect(rows) {
+    const auto = bestCompareBenchmark(rows);
+    if (!globalBenchmarks.length) return "";
+    return `<select id="compareBenchmarkSelect" class="control compact-control benchmark-select">
+      <option value="">自动：${B.esc(auto ? `${auto.name}｜${auto.method}` : "无可用基准")}</option>
+      ${globalBenchmarks.map((row) => `<option value="${B.esc(row.code)}" ${row.code === state.compareBenchmarkCode ? "selected" : ""}>${B.esc(row.name)}｜${B.esc(row.code)}</option>`).join("")}
+    </select>`;
+  }
+
+  function compareBenchmarkNote(rows) {
+    const selected = selectedCompareBenchmark(rows);
+    if (!selected) return "暂无可用指数基准。";
+    const corrText = selected.corr !== null && selected.corr !== undefined ? `，日收益相关性 ${selected.corr.toFixed(2)}，共同样本 ${countText(selected.count)}` : "";
+    return `${state.compareBenchmarkCode ? "手动选择" : `默认${selected.method || "自动选择"}`}：${selected.name}（${selected.code}）${corrText}。`;
+  }
+
+  function styleCompareReturnChart(el, names) {
+    const baseNames = [...new Set(names.map((name) => raw(name).split("｜")[0]))];
+    const colorMap = new Map(baseNames.map((name, index) => [name, comparePalette[index % comparePalette.length]]));
+    const visibleNames = names.filter((name) => !el.__seriesVisibility || el.__seriesVisibility[name] !== false);
+    el.querySelectorAll("svg path").forEach((pathEl, index) => {
+      const name = visibleNames[index] || "";
+      const base = raw(name).split("｜")[0];
+      const isBenchmark = name.startsWith("指数基准");
+      pathEl.setAttribute("stroke", isBenchmark ? "#101828" : (colorMap.get(base) || compareColorFor(base)));
+      pathEl.setAttribute("stroke-width", isBenchmark ? "3.2" : (name.includes("回放") ? "3.0" : "4.0"));
+      if (name.includes("回放")) pathEl.setAttribute("stroke-dasharray", "8 5");
+      if (isBenchmark) pathEl.setAttribute("stroke-dasharray", "3 4");
+    });
+    el.querySelectorAll(".legend-item").forEach((item) => {
+      const input = item.querySelector(".legend-toggle");
+      const dot = item.querySelector("i");
+      const name = input?.dataset.seriesName || "";
+      const base = raw(name).split("｜")[0];
+      if (dot) dot.style.background = name.startsWith("指数基准") ? "#101828" : (colorMap.get(base) || compareColorFor(base));
+      if (name.includes("回放")) dot.style.border = "2px dashed currentColor";
+      if (name.startsWith("指数基准")) dot.style.border = "2px dotted currentColor";
+    });
+  }
+
+  function drawCompareCharts() {
+    const el = B.byId("compareReturnChart");
+    if (!el) return;
+    const rows = compareSelectedRows();
+    const series = {};
+    const defaultVisible = [];
+    rows.forEach((row) => {
+      const detail = compareDetail(row.统一策略ID);
+      if (!detail?.curves) return;
+      const name = row.策略名称 || row.统一策略ID;
+      if (detail.curves.披露业绩) {
+        const key = `${name}｜披露`;
+        series[key] = detail.curves.披露业绩;
+        defaultVisible.push(key);
+      }
+      if (detail.curves.模拟业绩) series[`${name}｜回放`] = detail.curves.模拟业绩;
+    });
+    const benchmark = selectedCompareBenchmark(rows);
+    if (benchmark?.points?.length) {
+      const key = `指数基准：${benchmark.name}`;
+      series[key] = { 模式: "nav", points: benchmark.points };
+      defaultVisible.push(key);
+    }
+    if (!Object.keys(series).length) {
+      el.innerHTML = '<div class="empty">选择策略后加载收益曲线</div>';
+      return;
+    }
+    const names = Object.keys(series);
+    B.drawReturnChart(el, series, { range: state.range, title: "策略对比收益曲线", defaultVisibleSeries: defaultVisible });
+    styleCompareReturnChart(el, names);
+  }
+
+  function escapeRegExp(text) {
+    return raw(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function strategySentenceHtml(text, rows) {
+    let html = B.esc(text);
+    [...rows].sort((a, b) => raw(b.策略名称).length - raw(a.策略名称).length).forEach((row) => {
+      const name = raw(row.策略名称);
+      if (!name) return;
+      html = html.replace(new RegExp(escapeRegExp(B.esc(name)), "g"), strategyLink(row));
+    });
+    return html;
+  }
+
+  function compareAiSummaryBlock(rows, overlapRows) {
+    if (!rows.length) return "";
+    const peers = comparePeerRows();
+    const metric = returnMetric();
+    const peerMedian = median(peers.map((row) => row[metric]));
+    const peerP75 = percentile(peers.map((row) => row[metric]), 0.75);
+    const peerDrawdownMedian = median(peers.map((row) => row.最大回撤));
+    const sortedByReturn = [...rows].filter((row) => num(row[metric]) !== null).sort((a, b) => (num(b[metric]) || 0) - (num(a[metric]) || 0));
+    const bestReturn = sortedByReturn[0];
+    const lowestDrawdown = [...rows].filter((row) => num(row.最大回撤) !== null).sort((a, b) => (num(a.最大回撤) || 0) - (num(b.最大回撤) || 0))[0];
+    const bestSharpe = [...rows].filter((row) => num(row.夏普比率) !== null).sort((a, b) => (num(b.夏普比率) || 0) - (num(a.夏普比率) || 0))[0];
+    const maxOverlap = overlapRows.length ? overlapRows.reduce((best, row) => (num(row.持仓重合度) || 0) > (num(best.持仓重合度) || 0) ? row : best, overlapRows[0]) : null;
+    const facts = [];
+    if (bestReturn) {
+      const spread = num(bestReturn[metric]) !== null && peerMedian !== null ? (num(bestReturn[metric]) - peerMedian) : null;
+      facts.push(`${bestReturn.策略名称}的${rangeLabel()}收益${signedPctText(bestReturn[metric])}${spread !== null ? `，较同类中位高${spread.toFixed(2)}pct` : ""}。`);
+    }
+    if (lowestDrawdown) facts.push(`${lowestDrawdown.策略名称}最大回撤${pct(lowestDrawdown.最大回撤)}，是本组回撤压力最低的产品。`);
+    if (bestSharpe) facts.push(`${bestSharpe.策略名称}夏普比率${ratioText(bestSharpe.夏普比率)}，风险调整后表现居本组前列。`);
+    const warnings = rows.map((row) => {
+      const items = [];
+      if (peerMedian !== null && num(row[metric]) !== null && num(row[metric]) < peerMedian) items.push(`${rangeLabel()}收益低于同类中位${(peerMedian - num(row[metric])).toFixed(2)}pct`);
+      if (peerDrawdownMedian !== null && num(row.最大回撤) !== null && num(row.最大回撤) > peerDrawdownMedian) items.push(`最大回撤高于同类中位${(num(row.最大回撤) - peerDrawdownMedian).toFixed(2)}pct`);
+      if (raw(row.数据完整性) !== "完整") items.push(`数据完整性为${row.数据完整性 || "未披露"}`);
+      return items.length ? `${row.策略名称}：${items.join("，")}。` : "";
+    }).filter(Boolean);
+    const highlights = [];
+    rows.forEach((row) => {
+      if (peerP75 !== null && num(row[metric]) !== null && num(row[metric]) >= peerP75 && (peerDrawdownMedian === null || (num(row.最大回撤) || 0) <= peerDrawdownMedian * 1.15)) {
+        highlights.push(`${row.策略名称}可作为营销亮点：${rangeLabel()}收益进入同类前25%，回撤没有明显超出同类中位。`);
+      }
+    });
+    if (maxOverlap && (num(maxOverlap.持仓重合度) || 0) >= 60) {
+      warnings.push(`${maxOverlap.策略A} 与 ${maxOverlap.策略B} 持仓重合度${weightPoint(maxOverlap.持仓重合度)}，对外包装时不宜同时强调差异化。`);
+    } else if (maxOverlap && (num(maxOverlap.持仓重合度) || 0) <= 25) {
+      highlights.push(`本组最高持仓重合度仅${weightPoint(maxOverlap.持仓重合度)}，组合之间差异化较清晰，可分别按风险收益和资产方向包装。`);
+    }
+    return `<section class="panel compare-ai-panel">
+      <div class="panel-head"><div><h2>AI对比总结</h2><p class="desc">基于已选策略、当前同类口径和可计算字段生成，只输出本组有数据支撑的结论。</p></div></div>
+      <div class="compare-ai-grid">
+        <div><h3>优势</h3>${facts.map((text) => `<p>${strategySentenceHtml(text, rows)}</p>`).join("") || '<p>本组没有形成明确的收益、回撤或夏普优势。</p>'}</div>
+        <div><h3>短板</h3>${warnings.map((text) => `<p>${strategySentenceHtml(text, rows)}</p>`).join("") || '<p>按当前口径未发现明显短板，建议继续结合费率、持仓和调仓原因核验。</p>'}</div>
+        <div><h3>营销亮点</h3>${highlights.map((text) => `<p>${strategySentenceHtml(text, rows)}</p>`).join("") || '<p>当前更适合做内部复盘，不建议直接包装成收益卖点。</p>'}</div>
+      </div>
+    </section>`;
+  }
+
+  function compareTab() {
+    const selected = compareSelectedRows();
+    if (!state.compareSelectedPointId && selected[0]?.统一策略ID) state.compareSelectedPointId = selected[0].统一策略ID;
+    ensureCompareDetails();
+    const loadingCount = state.compareSelectedIds.filter((id) => !compareDetail(id)).length;
+    const overlapRows = pairwiseOverlapRows(selected);
+    return `
+      ${compareSelectorBlock()}
+      ${selected.length ? `
+        <section class="panel">
+          <div class="panel-head"><div><h2>投顾对比总览</h2><p class="desc">按天天投顾对比页的阅读顺序，把每只策略的风险、收益、费率、持仓日期和当前仓位来源放在同一屏。</p></div><span class="pill">最多 ${compareMaxCount} 只</span></div>
+          ${compareAdvisorSummaryBlock(selected)}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>核心指标对比</h2><p class="desc">按当前时间区间、同一字段口径横向比较，字段旁问号可查看计算说明。</p></div><span class="pill">详情待加载 ${countText(loadingCount)} 个</span></div>
+          ${compareCoreTable(selected)}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>费率对比</h2><p class="desc">参考天天投顾对比页的基础信息区，单独列出投顾费率、起投金额和建议持有时长。</p></div></div>
+          ${compareFeeBlock(selected)}
+        </section>
+        ${compareAiSummaryBlock(selected, overlapRows)}
+        <section class="panel chart-panel">
+          <div class="panel-head">
+            <div><h2>业绩曲线对比</h2><p class="desc">默认显示官方披露曲线，并叠加与本组策略最相关的指数基准；可在图例中打开自建回放曲线。</p></div>
+            <div class="chart-actions">${compareBenchmarkSelect(selected)}</div>
+          </div>
+          <div class="source-method"><strong>${B.label("对比基准")}</strong> ${B.esc(compareBenchmarkNote(selected))}</div>
+          <div id="compareReturnChart" class="chart compare-return-chart"></div>
+        </section>
+        <section class="insight-grid">
+          <div class="panel chart-panel">
+            <div class="panel-head">
+              <div><h2>风险收益散点</h2><p class="desc">已选策略高亮，背景为当前筛选和同类口径样本。</p></div>
+              <div class="chart-actions">
+                <select id="compareScatterX" class="control compact-control">
+                  ${["最大回撤", "波动率"].map((field) => `<option ${field === state.compareScatterX ? "selected" : ""}>${field}</option>`).join("")}
+                </select>
+              </div>
+            </div>
+            ${compareRiskScatter(selected)}
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><h2>同类推荐</h2><p class="desc">按第一只已选策略和同类口径自动筛选候选。</p></div></div>
+            <div class="compare-recommend-list">
+              ${compareRecommendedRows().slice(0, 8).map((row) => `<div class="rank-row"><div><strong>${strategyLink(row)}</strong><span>${B.esc(row.投顾机构 || "")}｜${B.esc(row.研报产品类型 || row.业务分类 || "")}｜${rangeLabel()} ${signedPct(row[returnMetric()])}</span></div><button type="button" class="mini-link" data-compare-add="${B.esc(row.统一策略ID)}" ${state.compareSelectedIds.length >= compareMaxCount ? "disabled" : ""}>加入</button></div>`).join("") || '<div class="empty">暂无同类候选</div>'}
+            </div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>大类资产配置对比</h2><p class="desc">按最新持仓快照的研报大类资产拆分展示，支持一只基金按规则拆到多个资产大类。</p></div></div>
+          ${compareExposureConfigBlock(selected, "研报大类资产")}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>行业配置对比</h2><p class="desc">按最新持仓快照的研报A股行业拆分展示，用于观察权益行业暴露和行业集中度。</p></div></div>
+          ${compareExposureConfigBlock(selected, "研报A股行业")}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>权益主题配置对比</h2><p class="desc">按权益行业主题拆分展示，缺少主题拆分时退回权益行业大类。</p></div></div>
+          ${compareExposureConfigBlock(selected, ["权益行业主题", "权益行业大类"])}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>仓位重合度</h2><p class="desc">仅比较当前对比篮子中的已选策略；基金、资产和行业三个角度衡量是否同质化。</p></div></div>
+          ${compareOverlapHeatmaps(selected, overlapRows)}
+          ${tableBlock(["策略A", "策略B", "持仓重合度", "共同基金数", "资产重合度", "行业重合度", "共同基金"], overlapRows, (row, h) => {
+            if (h === "策略A") return strategyLinkById(row.策略AID, row.策略A);
+            if (h === "策略B") return strategyLinkById(row.策略BID, row.策略B);
+            if (h === "共同基金") return (row.持仓重合明细 || []).slice(0, 5).map((item) => fundLink({ 基金代码: item.code, 基金名称: item.name })).join("、") || "无";
+            if (h.includes("重合度")) return weightPoint(row[h]);
+            if (h.includes("数")) return countText(row[h]);
+            return B.fmt(row[h]);
+          })}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>选基效果</h2><p class="desc">比较历史调仓胜率，以及当前持仓基金近1月、近3月、近6月、近1年同类排名前50%的仓位占比。</p></div></div>
+          ${compareFundSelectionBlock(selected)}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>历史盈利概率</h2><p class="desc">基于策略历史业绩曲线滚动计算任意时点买入并持有1月、3月、6月、1年后的正收益概率。</p></div></div>
+          ${compareProfitProbabilityBlock(selected)}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>前十大基金</h2><p class="desc">展示当前正权重最高的底层基金，基金名称可跳转详情页。</p></div></div>
+          ${compareTopFundsBlock(selected)}
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><h2>最近调仓与贡献对比</h2><p class="desc">展示最近一次历史调仓的披露原因、AI投研总结、基金级变化和收益贡献。</p></div></div>
+          ${compareRebalanceBlock(selected)}
+        </section>
+      ` : `
+        <section class="panel"><div class="empty">请从搜索结果或同类推荐中加入策略，随后展示指标、曲线、仓位、重合度和调仓贡献。</div></section>
+      `}
+    `;
+  }
+
   function renderContent() {
+    if (state.tab === "compare") return compareTab();
     if (state.tab === "holding") return holdingTab();
     if (state.tab === "rebalance") return rebalanceTab();
     return marketTab();
@@ -3500,19 +5176,26 @@
 
   function render() {
     const displayCount = strategyRows().length;
-    const holdingDisplayCount = filteredHoldingStrategyRows().length;
+    const holdingStrategyDetailCount = filteredHoldingStrategyRows().length;
+    const holdingDisplayCount = Math.max(
+      holdingStrategyDetailCount,
+      filteredHoldingSnapshotRows().length,
+      latestHoldingSnapshotRows("研报大类资产").length,
+      holdingSnapshotRows().length
+    );
     const rebalanceDisplayCount = rebalanceEvents(false).length;
     signalDetailStore.clear();
     root.innerHTML = `
       <section class="page-title">
         <div>
           <h1>数据洞察</h1>
-          <p class="desc">按市场总览、仓位分析和调仓分析三类视角展示策略表现、底层基金配置和调仓变化。</p>
+          <p class="desc">按市场总览、仓位分析、调仓分析和策略对比四类视角展示策略表现、底层基金配置和调仓变化。</p>
         </div>
         <div class="title-pills">
           <span class="pill">产品 ${countText(displayCount)} 个</span>
           <span class="pill">持仓明细 ${countText(holdingDisplayCount)} 行</span>
           <span class="pill">调仓 ${countText(rebalanceDisplayCount)} 条</span>
+          <span class="pill">对比 ${countText(state.compareSelectedIds.length)} 个</span>
         </div>
       </section>
       <section class="panel insight-sticky-controls">
@@ -3526,7 +5209,7 @@
           ${filterField("投顾机构", institutionSelect("insightInstitution", state.institution))}
         </div>
         <div class="insight-tabs">${tabs.map(([key, label]) => `<button type="button" class="insight-tab-button ${key === state.tab ? "is-active" : ""}" data-tab="${key}">${B.esc(label)}</button>`).join("")}</div>
-        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于市场总览、仓位分析、调仓分析的所有图表和表格；默认仅展示数据完整、非D0、非持仓缺失/不入池策略；对客范围可剔除天天投顾明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；时间区间同时用于区间收益、仓位时间序列和调仓事件；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
+        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于市场总览、仓位分析、调仓分析和策略对比的所有图表和表格；默认展示完整策略，以及已具备最新披露业绩和最新持仓明细的扩展样本；D0 持仓缺失和持仓缺失/不入池策略仍然剔除。对客范围可剔除明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；时间区间同时用于区间收益、仓位时间序列、调仓事件和对比曲线；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
       </section>
       <div class="insight-panel-stack">${renderContent()}</div>
     `;
@@ -3536,7 +5219,12 @@
       state.businessPages = {};
       state.openBusiness = "";
       state.expandedFundKey = "";
+      state.holdingFundPage = 1;
+      state.gfHoldingFundPage = 1;
+      state.gfOpportunityPage = 1;
       state.reportType = "";
+      state.rebalanceFundSecondaryCategory = "";
+      state.rebalanceFundCompany = "";
     };
     B.byId("insightRange").addEventListener("change", () => { state.range = B.byId("insightRange").value; resetDataView(); render(); });
     B.byId("insightRisk").addEventListener("change", () => { state.risk = B.byId("insightRisk").value; resetDataView(); render(); });
@@ -3566,9 +5254,22 @@
     const rebalancePrev = B.byId("rebalanceDetailPrev");
     const rebalanceNext = B.byId("rebalanceDetailNext");
     const rebalancePageSize = B.byId("rebalanceDetailPageSize");
+    const holdingFundPrev = B.byId("holdingFundPrev");
+    const holdingFundNext = B.byId("holdingFundNext");
+    const holdingFundPageSize = B.byId("holdingFundPageSize");
+    const holdingFundType = B.byId("holdingFundType");
+    const gfHoldingFundPrev = B.byId("gfHoldingFundPrev");
+    const gfHoldingFundNext = B.byId("gfHoldingFundNext");
+    const gfHoldingFundPageSize = B.byId("gfHoldingFundPageSize");
+    const gfHoldingFundType = B.byId("gfHoldingFundType");
+    const gfOpportunityFundPrev = B.byId("gfOpportunityFundPrev");
+    const gfOpportunityFundNext = B.byId("gfOpportunityFundNext");
+    const gfOpportunityFundPageSize = B.byId("gfOpportunityFundPageSize");
+    const gfOpportunityFundType = B.byId("gfOpportunityFundType");
     const rebalanceMode = B.byId("rebalanceMode");
     const rebalanceMonth = B.byId("rebalanceMonth");
     const rebalanceReportType = B.byId("rebalanceReportType");
+    const rebalanceFundRankType = B.byId("rebalanceFundRankType");
     if (scatterX) scatterX.addEventListener("change", () => { state.scatterX = scatterX.value; render(); });
     if (scatterViewPct) scatterViewPct.addEventListener("input", () => { state.viewPct = Number(scatterViewPct.value) || 100; render(); });
     if (scatterGfScope) scatterGfScope.addEventListener("change", () => { state.gfScope = scatterGfScope.value; resetDataView(); render(); });
@@ -3602,12 +5303,91 @@
         render();
       });
     });
+    if (holdingFundPrev) holdingFundPrev.addEventListener("click", () => { state.holdingFundPage = Math.max(1, state.holdingFundPage - 1); render(); });
+    if (holdingFundNext) holdingFundNext.addEventListener("click", () => { state.holdingFundPage += 1; render(); });
+    if (holdingFundPageSize) holdingFundPageSize.addEventListener("change", () => { state.holdingFundPageSize = Number(holdingFundPageSize.value) || 20; state.holdingFundPage = 1; render(); });
+    if (holdingFundType) holdingFundType.addEventListener("change", () => { state.holdingFundType = holdingFundType.value || ""; state.holdingFundPage = 1; render(); });
+    if (gfHoldingFundPrev) gfHoldingFundPrev.addEventListener("click", () => { state.gfHoldingFundPage = Math.max(1, state.gfHoldingFundPage - 1); render(); });
+    if (gfHoldingFundNext) gfHoldingFundNext.addEventListener("click", () => { state.gfHoldingFundPage += 1; render(); });
+    if (gfHoldingFundPageSize) gfHoldingFundPageSize.addEventListener("change", () => { state.gfHoldingFundPageSize = Number(gfHoldingFundPageSize.value) || 20; state.gfHoldingFundPage = 1; render(); });
+    if (gfHoldingFundType) gfHoldingFundType.addEventListener("change", () => { state.gfHoldingFundType = gfHoldingFundType.value || ""; state.gfHoldingFundPage = 1; render(); });
+    if (gfOpportunityFundPrev) gfOpportunityFundPrev.addEventListener("click", () => { state.gfOpportunityPage = Math.max(1, state.gfOpportunityPage - 1); render(); });
+    if (gfOpportunityFundNext) gfOpportunityFundNext.addEventListener("click", () => { state.gfOpportunityPage += 1; render(); });
+    if (gfOpportunityFundPageSize) gfOpportunityFundPageSize.addEventListener("change", () => { state.gfOpportunityPageSize = Number(gfOpportunityFundPageSize.value) || 20; state.gfOpportunityPage = 1; render(); });
+    if (gfOpportunityFundType) gfOpportunityFundType.addEventListener("change", () => { state.gfOpportunityFundType = gfOpportunityFundType.value || ""; state.gfOpportunityPage = 1; render(); });
     if (rebalancePrev) rebalancePrev.addEventListener("click", () => { state.rebalancePage = Math.max(1, state.rebalancePage - 1); render(); });
     if (rebalanceNext) rebalanceNext.addEventListener("click", () => { state.rebalancePage += 1; render(); });
     if (rebalancePageSize) rebalancePageSize.addEventListener("change", () => { state.rebalancePageSize = Number(rebalancePageSize.value) || 20; state.rebalancePage = 1; render(); });
     if (rebalanceMode) rebalanceMode.addEventListener("change", () => { state.rebalanceMode = rebalanceMode.value || "month"; state.rebalancePage = 1; render(); });
     if (rebalanceMonth) rebalanceMonth.addEventListener("change", () => { state.rebalanceMonth = rebalanceMonth.value || ""; state.rebalancePage = 1; render(); });
     if (rebalanceReportType) rebalanceReportType.addEventListener("change", () => { state.reportType = rebalanceReportType.value || ""; state.rebalancePage = 1; render(); });
+    if (rebalanceFundRankType) rebalanceFundRankType.addEventListener("change", () => { state.rebalanceFundRankType = rebalanceFundRankType.value || "netIn"; render(); });
+    root.querySelectorAll("[data-rebalance-fund-secondary]").forEach((select) => {
+      select.addEventListener("change", () => {
+        state.rebalanceFundSecondaryCategory = select.value || "";
+        state.rebalancePage = 1;
+        render();
+      });
+    });
+    root.querySelectorAll("[data-rebalance-fund-company]").forEach((select) => {
+      select.addEventListener("change", () => {
+        state.rebalanceFundCompany = select.value || "";
+        state.rebalancePage = 1;
+        render();
+      });
+    });
+    const compareSearch = B.byId("compareSearch");
+    const comparePeerMode = B.byId("comparePeerMode");
+    const compareScatterX = B.byId("compareScatterX");
+    const compareBenchmarkSelectEl = B.byId("compareBenchmarkSelect");
+    const compareClear = B.byId("compareClear");
+    if (compareSearch) {
+      compareSearch.addEventListener("compositionstart", () => { compareSearchComposing = true; });
+      compareSearch.addEventListener("compositionend", () => {
+        compareSearchComposing = false;
+        state.compareQueryInput = compareSearch.value || "";
+        scheduleCompareSearchCommit(260);
+      });
+      compareSearch.addEventListener("input", (event) => {
+        state.compareQueryInput = compareSearch.value || "";
+        if (compareSearchComposing || event.isComposing) return;
+        scheduleCompareSearchCommit(650);
+      });
+    }
+    if (comparePeerMode) comparePeerMode.addEventListener("change", () => { state.comparePeerMode = comparePeerMode.value || "reportType"; render(); });
+    if (compareScatterX) compareScatterX.addEventListener("change", () => { state.compareScatterX = compareScatterX.value || "最大回撤"; render(); });
+    if (compareBenchmarkSelectEl) compareBenchmarkSelectEl.addEventListener("change", () => { state.compareBenchmarkCode = compareBenchmarkSelectEl.value || ""; render(); });
+    if (compareClear) compareClear.addEventListener("click", () => { state.compareSelectedIds = []; state.compareOverlapDetailKey = ""; render(); });
+    root.querySelectorAll("[data-compare-add]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = button.dataset.compareAdd || "";
+        if (!id || state.compareSelectedIds.includes(id) || state.compareSelectedIds.length >= compareMaxCount) return;
+        state.compareSelectedIds = [...state.compareSelectedIds, id];
+        state.compareOverlapDetailKey = "";
+        ensureCompareDetails([id]);
+        render();
+      });
+    });
+    root.querySelectorAll("[data-compare-remove]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = button.dataset.compareRemove || "";
+        state.compareSelectedIds = state.compareSelectedIds.filter((item) => item !== id);
+        state.compareOverlapDetailKey = "";
+        render();
+      });
+    });
+    root.querySelectorAll("[data-overlap-detail]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.compareOverlapDetailKey = button.dataset.overlapDetail || "";
+        render();
+      });
+    });
+    root.querySelectorAll("[data-compare-point-id]").forEach((point) => {
+      point.addEventListener("click", () => {
+        state.compareSelectedPointId = point.dataset.comparePointId || "";
+        render();
+      });
+    });
     root.querySelectorAll("[data-signal-detail]").forEach((button) => {
       button.addEventListener("click", () => {
         showSignalDetail(button.dataset.signalDetail || "");
@@ -3650,6 +5430,10 @@
         point.addEventListener("pointermove", (event) => moveTip(event, point));
         point.addEventListener("pointerleave", () => { hoverTip.hidden = true; });
       });
+    }
+    if (state.tab === "compare") {
+      ensureCompareDetails();
+      requestAnimationFrame(drawCompareCharts);
     }
     requestAnimationFrame(scrollToHashTarget);
   }

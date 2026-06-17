@@ -2,6 +2,7 @@
 (async () => {
   const B = window.BasicData;
   const root = B.byId("strategyDetailPage");
+  const semanticIndex = window.__AI_STRATEGY_SEMANTIC_INDEX__ || null;
   const id = B.params().get("id");
   const item = B.state.summary.strategies.find((row) => row.统一策略ID === id);
   if (!item) {
@@ -26,7 +27,7 @@
   ];
   const intervalHeaders = ["口径", "近一周", "近一月", "近三月", "近1年", "今年以来", "成立以来"];
   const curveRows = ["披露业绩", "模拟业绩", "基准业绩", "沪深300业绩"];
-  const holdingHeaders = ["基金代码", "基金名称", "权重", "上次调仓后权重", "权重变化", "基金净值", "净值日期", "日涨幅", "调仓后收益率", "调仓后收益贡献"];
+  const holdingHeaders = ["基金代码", "基金名称", "二级分类", "权重", "上次调仓后权重", "权重变化", "基金净值", "净值日期", "日涨幅", "调仓后收益率", "调仓后收益贡献"];
   const snapshots = detail.positionSnapshots || [];
   const globalBenchmarks = B.state.summary?.globalBenchmarks || [];
   let activeRange = "all";
@@ -73,6 +74,275 @@
   const profileMap = mapFields(detail.profileFields);
   const performanceMap = mapFields(detail.performanceFields);
   const classificationMap = mapFields(detail.classificationFields);
+  Object.assign(B.state.summary.fieldDictionary = B.state.summary.fieldDictionary || {}, {
+    "组合基金持仓": "展示当前策略组合持有的底层基金。组合占比来自策略当前持仓或推算持仓；配置日优先取该策略最近一次历史调仓日；持有时长按最新持仓日与配置日之间的自然日差计算。",
+    "基金类型分类": "按持仓基金的资产类型、基金同类分组和基金详情包中的基金类型归并为现金类、固收类、股票类、混合类或其他。",
+    "配置日": "该组合当前配置的起始日期。优先使用最新历史调仓日期；若没有历史调仓事件，则使用当前持仓日期。",
+    "持有时长": "最新持仓日减去配置日得到的自然日天数。无法解析日期时显示未披露。",
+    "资产配置估算": "基于 fund_detail_pack 中的基金资产暴露字段拆分股票、固收、现金、基金、其他和其中可转债。缺少资产暴露时按基金标准分类做兜底估算，不等同于基金最新季报原文披露。",
+    "基金持有区间收益": "优先使用策略详情中该基金调仓后收益率；缺失时使用基金详情包内的区间收益率。",
+    "基金近1年收益": "使用该基金日度净值计算的近1年收益率；缺失时显示未披露。"
+  });
+  const fundPack = window.__BASIC_DATA__?.fundDetailPack || {};
+  const fundFields = fundPack.fundFields || [];
+  const fundObjects = (fundPack.funds || []).map((row) => Object.fromEntries(fundFields.map((field, index) => [field, row[index] ?? ""])));
+  const fundDataByCode = new Map(fundObjects.map((row) => [raw(row.基金代码), row]).filter(([code]) => code));
+  const fundDataByName = new Map(fundObjects.map((row) => [raw(row.基金名称), row]).filter(([name]) => name));
+  function semanticRows(packName) {
+    const pack = semanticIndex?.[packName];
+    if (!pack || !Array.isArray(pack.rows)) return [];
+    const fields = pack.fields || [];
+    return pack.rows.map((row) => Object.fromEntries(fields.map((field, index) => [field, row[index] ?? ""])));
+  }
+  function strategyEntityRows() {
+    return semanticRows("strategyEntities")
+      .filter((row) => raw(row.统一策略ID) === raw(detail.id))
+      .filter((row) => num(row.权重) !== null && num(row.权重) > 0.0001)
+      .sort((a, b) => (num(b.权重) || 0) - (num(a.权重) || 0));
+  }
+  function entityBadge(row) {
+    const source = [row.来源字段, row.来源值].filter(Boolean).join("：");
+    const meta = [row.实体等级, source, row.抽取规则ID].filter(Boolean).join("｜");
+    return `<div class="entity-badge">
+      <div><strong>${B.esc(row.实体名称 || row.实体Key || "未命名实体")}</strong><span>${B.esc(row.实体类型 || "实体")}${meta ? `｜${B.esc(meta)}` : ""}</span></div>
+      <em>${B.pct(row.权重)}</em>
+      ${row.证据基金 ? `<p>${B.esc(row.证据基金)}</p>` : ""}
+      ${row.规则版本 ? `<p>规则版本：${B.esc(row.规则版本)}</p>` : ""}
+    </div>`;
+  }
+  function entityGraphSection() {
+    const rows = strategyEntityRows();
+    const primaryTypes = ["资产大类", "资产", "指数", "地域", "行业主题", "产品形态", "风格"];
+    const groups = primaryTypes.map((type) => ({
+      type,
+      rows: rows.filter((row) => row.实体类型 === type).slice(0, type === "资产大类" ? 8 : 12),
+    })).filter((group) => group.rows.length);
+    return `<section class="panel entity-panel">
+      <div class="panel-head">
+        <div>
+          <h2>实体图谱</h2>
+          <p class="desc">基于最新持仓基金的结构化分类、资产暴露和基金名称抽取；权重为策略持仓权重按基金暴露比例汇总。</p>
+        </div>
+        <span class="pill">${rows.length.toLocaleString("zh-CN")} 个实体</span>
+      </div>
+      ${groups.length ? groups.map((group) => `
+        <div class="entity-group">
+          <h3>${B.esc(group.type)}</h3>
+          <div class="entity-grid">${group.rows.map(entityBadge).join("")}</div>
+        </div>
+      `).join("") : '<div class="empty">当前策略暂无可展示实体。请先重建 AI 语义索引。</div>'}
+    </section>`;
+  }
+  function currentHoldingSnapshot() {
+    return snapshots.find((snap) => snap.id === "current") || snapshots.find((snap) => snap.类型 === "当前仓位") || snapshots[0] || { holdings: [] };
+  }
+  function latestRebalanceDate() {
+    return snapshots
+      .filter((snap) => snap.id !== "current" && snap.日期)
+      .map((snap) => snap.日期)
+      .sort()
+      .at(-1) || "";
+  }
+  function fundData(row) {
+    return fundDataByCode.get(raw(row.基金代码)) || fundDataByName.get(raw(row.基金名称)) || {};
+  }
+  function parseDate(value) {
+    const text = raw(value).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+    const date = new Date(`${text}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  function dayDiff(start, end) {
+    const startDate = parseDate(start);
+    const endDate = parseDate(end);
+    if (!startDate || !endDate) return null;
+    return Math.max(0, Math.round((endDate - startDate) / 86400000));
+  }
+  function holdingCategory(row, data) {
+    const text = [row.资产类型, row.基金同类分组, row.分组, data.基金类型, data.研报大类资产].map(raw).join(" ");
+    if (/货币|现金/.test(text)) return "现金类";
+    if (/可转债|债|固收|短债|纯债/.test(text)) return "固收类";
+    if (/股票|权益|A股|港股|美股|QDII|指数|ETF/.test(text)) return "股票类";
+    if (/混合|多资产|FOF|基金中基金/.test(text)) return "混合类";
+    return "其他";
+  }
+  function secondaryCategory(row, data) {
+    return row.分组 || row.基金同类分组 || data.权益行业主题 || data.行业主题 || data.基金类型 || data.研报大类资产 || "--";
+  }
+  function parseExposurePairs(text) {
+    const result = [];
+    raw(text).split(/[、,，;；]+/).forEach((part) => {
+      const item = part.trim();
+      if (!item) return;
+      const match = item.match(/^(.+?)(-?\d+(?:\.\d+)?)%$/);
+      if (match) result.push({ name: match[1].trim(), value: Number(match[2]) });
+    });
+    return result;
+  }
+  function exposureBucket(name) {
+    if (/可转债|转债/.test(name)) return "其中可转债";
+    if (/货币|现金/.test(name)) return "现金";
+    if (/债|固收/.test(name)) return "固收";
+    if (/基金|FOF/.test(name)) return "基金";
+    if (/股票|权益|A股|港股|美股|海外|全球|行业|主题|科技|消费|医药|制造|成长|价值|周期|红利/.test(name)) return "股票";
+    return "其他";
+  }
+  function fallbackAllocation(row, data) {
+    const text = [row.资产类型, row.基金同类分组, row.分组, data.基金类型, data.研报大类资产, data.资产暴露].map(raw).join(" ");
+    const allocation = { 股票: 0, 固收: 0, 现金: 0, 基金: 0, 其他: 0, 其中可转债: 0 };
+    if (/可转债|转债/.test(text)) {
+      allocation.固收 = 100;
+      allocation.其中可转债 = 100;
+    } else if (/债|固收|短债|纯债/.test(text)) allocation.固收 = 100;
+    else if (/货币|现金/.test(text)) allocation.现金 = 100;
+    else if (/FOF|基金中基金/.test(text)) allocation.基金 = 100;
+    else if (/股票|权益|A股|港股|美股|QDII|指数|ETF/.test(text)) allocation.股票 = 100;
+    else allocation.其他 = 100;
+    return allocation;
+  }
+  function fundAllocation(row, data) {
+    const allocation = { 股票: 0, 固收: 0, 现金: 0, 基金: 0, 其他: 0, 其中可转债: 0 };
+    const pairs = parseExposurePairs(data.资产暴露 || data.研报大类资产 || "");
+    if (!pairs.length) return fallbackAllocation(row, data);
+    pairs.forEach((pair) => {
+      const bucket = exposureBucket(pair.name);
+      if (bucket === "其中可转债") {
+        allocation.其中可转债 += pair.value;
+        allocation.固收 += pair.value;
+      } else if (allocation[bucket] !== undefined) {
+        allocation[bucket] += pair.value;
+      }
+    });
+    return allocation;
+  }
+  function pctCell(value) {
+    const n = num(value);
+    return n === null ? '<span class="small">--</span>' : B.pct(n);
+  }
+  function portfolioWeightHtml(value, maxWeight) {
+    const n = num(value) || 0;
+    const width = Math.max(3, Math.min(100, maxWeight > 0 ? (n / maxWeight) * 100 : 0));
+    return `<div class="portfolio-weight"><span><i style="width:${width.toFixed(2)}%"></i></span><b>${B.pct(n)}</b></div>`;
+  }
+  function portfolioFundRows() {
+    const snap = currentHoldingSnapshot();
+    const holdings = (snap.holdings || []).filter((row) => (num(row.权重) || 0) > 0);
+    const configDate = latestRebalanceDate() || snap.日期 || detail.holdingMeta.最新持仓日 || "";
+    const currentDate = snap.日期 || detail.holdingMeta.最新持仓日 || configDate;
+    const rows = holdings.map((row) => {
+      const data = fundData(row);
+      const allocation = fundAllocation(row, data);
+      return {
+        ...row,
+        _fundData: data,
+        _category: holdingCategory(row, data),
+        _secondary: secondaryCategory(row, data),
+        _allocation: allocation,
+        _configDate: configDate || row.持仓日期 || "",
+        _holdingDays: dayDiff(configDate || row.持仓日期, currentDate),
+        _intervalReturn: num(row.调仓后收益率 ?? data.区间收益率),
+        _oneYearReturn: num(row.近1年收益),
+      };
+    });
+    const order = new Map(["现金类", "固收类", "股票类", "混合类", "其他"].map((name, index) => [name, index]));
+    return rows.sort((a, b) => (order.get(a._category) ?? 99) - (order.get(b._category) ?? 99) || (num(b.权重) || 0) - (num(a.权重) || 0));
+  }
+  function portfolioHoldingsSection() {
+    const rows = portfolioFundRows();
+    const maxWeight = Math.max(0, ...rows.map((row) => num(row.权重) || 0));
+    const groups = new Map();
+    rows.forEach((row) => {
+      const list = groups.get(row._category) || [];
+      list.push(row);
+      groups.set(row._category, list);
+    });
+    const totalWeight = rows.reduce((acc, row) => acc + (num(row.权重) || 0), 0);
+    const totals = { 股票: 0, 固收: 0, 现金: 0, 基金: 0, 其他: 0, 其中可转债: 0 };
+    rows.forEach((row) => {
+      const weight = num(row.权重) || 0;
+      Object.keys(totals).forEach((key) => {
+        totals[key] += weight * ((num(row._allocation[key]) || 0) / 100);
+      });
+    });
+    const weightedReturn = (field) => {
+      const valid = rows.filter((row) => num(row[field]) !== null && (num(row.权重) || 0) > 0);
+      const weight = valid.reduce((acc, row) => acc + (num(row.权重) || 0), 0);
+      if (!weight) return null;
+      return valid.reduce((acc, row) => acc + (num(row.权重) || 0) * (num(row[field]) || 0), 0) / weight;
+    };
+    const body = [...groups.entries()].map(([category, list]) => list.map((row, index) => `<tr>
+      ${index === 0 ? `<td class="portfolio-category" rowspan="${list.length}">${B.esc(category)}</td>` : ""}
+      <td class="portfolio-code">${fundLink(row, row.基金代码 || "--")}</td>
+      <td class="portfolio-name">${fundLink(row, row.基金名称 || row.基金代码 || "未命名基金")}</td>
+      <td>${B.esc(row._secondary || "--")}</td>
+      <td>${portfolioWeightHtml(row.权重, maxWeight)}</td>
+      <td>${B.esc(row._configDate || "--")}</td>
+      <td>${row._holdingDays === null ? "--" : row._holdingDays}</td>
+      <td>${pctCell(row._allocation.股票)}</td>
+      <td>${pctCell(row._allocation.固收)}</td>
+      <td>${pctCell(row._allocation.现金)}</td>
+      <td>${pctCell(row._allocation.基金)}</td>
+      <td>${pctCell(row._allocation.其他)}</td>
+      <td>${pctCell(row._allocation.其中可转债)}</td>
+      <td class="${returnTone(row._intervalReturn)}">${B.pctSigned(row._intervalReturn)}</td>
+      <td class="${returnTone(row._oneYearReturn)}">${B.pctSigned(row._oneYearReturn)}</td>
+    </tr>`).join("")).join("");
+    return `<section class="panel portfolio-holding-panel">
+      <div class="panel-head">
+        <div>
+          <h2>组合基金持仓</h2>
+          <p class="desc">参考组合持仓表模式展示底层基金、组合占比、配置日志和基金资产暴露。资产配置列来自基金详情包的资产暴露解析；缺失时按基金分类兜底估算。</p>
+        </div>
+        <span class="pill">${rows.length.toLocaleString("zh-CN")} 只基金</span>
+      </div>
+      <div class="portfolio-table-wrap">
+        <table class="portfolio-holding-table">
+          <thead>
+            <tr class="portfolio-super-head">
+              <th colspan="5">组合持仓与占比</th>
+              <th colspan="2">配置日志</th>
+              <th colspan="6">基金资产配置估算</th>
+              <th colspan="2">区间个基表现</th>
+            </tr>
+            <tr>
+              <th>${B.label("基金类型分类")}</th>
+              <th>${B.label("基金代码")}</th>
+              <th>${B.label("基金名称")}</th>
+              <th>${B.label("二级分类")}</th>
+              <th>${B.label("组合占比")}</th>
+              <th>${B.label("配置日")}</th>
+              <th>${B.label("持有时长")}</th>
+              <th>股票</th>
+              <th>固收</th>
+              <th>现金</th>
+              <th>基金</th>
+              <th>其他</th>
+              <th>其中可转债</th>
+              <th>${B.label("基金持有区间收益")}</th>
+              <th>${B.label("基金近1年收益")}</th>
+            </tr>
+          </thead>
+          <tbody>${body || '<tr><td colspan="15"><div class="empty">暂无当前组合基金持仓</div></td></tr>'}</tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4">组合合计</td>
+              <td>${B.pct(totalWeight)}</td>
+              <td>--</td>
+              <td>--</td>
+              <td>${pctCell(totals.股票)}</td>
+              <td>${pctCell(totals.固收)}</td>
+              <td>${pctCell(totals.现金)}</td>
+              <td>${pctCell(totals.基金)}</td>
+              <td>${pctCell(totals.其他)}</td>
+              <td>${pctCell(totals.其中可转债)}</td>
+              <td>${B.pctSigned(weightedReturn("_intervalReturn"))}</td>
+              <td>${B.pctSigned(weightedReturn("_oneYearReturn"))}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>`;
+  }
   function pairCard(title, rows) {
     const body = rows.map(([labelName, value, formatter]) => `
       <div class="pair-row"><span>${B.label(labelName)}</span><strong>${formatter ? formatter(value) : B.valueHtml(labelName, value)}</strong></div>
@@ -383,6 +653,7 @@
   function holdingValue(row, h) {
     if (h === "基金代码") return `<strong>${fundLink(row, row[h] || "")}</strong>`;
     if (h === "基金名称") return fundLink(row, row[h] || "未命名基金");
+    if (h === "二级分类") return B.esc(secondaryCategory(row, fundData(row)));
     if (["权重", "上次调仓后权重"].includes(h)) return B.pct(row[h]);
     if (["权重变化", "日涨幅", "调仓后收益率", "调仓后收益贡献"].includes(h)) return B.pctSigned(row[h]);
     return B.fmt(row[h]);
@@ -607,6 +878,8 @@
         ${benchmarkInfo()}
       </div>
     </section>
+    ${portfolioHoldingsSection()}
+    ${entityGraphSection()}
     <section class="panel chart-panel">
       <div class="panel-head">
         <div>

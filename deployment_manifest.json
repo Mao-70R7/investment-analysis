@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-11T18:28:23+08:00",
+  "generatedAt": "2026-06-17T11:49:02+08:00",
   "deployDir": "E:\\synctingDataToWork\\全市场投顾分析平台",
   "pageSet": "basic_data",
   "defaultPage": "basic_data/index.html",
@@ -14,8 +14,8 @@
   },
   "basicData": {
     "exists": true,
-    "files": 1172,
-    "bytes": 864670627
+    "files": 1179,
+    "bytes": 913502309
   },
   "fullDataStatisticsReport": {
     "exists": false,

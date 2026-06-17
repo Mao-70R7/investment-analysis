@@ -6,6 +6,10 @@
   const insight = summary.insightData || {};
   const points = insight.策略表现点 || [];
   const listStats = summary.strategyListStats || {};
+  const benchmarkDisclosure = summary.benchmarkDisclosure || {};
+  const benchmarkOverview = benchmarkDisclosure.总览 || {};
+  const benchmarkByType = benchmarkDisclosure.按研报产品类型 || [];
+  const benchmarkByInstitution = benchmarkDisclosure.按机构 || [];
 
   function raw(value) {
     return value === null || value === undefined ? "" : String(value);
@@ -64,6 +68,16 @@
     return Number(value || 0).toLocaleString("zh-CN");
   }
 
+  function percent(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number.toFixed(2)}%` : "未披露";
+  }
+
+  function benchmarkFormatter(row, field) {
+    if (field === "披露覆盖率") return B.pct(row[field]);
+    return B.fmt(row[field]);
+  }
+
   function actionRow(title, desc, href, action = "进入", gate = "") {
     return `<div class="rank-row">
       <div><strong>${B.esc(title)}</strong><span>${B.esc(desc)}</span></div>
@@ -109,6 +123,26 @@
         <div class="rank-row"><div><strong>源表不等于展示样本</strong><span>源表 ${count(sourceTotal)} 条；完整可展示策略 ${count(evidenceRecords)} 条；${count(hiddenGap)} 条来自 ${count(hiddenChannels)} 个暂不展示渠道或非当前展示口径。</span></div><span class="rank-value">全局口径</span></div>
         <div class="rank-row"><div><strong>系列样本不等于策略记录</strong><span>目标盈按系列归并，${count(targetPeriodRecords)} 条目标盈期次压缩为 ${count(targetSeriesRows.length)} 个系列，合并掉 ${count(targetMerged)} 条重复期次，系列归并后样本为 ${count(operatingRows.length)} 个。</span></div><a class="link" href="./insights.html?tab=market">看市场总览</a></div>
       </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><h2>天天基金业绩基准说明披露</h2><p class="desc">${B.esc(benchmarkDisclosure.统计口径 || "天天基金/投顾渠道全部策略；按详情页业绩基准说明文本统计。")}</p></div></div>
+      <section class="insight-hero">
+        ${B.metric("天天基金策略数", benchmarkOverview.策略数 || 0, "渠道口径，不按展示样本过滤")}
+        ${B.metric("有业绩基准说明", benchmarkOverview.有业绩基准说明 || 0, "详情页存在可读取披露文本")}
+        ${B.metric("无业绩基准说明", benchmarkOverview.无业绩基准说明 || 0, "不使用仅曲线状态替代说明文本")}
+        ${B.metric("披露覆盖率", percent(benchmarkOverview.披露覆盖率), benchmarkOverview.详情缺失策略数 ? `详情缺失 ${count(benchmarkOverview.详情缺失策略数)} 条` : "详情文件已覆盖全部天天基金策略")}
+      </section>
+      <section class="two-col">
+        <section>
+          <div class="panel-head"><h2>按研报产品类型</h2></div>
+          ${B.table(["研报产品类型", "策略数", "有业绩基准说明", "无业绩基准说明", "披露覆盖率"], benchmarkByType, benchmarkFormatter)}
+        </section>
+        <section>
+          <div class="panel-head"><h2>按投顾机构</h2></div>
+          ${B.table(["投顾机构", "策略数", "有业绩基准说明", "无业绩基准说明", "披露覆盖率"], benchmarkByInstitution.slice(0, 20), benchmarkFormatter)}
+        </section>
+      </section>
     </section>
 
     <details class="panel fold-block">

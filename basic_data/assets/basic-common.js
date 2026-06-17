@@ -19,7 +19,7 @@ window.BasicData = (() => {
     "主可比池", "市场地域", "主动被动", "特殊标签", "策略实现标签", "权益基金权重", "债券基金权重",
     "货币基金权重", "混合基金权重", "QDII权重", "指数基金权重", "主动基金权重", "基准权益权重",
     "基准债券权重", "基准货币权重", "基准可用状态", "基础数据等级", "费率状态", "年化投顾费率", "分类依据",
-    "运作天数", "数据完整性", "质检情况", "稽核结论", "近一周", "近一月", "近三月", "近1年", "今年以来",
+    "运作天数", "数据完整性", "质检情况", "稽核结论", "近一周", "近一月", "近三月", "近6月", "近1年", "今年以来",
     "累计收益率", "自建累计收益", "与官方偏差", "最大回撤", "当前回撤", "年化收益", "波动率", "夏普比率",
     "单次平均换手率", "年化换手率", "调仓频率", "最近一年调仓次数", "官方对比口径", "可比记录数",
     "持仓来源", "持仓基金数", "权重", "上次调仓后权重", "权重变化", "调仓动作", "调仓基金数", "调后权重和", "区间", "年度",
@@ -75,9 +75,6 @@ window.BasicData = (() => {
     const text = String(field || "");
     if (text.includes("基金分类依据")) {
       return "计算口径：展示单只基金归类时命中的证据链。优先取基金代码/名称标准字典，其次取平台持仓披露的资产类型或分组，再用基金名称、跟踪指数、QDII/ETF/FOF/REIT/黄金/商品/短债/纯债/可转债等关键词兜底。该字段用于解释为什么基金被归入当前基金类型。";
-    }
-    if (text.includes("基金分类置信度")) {
-      return "计算口径：A=命中基金标准字典或明确代码规则；B=有平台披露分类且名称规则能解释；C=主要依赖基金名称/指数关键词；D=缺少标准档案或平台分类，仅能用兜底规则，后续需要补采公开基金资料。";
     }
     if (text.includes("资产暴露") || text.includes("研报大类资产")) {
       return "计算口径：先识别单只基金主类型，再把基金权重拆到A股、港股、美股、债券、货币及现金、黄金、商品、海外债、REIT等资产。图表权重=sum(策略基金权重*基金对应资产暴露比例)。例如固收+/偏债混合默认拆为债券70%+A股25%+现金5%，沪港深权益默认A股55%+港股40%+现金5%。";
@@ -153,11 +150,15 @@ window.BasicData = (() => {
   function showInfoModal(title, body) {
     byId("fieldModalTitle").textContent = title;
     byId("fieldModalBody").textContent = body;
+    byId("fieldModalBody").scrollTop = 0;
+    byId("fieldModalBody").scrollLeft = 0;
     byId("fieldModal").hidden = false;
   }
   function showHtmlModal(title, html) {
     byId("fieldModalTitle").textContent = title;
     byId("fieldModalBody").innerHTML = html;
+    byId("fieldModalBody").scrollTop = 0;
+    byId("fieldModalBody").scrollLeft = 0;
     byId("fieldModal").hidden = false;
   }
   function fmt(value, suffix = "") {
@@ -175,7 +176,7 @@ window.BasicData = (() => {
     const cls = number > 0 ? "ret-pos" : number < 0 ? "ret-neg" : "ret-zero";
     return `<span class="${cls}">${number.toFixed(2)}%</span>`;
   }
-  const returnFieldNames = new Set(["官方累计收益", "自建累计收益", "与官方偏差", "最大回撤", "当前回撤", "年化收益", "波动率", "权重变化", "调仓后收益率", "调仓后收益贡献", "近一周", "近一月", "近三月", "近1年", "今年以来", "累计收益率", "策略收益", "基准收益", "基准业绩", "调仓超额"]);
+  const returnFieldNames = new Set(["官方累计收益", "自建累计收益", "与官方偏差", "最大回撤", "当前回撤", "年化收益", "波动率", "权重变化", "调仓后收益率", "调仓后收益贡献", "近一周", "近一月", "近三月", "近6月", "近1年", "今年以来", "累计收益率", "策略收益", "基准收益", "基准业绩", "调仓超额"]);
   const returnFieldHints = ["收益", "回撤", "波动", "偏差", "贡献", "涨幅", "超额"];
   function isReturnField(field) {
     return returnFieldNames.has(field) || returnFieldHints.some((word) => String(field).includes(word));
