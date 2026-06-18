@@ -276,6 +276,43 @@ tr:last-child td { border-bottom: 0; }
 .classification-rule-card span { display:block; color:#53657a; font-size:12px; line-height:1.62; overflow-wrap:anywhere; }
 .classification-note-lines { display:grid; gap:8px; }
 .control { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 0 9px; background: #fff; color: var(--ink); }
+.metric-search-row { display:grid; grid-template-columns:minmax(280px,.9fr) minmax(0,1.1fr); gap:12px; align-items:start; margin-bottom:14px; }
+.metric-search-box { display:grid; gap:6px; color:#475467; font-size:12px; font-weight:700; }
+.metric-search-results { display:flex; flex-wrap:wrap; gap:8px; align-content:start; min-height:36px; }
+.metric-result { border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; color:#344054; padding:7px 9px; display:grid; gap:2px; min-width:128px; max-width:220px; text-align:left; cursor:pointer; }
+.metric-result strong { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#172033; }
+.metric-result span { font-size:11px; color:#667085; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.metric-result:hover, .metric-result.is-active { border-color:#95c3ca; background:#f2fafb; color:var(--brand-dark); }
+.metric-analysis-card { display:grid; gap:14px; }
+.metric-analysis-title { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:12px; }
+.metric-analysis-title h3 { margin:0; font-size:18px; }
+.metric-kpis { margin:0; }
+.metric-lineage { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+.metric-lineage > div { min-width:0; border:1px solid #dbe4ee; border-radius:8px; background:#fff; padding:10px; }
+.metric-lineage strong { display:block; color:#24364a; margin-bottom:5px; font-size:13px; }
+.metric-lineage p { margin:0; color:#526174; line-height:1.65; font-size:12px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.metric-factor-list { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.metric-factor-link { cursor:pointer; }
+.metric-alert-panel { border:1px solid #dbe4ee; border-radius:8px; background:#fff; padding:12px; display:grid; gap:10px; }
+.metric-alert-panel h3 { margin:0; font-size:15px; color:#24364a; }
+.metric-alert-panel-muted { background:#fbfdff; }
+.metric-alert-list { list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+.metric-alert-item { border:1px solid #dbe4ee; border-left-width:4px; border-radius:8px; background:#fbfdff; padding:9px 10px; display:grid; grid-template-columns:42px minmax(0,1fr); gap:8px; align-items:start; }
+.metric-alert-item span { display:inline-flex; justify-content:center; align-items:center; border-radius:999px; height:22px; font-size:12px; font-weight:700; }
+.metric-alert-item p { margin:0; color:#475467; font-size:12px; line-height:1.65; overflow-wrap:anywhere; }
+.metric-alert-item.is-high { border-left-color:#d92d20; background:#fff7f5; }
+.metric-alert-item.is-high span { color:#b42318; background:#fee4e2; }
+.metric-alert-item.is-mid { border-left-color:#dc8603; background:#fffaf0; }
+.metric-alert-item.is-mid span { color:#8a5a13; background:#fef0c7; }
+.metric-alert-item.is-low { border-left-color:#2e90fa; background:#f5faff; }
+.metric-alert-item.is-low span { color:#175cd3; background:#d1e9ff; }
+.metric-table-link { border:0; background:transparent; color:var(--brand-dark); font-weight:700; padding:0; cursor:pointer; text-align:left; font:inherit; }
+.metric-table-link:hover { text-decoration:underline; }
+.muted-text { color:#667085; font-size:12px; }
+.status-badge { display:inline-flex; align-items:center; white-space:nowrap; border-radius:999px; border:1px solid #dbe4ee; padding:4px 9px; font-size:12px; font-weight:700; }
+.status-badge.status-ok { color:#0f7b4f; border-color:#b9decf; background:#f2fbf7; }
+.status-badge.status-warn { color:#8a5a13; border-color:#ecd59d; background:#fff8e6; }
+.status-badge.status-bad { color:#b42318; border-color:#efc2bc; background:#fff5f2; }
 .small { color: var(--muted); font-size: 12px; }
 .link { color: var(--brand-dark); font-weight: 650; }
 .pill {
@@ -960,7 +997,7 @@ tr:last-child td { border-bottom: 0; }
   .core-line-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .class-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .insight-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .insight-grid, .insight-layout, .insight-dimension-grid, .asset-trend-layout, .compare-fund-grid, .compare-rebalance-grid, .compare-search-row, .overlap-matrix-grid, .compare-ai-grid, .compare-distribution-grid, .compare-advisor-grid, .compare-strategy-distribution, .compare-profit-grid { grid-template-columns: 1fr; }
+  .insight-grid, .insight-layout, .insight-dimension-grid, .asset-trend-layout, .compare-fund-grid, .compare-rebalance-grid, .compare-search-row, .metric-search-row, .metric-lineage, .overlap-matrix-grid, .compare-ai-grid, .compare-distribution-grid, .compare-advisor-grid, .compare-strategy-distribution, .compare-profit-grid { grid-template-columns: 1fr; }
   .entity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .compare-pick-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .compare-point-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); }
@@ -986,7 +1023,8 @@ tr:last-child td { border-bottom: 0; }
   .quality-grid { grid-template-columns: 1fr; }
   .hero-kpis, .return-grid, .hero-dates, .core-line-values, .class-chip-grid, .class-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profile-compact, .core-line { grid-template-columns: 1fr; }
-  .insight-filters, .insight-hero, .insight-bar-row, .signal-chart-row, .signal-x-axis, .opportunity-row, .insight-mini-grid, .rank-row, .strategy-decision-kpis, .strategy-decision-item, .compare-pick-grid, .compare-pick-card, .compare-point-kpis, .compare-share-row { grid-template-columns: 1fr; }
+  .insight-filters, .insight-hero, .insight-bar-row, .signal-chart-row, .signal-x-axis, .opportunity-row, .insight-mini-grid, .rank-row, .metric-search-row, .metric-lineage, .strategy-decision-kpis, .strategy-decision-item, .compare-pick-grid, .compare-pick-card, .compare-point-kpis, .compare-share-row { grid-template-columns: 1fr; }
+  .metric-analysis-title { flex-direction:column; }
   .ai-kpi-grid, .ai-diagnostic-grid, .ai-help-grid { grid-template-columns: 1fr; }
   .fund-link-actions { justify-content:flex-start; }
   .signal-chart-meta { text-align:left; }

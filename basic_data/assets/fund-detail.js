@@ -111,7 +111,7 @@
       <div class="panel-head">
         <div>
           <h2>基金实体描述</h2>
-          <p class="desc">基于基金分类、资产暴露、行业主题、研报大类资产和基金名称抽取；暴露比例来自基金资产暴露或结构化分类。</p>
+          <p class="desc">基于基金分类快照、资产暴露、行业主题、研报大类资产和基金名称抽取；优先使用季报穿透，缺失时使用规则估算兜底。</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 个实体</span>
       </div>
@@ -166,20 +166,21 @@
   const fundHoldings = holdings
     .filter((row) => Number(row?.[0]) === fundIndex)
     .map((row) => toObject(holdingFields, row))
-    .sort((a, b) => Number(b[holdingFields[12]] || 0) - Number(a[holdingFields[12]] || 0));
+    .sort((a, b) => Number(b.期末持仓比例 || 0) - Number(a.期末持仓比例 || 0));
   const fundMonthly = monthly
     .filter((row) => Number(row?.[0]) === fundIndex)
     .map((row) => toObject(monthlyFields, row))
     .sort((a, b) => String(b[monthlyFields[1]] || "").localeCompare(String(a[monthlyFields[1]] || "")));
 
   const summaryFields = pickFields(fundFields, [
-    "基金代码", "基金名称", "基金公司", "基金类型", "二级分类", "资产暴露", "行业暴露",
+    "基金代码", "基金名称", "基金公司", "基金类型", "二级分类", "基金分类来源",
+    "基金穿透报告期", "基金穿透覆盖状态", "是否估算分类", "资产暴露", "行业暴露",
     "研报大类资产", "广发基金产品", "总权重", "广发策略权重", "非广发策略权重",
     "持仓策略数", "中位权重", "区间收益率", "增持策略数", "减持策略数"
   ]);
   const holdingDisplayFields = pickFields(holdingFields, [
     "策略名称", "投顾机构", "渠道", "是否广发策略", "风险等级", "业务分类",
-    "研报产品类型", "天天当前对客展示", "初持仓比例", "期末持仓比例",
+    "研报产品类型", "天天当前对客展示", "基金分类来源", "基金穿透报告期", "初持仓比例", "期末持仓比例",
     "权重变化", "区间收益率", "近1年"
   ]);
   const monthlyDisplayFields = monthlyFields.slice(1);

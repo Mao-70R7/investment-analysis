@@ -79,7 +79,10 @@
     "基金类型分类": "按持仓基金的资产类型、基金同类分组和基金详情包中的基金类型归并为现金类、固收类、股票类、混合类或其他。",
     "配置日": "该组合当前配置的起始日期。优先使用最新历史调仓日期；若没有历史调仓事件，则使用当前持仓日期。",
     "持有时长": "最新持仓日减去配置日得到的自然日天数。无法解析日期时显示未披露。",
-    "资产配置估算": "基于 fund_detail_pack 中的基金资产暴露字段拆分股票、固收、现金、基金、其他和其中可转债。缺少资产暴露时按基金标准分类做兜底估算，不等同于基金最新季报原文披露。",
+    "资产配置估算": "优先基于 fund_detail_pack 中的季报穿透资产暴露拆分股票、固收、现金、基金、其他和其中可转债；缺少季报穿透时按基金标准分类做兜底估算。",
+    "基金分类来源": "说明该基金分类和暴露字段的来源。东财F10季报穿透表示已读取基金季报资产配置；规则估算表示暂未取得季报穿透，使用基金类型、名称和平台披露分类兜底。",
+    "基金穿透报告期": "当前基金资产暴露使用的季报报告期。历史持仓快照会优先选择报告期不晚于持仓日期的分类快照。",
+    "基金穿透覆盖状态": "exact_quarterly_asset_and_stock 表示已有季报资产配置和股票持仓行业推导；exact_quarterly_asset_only 表示仅有季报资产配置；空值表示走规则估算兜底。",
     "基金持有区间收益": "优先使用策略详情中该基金调仓后收益率；缺失时使用基金详情包内的区间收益率。",
     "基金近1年收益": "使用该基金日度净值计算的近1年收益率；缺失时显示未披露。"
   });
@@ -121,7 +124,7 @@
       <div class="panel-head">
         <div>
           <h2>实体图谱</h2>
-          <p class="desc">基于最新持仓基金的结构化分类、资产暴露和基金名称抽取；权重为策略持仓权重按基金暴露比例汇总。</p>
+          <p class="desc">基于最新持仓基金的分类快照、资产暴露和基金名称抽取；权重为策略持仓权重按基金暴露比例汇总，优先使用季报穿透。</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 个实体</span>
       </div>
@@ -275,6 +278,8 @@
       <td class="portfolio-code">${fundLink(row, row.基金代码 || "--")}</td>
       <td class="portfolio-name">${fundLink(row, row.基金名称 || row.基金代码 || "未命名基金")}</td>
       <td>${B.esc(row._secondary || "--")}</td>
+      <td>${B.esc(row._fundData.基金分类来源 || "规则估算")}</td>
+      <td>${B.esc(row._fundData.基金穿透报告期 || "--")}</td>
       <td>${portfolioWeightHtml(row.权重, maxWeight)}</td>
       <td>${B.esc(row._configDate || "--")}</td>
       <td>${row._holdingDays === null ? "--" : row._holdingDays}</td>
@@ -291,7 +296,7 @@
       <div class="panel-head">
         <div>
           <h2>组合基金持仓</h2>
-          <p class="desc">参考组合持仓表模式展示底层基金、组合占比、配置日志和基金资产暴露。资产配置列来自基金详情包的资产暴露解析；缺失时按基金分类兜底估算。</p>
+          <p class="desc">参考组合持仓表模式展示底层基金、组合占比、配置日志和基金资产暴露。资产配置列优先来自基金季报穿透；缺失时按基金分类兜底估算。</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 只基金</span>
       </div>
@@ -299,7 +304,7 @@
         <table class="portfolio-holding-table">
           <thead>
             <tr class="portfolio-super-head">
-              <th colspan="5">组合持仓与占比</th>
+              <th colspan="7">组合持仓与占比</th>
               <th colspan="2">配置日志</th>
               <th colspan="6">基金资产配置估算</th>
               <th colspan="2">区间个基表现</th>
@@ -309,6 +314,8 @@
               <th>${B.label("基金代码")}</th>
               <th>${B.label("基金名称")}</th>
               <th>${B.label("二级分类")}</th>
+              <th>${B.label("基金分类来源")}</th>
+              <th>${B.label("基金穿透报告期")}</th>
               <th>${B.label("组合占比")}</th>
               <th>${B.label("配置日")}</th>
               <th>${B.label("持有时长")}</th>
@@ -322,10 +329,10 @@
               <th>${B.label("基金近1年收益")}</th>
             </tr>
           </thead>
-          <tbody>${body || '<tr><td colspan="15"><div class="empty">暂无当前组合基金持仓</div></td></tr>'}</tbody>
+          <tbody>${body || '<tr><td colspan="17"><div class="empty">暂无当前组合基金持仓</div></td></tr>'}</tbody>
           <tfoot>
             <tr>
-              <td colspan="4">组合合计</td>
+              <td colspan="6">组合合计</td>
               <td>${B.pct(totalWeight)}</td>
               <td>--</td>
               <td>--</td>
