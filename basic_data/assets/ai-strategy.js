@@ -8,7 +8,10 @@
   const holdingPack = window.__BASIC_HOLDING_SNAPSHOT_PACK__ || null;
   const semanticIndex = window.__AI_STRATEGY_SEMANTIC_INDEX__ || null;
   const fundDetailPack = window.__BASIC_DATA__?.fundDetailPack || null;
-  const aiConfig = window.__AI_STRATEGY_CONFIG__ || {};
+  const modelConfigStorageKey = "aiStrategyModelConfigV3";
+  const aiConfigFileDefault = Object.assign({}, window.__AI_STRATEGY_CONFIG__ || {});
+  const aiConfig = Object.assign({}, aiConfigFileDefault, readStoredModelConfig());
+  window.__AI_STRATEGY_CONFIG__ = aiConfig;
   let modelBackoffUntil = 0;
   const allowedReturnMetrics = new Set(["近一周", "近一月", "近三月", "近6月", "近1年", "今年以来", "累计收益率", "年化收益"]);
   const allowedReportTypes = new Set(["固收+型", "纯债型", "股票型", "多元配置型", "股债混合型", "海外/全球型", "主题/行业型", "现金管理型", "偏股配置型"]);
@@ -142,6 +145,8 @@
     "not contains": "不包含",
     "=": "等于",
     "!=": "不等于",
+    in: "等于任一",
+    "not in": "不等于任一",
     ">=": "大于等于",
     "<=": "小于等于",
     ">": "大于",
@@ -149,7 +154,8 @@
     "is empty": "为空",
     "is not empty": "有值",
   };
-  const operatorOptions = ["contains", "contains_any", "not contains", ">=", "<=", ">", "<", "=", "!=", "is not empty", "is empty"];
+  const operatorOptions = ["contains", "contains_any", "not contains", "in", "not in", ">=", "<=", ">", "<", "=", "!=", "is not empty", "is empty"];
+  const singleValueCategoricalFields = new Set(["研报产品类型", "业务分类", "市场地域", "主动被动", "运作状态", "基础数据等级", "风险等级", "业务组合分类"]);
   const defaultQuery = "找成立一年以上，回撤在15个点以内，收益率在15个点以上，持仓含德国、日本的策略。";
   const state = {
     query: new URLSearchParams(window.location.search).get("q") || defaultQuery,
@@ -162,12 +168,150 @@
     limit: 100,
     searchSeq: 0,
     selectedCompareIds: [],
+    selectedScatterId: "",
+    scatterXField: "",
+    scatterYField: "",
     lastResult: null,
   };
   const compareMaxCount = 5;
+  const scatterMetricOptions = [
+    "最大回撤",
+    "当前回撤",
+    "累计收益率",
+    "年化收益",
+    "近6月",
+    "近1年",
+    "今年以来",
+    "近三月",
+    "近一月",
+    "波动率",
+    "夏普比率",
+    "权益基金权重",
+    "债券基金权重",
+    "货币基金权重",
+    "QDII权重",
+    "指数基金权重",
+    "主动基金权重",
+    "持仓基金数",
+    "调仓次数",
+    "最近一年调仓次数",
+    "单次平均换手率",
+    "年化换手率",
+  ];
+  const percentMetricFields = new Set([
+    "最大回撤",
+    "当前回撤",
+    "累计收益率",
+    "年化收益",
+    "近6月",
+    "近1年",
+    "今年以来",
+    "近三月",
+    "近一月",
+    "波动率",
+    "权益基金权重",
+    "债券基金权重",
+    "货币基金权重",
+    "QDII权重",
+    "指数基金权重",
+    "主动基金权重",
+    "单次平均换手率",
+    "年化换手率",
+  ]);
 
   function raw(value) {
     return value === null || value === undefined ? "" : String(value);
+  }
+
+  function readStoredModelConfig() {
+    try {
+      const text = window.localStorage?.getItem(modelConfigStorageKey);
+      if (!text) return {};
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function writeStoredModelConfig(config) {
+    try {
+      window.localStorage?.setItem(modelConfigStorageKey, JSON.stringify(config || {}));
+    } catch (error) {
+      // localStorage can be unavailable in hardened browser modes; runtime config still applies.
+    }
+  }
+
+  function clearStoredModelConfig() {
+    try {
+      window.localStorage?.removeItem(modelConfigStorageKey);
+    } catch (error) {
+      // Ignore storage cleanup failures.
+    }
+  }
+
+  function normalizeModelBaseUrl(value) {
+    let text = raw(value).trim();
+    if (!text) return "";
+    text = text.replace(/\/+$/, "");
+    return text.replace(/\/chat\/completions$/i, "");
+  }
+
+  function normalizeModelEndpoint(value, baseUrl = "") {
+    const explicit = raw(value).trim();
+    if (explicit) {
+      const cleaned = explicit.replace(/\/+$/, "");
+      return /\/chat\/completions$/i.test(cleaned) ? cleaned : `${cleaned}/chat/completions`;
+    }
+    const base = normalizeModelBaseUrl(baseUrl);
+    return base ? `${base}/chat/completions` : "";
+  }
+
+  function modelBaseUrl(config = aiConfig) {
+    return normalizeModelBaseUrl(config.baseUrl || config.endpoint || "");
+  }
+
+  function modelChatEndpoint(config = aiConfig) {
+    return normalizeModelEndpoint(config.endpoint || "", config.baseUrl || "");
+  }
+
+  function isCodexProxyConfig(config = aiConfig) {
+    return /codex/i.test(raw(config.provider)) || /127\.0\.0\.1:8787|localhost:8787/.test(raw(config.endpoint));
+  }
+
+  function modelDisplayLabel(config = aiConfig) {
+    if (config.enabled === false) return "模型解析未启用";
+    const endpoint = modelBaseUrl(config) || modelChatEndpoint(config) || "未配置";
+    return `模型解析 ${raw(config.model || "未配置模型")} @ ${endpoint}`;
+  }
+
+  function parseHeadersJson(text) {
+    const value = raw(text).trim();
+    if (!value) return {};
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("headers 必须是 JSON 对象");
+    return parsed;
+  }
+
+  function applyRuntimeModelConfig(nextConfig, persist = true) {
+    const normalized = {
+      enabled: nextConfig.enabled !== false,
+      provider: raw(nextConfig.provider || "inner-ds-openai-compatible").trim() || "inner-ds-openai-compatible",
+      baseUrl: normalizeModelBaseUrl(nextConfig.baseUrl || nextConfig.endpoint || ""),
+      endpoint: normalizeModelEndpoint(nextConfig.endpoint || "", nextConfig.baseUrl || nextConfig.endpoint || ""),
+      model: raw(nextConfig.model || "").trim(),
+      timeoutMs: Math.min(Math.max(Number(nextConfig.timeoutMs) || 45000, 800), 120000),
+      mode: raw(nextConfig.mode || "hybrid-parse").trim() || "hybrid-parse",
+      apiKey: raw(nextConfig.apiKey || ""),
+      headers: nextConfig.headers && typeof nextConfig.headers === "object" && !Array.isArray(nextConfig.headers) ? nextConfig.headers : {},
+      rateLimitBackoffMs: Math.max(Number(nextConfig.rateLimitBackoffMs) || 60000, 1000),
+      responseFormat: nextConfig.responseFormat !== false,
+    };
+    Object.assign(aiConfig, normalized);
+    window.__AI_STRATEGY_CONFIG__ = aiConfig;
+    modelBackoffUntil = 0;
+    if (persist) writeStoredModelConfig(normalized);
+    return normalized;
   }
 
   function num(value) {
@@ -1183,7 +1327,81 @@
   ];
 
   function filterKey(filter) {
-    return `${filter.field}|${filter.op}|${raw(filter.value)}|${filter.unit || ""}`;
+    return `${filter.field}|${filter.op}|${filterValues(filter).join("|")}|${filter.unit || ""}`;
+  }
+
+  function filterValues(filter) {
+    const source = Array.isArray(filter?.values) ? filter.values : (Array.isArray(filter?.value) ? filter.value : [filter?.value]);
+    return source
+      .flatMap((value) => raw(value).split(/\s*(?:\||、|，|,)\s*/))
+      .map((value) => raw(value).trim())
+      .filter(Boolean);
+  }
+
+  function isPositiveCategoricalFilter(filter) {
+    if (!filter || filter.system || !singleValueCategoricalFields.has(filter.field)) return false;
+    return ["=", "contains", "in", "contains_any"].includes(raw(filter.op || "contains"));
+  }
+
+  function isNegativeCategoricalFilter(filter) {
+    if (!filter || filter.system || !singleValueCategoricalFields.has(filter.field)) return false;
+    return ["!=", "not contains", "not in"].includes(raw(filter.op || "contains"));
+  }
+
+  function normalizeLogicalFilters(filters, parsed = null) {
+    const result = [];
+    const positiveGroups = new Map();
+    const negativeValuesByField = new Map();
+    (filters || []).forEach((filter) => {
+      const normalized = { ...filter, label: filter.label || filterLabel(filter) };
+      if (isNegativeCategoricalFilter(normalized)) {
+        const set = negativeValuesByField.get(normalized.field) || new Set();
+        filterValues(normalized).forEach((value) => set.add(value));
+        negativeValuesByField.set(normalized.field, set);
+        result.push(normalized);
+        return;
+      }
+      if (isPositiveCategoricalFilter(normalized)) {
+        const key = normalized.field;
+        const existing = positiveGroups.get(key) || { field: normalized.field, values: [], filters: [], ambiguous: false, unit: normalized.unit || "" };
+        filterValues(normalized).forEach((value) => {
+          if (!existing.values.includes(value)) existing.values.push(value);
+        });
+        existing.filters.push(normalized);
+        existing.ambiguous = existing.ambiguous || !!normalized.ambiguous;
+        positiveGroups.set(key, existing);
+        return;
+      }
+      result.push(normalized);
+    });
+    positiveGroups.forEach((group) => {
+      const negativeValues = negativeValuesByField.get(group.field) || new Set();
+      const values = group.values.filter((value) => !negativeValues.has(value));
+      if (!values.length) {
+        parsed?.warnings?.push(`${fieldLabel(group.field)}存在正向和排除条件冲突，已保留排除条件并移除正向条件。`);
+        return;
+      }
+      if (values.length < group.values.length) {
+        parsed?.warnings?.push(`${fieldLabel(group.field)}部分候选值同时被排除，已从正向筛选中移除：${group.values.filter((value) => negativeValues.has(value)).join("、")}。`);
+      }
+      if (values.length === 1) {
+        const original = group.filters.find((filter) => filterValues(filter).includes(values[0])) || group.filters[0];
+        result.push({ ...original, value: values[0], values: undefined, label: original.label || filterLabel({ ...original, value: values[0] }) });
+        return;
+      }
+      const exact = group.filters.every((filter) => ["=", "in"].includes(raw(filter.op || "contains")));
+      result.push({
+        field: group.field,
+        op: exact ? "in" : "contains_any",
+        value: values.join("|"),
+        values,
+        unit: group.unit,
+        label: `${fieldLabel(group.field)}${exact ? "等于任一" : "包含任一"}：${values.join("、")}`,
+        logic: "or",
+        ambiguous: group.ambiguous,
+      });
+    });
+    return result;
   }
 
   function addGenericFilter(parsed, filter) {
@@ -1232,6 +1450,39 @@
         });
       });
     });
+  }
+
+  function hasProductTypeContext(query) {
+    const text = raw(query);
+    return /策略类型|产品类型|研报产品|类型为|类别为|分类为|策略分类|产品分类/.test(text)
+      || /(固收|纯债|短债|股票|多元|股债).{0,6}(策略|产品|组合)/.test(text)
+      || /(策略|产品|组合).{0,6}(固收|纯债|短债|股票|多元|股债)/.test(text);
+  }
+
+  function addProductTypeContextFilters(parsed, query) {
+    if (!hasProductTypeContext(query)) return;
+    const text = raw(query);
+    const addReportType = (value) => addGenericFilter(parsed, {
+      field: "研报产品类型",
+      op: "=",
+      value,
+      label: `研报产品类型 = ${value}`,
+    });
+    if (/固收(?!\+|加)/.test(text)) {
+      addReportType("固收+型");
+      addReportType("纯债型");
+    }
+    if (/固收\+|固收加/.test(text)) addReportType("固收+型");
+    if (/纯债|短债/.test(text)) addReportType("纯债型");
+    if (/股债/.test(text)) addReportType("股债混合型");
+    if (/多元/.test(text)) addReportType("多元配置型");
+    if (/股票|偏股/.test(text)) addReportType("股票型");
+  }
+
+  function isProductTypeEntityInProductContext(entity, query) {
+    if (!hasProductTypeContext(query)) return false;
+    const text = `${entity?.label || ""} ${entity?.term || ""}`;
+    return /固收|纯债|短债|债券|股票|多元配置|股债混合|现金管理/.test(text);
   }
 
   function addRiskProfileFilters(parsed, query) {
@@ -1447,7 +1698,7 @@
       const filter = { field: "研报产品类型", op: "=", value: thresholds.reportType, label: thresholds.reportType };
       if (!filters.some((item) => filterKey(item) === filterKey(filter))) filters.push(filter);
     }
-    return filters;
+    return normalizeLogicalFilters(filters, parsed);
   }
 
   function parseQuery(queryText) {
@@ -1494,6 +1745,7 @@
 
     addNumericIntentFilters(parsed, query);
     addCategoricalIntentFilters(parsed, query);
+    addProductTypeContextFilters(parsed, query);
     addRiskProfileFilters(parsed, query);
 
     const goldEntity = semanticEntityCatalog.find((entity) => entity.key === "gold");
@@ -1523,6 +1775,7 @@
     const semanticDetections = detectSemanticEntities(query).filter((entity) => {
       if (entity.key === "gold" && parsed.thresholds.excludeGold) return false;
       if (entity.key === "overseas" && (parsed.thresholds.includeOverseas || parsed.thresholds.excludeQdii)) return false;
+      if (isProductTypeEntityInProductContext(entity, query)) return false;
       return true;
     });
     if (semanticDetections.length) {
@@ -1591,7 +1844,7 @@
   function shouldUseModelParser(allowModel = true) {
     if (!allowModel) return false;
     const mode = raw(aiConfig.mode || "hybrid-parse").toLowerCase();
-    return aiConfig.enabled !== false && !!raw(aiConfig.endpoint).trim() && mode !== "local-only" && mode !== "off" && Date.now() >= modelBackoffUntil;
+    return aiConfig.enabled !== false && !!modelChatEndpoint(aiConfig) && mode !== "local-only" && mode !== "off" && Date.now() >= modelBackoffUntil;
   }
 
   function firstDefined(source, keys) {
@@ -1725,13 +1978,14 @@
     const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     const headers = { "Content-Type": "application/json", ...(aiConfig.headers || {}) };
     if (aiConfig.apiKey) headers.Authorization = `Bearer ${aiConfig.apiKey}`;
+    const endpoint = modelChatEndpoint(aiConfig);
     const payload = {
-      model: aiConfig.model || "codex",
+      model: aiConfig.model || "deepseek-v4-flash-inner",
       temperature: 0,
       messages: [
         {
           role: "system",
-          content: "你只做中文投顾策略筛选意图解析。只输出 JSON 对象，不要输出策略名单、解释或 Markdown。模型只能输出筛选条件，不能输出候选结果，也不能发明基金/策略实体标签。常用字段：returnMetric,minReturn,drawdownField,maxDrawdown,minAgeYears,includeOverseas,excludeGold,excludeQdii,onlyGf,excludeGf,gfTerm,entityTerm,holdingEntities,holdingEntityWeightMin,reportType,filters。returnMetric 只能是近一周、近一月、近三月、近6月、近1年、今年以来、累计收益率、年化收益；注意年化投顾费率、年化波动、年化换手不是收益口径，应放入 filters。drawdownField 只能是最大回撤或当前回撤；用户只说回撤时按最大回撤。KYC 风险偏好用 filters 输出字段“风险等级序号”：保守/低风险/R2以内 => <=2，稳健/均衡 => <=3，进取/高风险 => >=4。费用、波动率、夏普、权益/债券/货币/QDII/指数基金权重、调仓频率、年化换手率等量化诉求放入 filters。产品/客群偏好可落到研报产品类型、业务分类、市场地域、主动被动、运作状态、基础数据等级等字段。holdingEntities 只能引用下方提供的标准实体或查询别名，每项为 {term, key, negative}；key 使用标准实体 key，term 保留用户词，negative 表示不含。若用户词不能唯一映射到标准实体，不要强行输出 holdingEntities，改用 entityTerm 或 filters。基金公司仓位、持仓占比、配置比例等阈值输出 holdingEntityWeightMin。用户说“同时/且/并且/和”默认多个实体都要命中；用户说“或/或者/任一/任意”才是任一命中。多个实体带权重阈值默认按合计仓位判断，只有用户说分别/各自/都超过才按每个实体分别达标。用户说不持有/未持有/不含/没有/无黄金时，excludeGold=true，且不要再输出正向黄金 holdingEntities。只有用户明确说海外/全球/QDII/海外资产/全球资产时 includeOverseas=true；港股、美股这类具体资产输出 holdingEntities，不要同时输出海外宽口径，除非用户也明确说海外资产。不要因为纳指、纳斯达克100或标普500自动增加海外宽口径。gfTerm 仅用于“广发基金/广发投顾/广发产品”等可能匹配机构、渠道或策略名称的歧义条件；其他投顾机构、渠道或策略名称关键词用 entityTerm。基金公司、基金名称、行业、主题、国家地区、指数应优先映射到已知标准实体；无法映射时不要输出标准实体。filters 是数组，每项为 {field,op,value}，字段必须来自用户消息给出的可用字段。所有百分比或“几个点”数值统一输出百分数数值，例如 5个点输出 5，不要输出 0.05。未知字段输出 null 或 false。"
+          content: "你只做中文投顾策略筛选意图解析。只输出 JSON 对象，不要输出策略名单、解释或 Markdown。模型只能输出筛选条件，不能输出候选结果，也不能发明基金/策略实体标签。常用字段：returnMetric,minReturn,drawdownField,maxDrawdown,minAgeYears,includeOverseas,excludeGold,excludeQdii,onlyGf,excludeGf,gfTerm,entityTerm,holdingEntities,holdingEntityWeightMin,reportType,filters。returnMetric 只能是近一周、近一月、近三月、近6月、近1年、今年以来、累计收益率、年化收益；注意年化投顾费率、年化波动、年化换手不是收益口径，应放入 filters。drawdownField 只能是最大回撤或当前回撤；用户只说回撤时按最大回撤。KYC 风险偏好用 filters 输出字段“风险等级序号”：保守/低风险/R2以内 => <=2，稳健/均衡 => <=3，进取/高风险 => >=4。费用、波动率、夏普、权益/债券/货币/QDII/指数基金权重、调仓频率、年化换手率等量化诉求放入 filters。产品/客群偏好可落到研报产品类型、业务分类、市场地域、主动被动、运作状态、基础数据等级等字段；同一单值字段若有多个候选分类，应使用 contains_any 或 in 表达“任一满足”，不要输出多个互斥 AND 条件。holdingEntities 只能引用下方提供的标准实体或查询别名，每项为 {term, key, negative}；key 使用标准实体 key，term 保留用户词，negative 表示不含。若用户词不能唯一映射到标准实体，不要强行输出 holdingEntities，改用 entityTerm 或 filters。基金公司仓位、持仓占比、配置比例等阈值输出 holdingEntityWeightMin。用户说“同时/且/并且/和”默认多个实体都要命中；用户说“或/或者/任一/任意”才是任一命中。多个实体带权重阈值默认按合计仓位判断，只有用户说分别/各自/都超过才按每个实体分别达标。用户说不持有/未持有/不含/没有/无黄金时，excludeGold=true，且不要再输出正向黄金 holdingEntities。只有用户明确说海外/全球/QDII/海外资产/全球资产时 includeOverseas=true；港股、美股这类具体资产输出 holdingEntities，不要同时输出海外宽口径，除非用户也明确说海外资产。不要因为纳指、纳斯达克100或标普500自动增加海外宽口径。gfTerm 仅用于“广发基金/广发投顾/广发产品”等可能匹配机构、渠道或策略名称的歧义条件；其他投顾机构、渠道或策略名称关键词用 entityTerm。基金公司、基金名称、行业、主题、国家地区、指数应优先映射到已知标准实体；无法映射时不要输出标准实体。filters 是数组，每项为 {field,op,value}，字段必须来自用户消息给出的可用字段。所有百分比或“几个点”数值统一输出百分数数值，例如 5个点输出 5，不要输出 0.05。未知字段输出 null 或 false。"
         },
         {
           role: "user",
@@ -1741,7 +1995,7 @@
     };
     if (aiConfig.responseFormat !== false) payload.response_format = { type: "json_object" };
     try {
-      const response = await fetch(aiConfig.endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers,
         body: JSON.stringify(payload),
@@ -1836,6 +2090,7 @@
       const exists = parsed.filters.some((item) => item.field === filter.field && item.op === filter.op && raw(item.value) === raw(filter.value));
       if (!exists) parsed.filters.push(filter);
     });
+    parsed.filters = normalizeLogicalFilters(parsed.filters, parsed);
     parsed.model = { status: "used", provider: raw(aiConfig.provider || "local"), model: raw(aiConfig.model || "codex") };
     parsed.assumptions.push("已调用本机模型辅助解析；模型只输出筛选条件，候选结果仍由本地策略宽表和持仓快照核验。");
     return parsed;
@@ -1857,7 +2112,9 @@
     } catch (error) {
       let message = raw(error?.name === "AbortError" ? "模型解析超时" : error?.message || error);
       if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
-        message = "本机模型代理未连接，请先运行 scripts/start_ai_strategy_codex_proxy.ps1，并确认 http://127.0.0.1:8787/healthz 可访问";
+        message = isCodexProxyConfig(aiConfig)
+          ? "本机模型代理未连接，请先运行 scripts/start_ai_strategy_codex_proxy.ps1，并确认 http://127.0.0.1:8787/healthz 可访问"
+          : `模型接口无法访问，请检查内网连通性、接口跨域和鉴权配置：${modelBaseUrl(aiConfig) || modelChatEndpoint(aiConfig) || "未配置"}`;
       }
       message = message.slice(0, 160);
       if (error?.status === 429 || /429|Too Many Requests/i.test(message)) {
@@ -2007,12 +2264,19 @@
     return value === null || value === undefined || raw(value).trim() === "";
   }
 
+  function markMissing(missing, row) {
+    if (!missing) return;
+    missing.generic += 1;
+    const id = raw(row?.统一策略ID || row?.策略代码 || row?.策略名称);
+    if (id) missing.rowIds.add(id);
+  }
+
   function compareFilter(row, filter, missing) {
     const op = raw(filter.op || "contains");
     if (filter.field === "__holding_entity") {
       const evidence = holdingEntityEvidenceForFilter(row, filter);
       if (!evidence.known) {
-        if (missing) missing.generic += 1;
+        markMissing(missing, row);
         return false;
       }
       if (op === "not contains" || op === "!=") return !evidence.hasEntity;
@@ -2031,7 +2295,7 @@
     if (op === "is empty") return isEmptyValue(value);
     if (op === "is not empty") return !isEmptyValue(value);
     if (isEmptyValue(value)) {
-      if (missing) missing.generic += 1;
+      markMissing(missing, row);
       return false;
     }
     const target = filter.value;
@@ -2047,7 +2311,7 @@
       const left = num(value);
       const right = num(target);
       if (left === null || right === null) {
-        if (missing) missing.generic += 1;
+        markMissing(missing, row);
         return false;
       }
       if (op === ">=") return left >= right;
@@ -2057,8 +2321,12 @@
     }
     const leftText = raw(value).toLowerCase();
     const rightText = raw(target).toLowerCase();
+    const targets = filterValues(filter).map((item) => item.toLowerCase());
     if (op === "contains") return leftText.includes(rightText);
+    if (op === "contains_any") return targets.some((item) => leftText.includes(item));
     if (op === "not contains") return !leftText.includes(rightText);
+    if (op === "in") return targets.some((item) => leftText === item);
+    if (op === "not in") return targets.every((item) => leftText !== item);
     if (op === "=") {
       const leftNumber = num(value);
       const rightNumber = num(target);
@@ -2076,6 +2344,48 @@
 
   function activeFilters(parsed) {
     return (parsed.filters || []).filter((filter) => !(parsed.completeOnly && filter.system && filter.field === "数据完整性" && filter.value === "完整"));
+  }
+
+  function filterMatchScore(row, filter, parsed) {
+    const op = raw(filter.op || "contains");
+    if (filter.field === "__holding_entity") {
+      const evidence = holdingEntityEvidenceForFilter(row, filter);
+      if (op === "not contains" || op === "!=") return evidence.hasEntity ? 0 : 5;
+      return 8 + Math.min(30, num(evidence.weight) || 0);
+    }
+    const value = fieldValue(row, filter.field);
+    if (isEmptyValue(value)) return 0;
+    if ([">=", ">"].includes(op)) {
+      const left = num(value);
+      const right = num(filter.value);
+      if (left === null || right === null) return 0;
+      const margin = Math.max(0, left - right);
+      const factor = filter.field === parsed?.returnMetric?.field ? 1.2 : 0.35;
+      return 4 + Math.min(40, margin * factor);
+    }
+    if (["<=", "<"].includes(op)) {
+      const left = num(value);
+      const right = num(filter.value);
+      if (left === null || right === null) return 0;
+      const margin = Math.max(0, right - left);
+      const factor = /回撤|波动|费率|换手/.test(filter.field) ? 1.4 : 0.35;
+      return 4 + Math.min(35, margin * factor);
+    }
+    if (["=", "in", "contains", "contains_any"].includes(op)) return 6;
+    if (["!=", "not in", "not contains"].includes(op)) return 3;
+    return 1;
+  }
+
+  function rowMatchScore(row, parsed) {
+    const filters = activeFilters(parsed).filter((filter) => !filter.system);
+    let score = filters.reduce((total, filter) => total + filterMatchScore(row, filter, parsed), 0);
+    const sortField = allowedReturnMetrics.has(parsed?.returnMetric?.field) ? parsed.returnMetric.field : state.sortField;
+    const returnValue = num(row[sortField]);
+    if (returnValue !== null) score += returnValue * 0.08;
+    const drawdownField = parsed?.thresholds?.drawdownField || "最大回撤";
+    const drawdown = num(row[drawdownField]);
+    if (drawdown !== null) score -= drawdown * 0.05;
+    return score;
   }
 
   function filterLabel(filter) {
@@ -2098,8 +2408,120 @@
       const verb = op === "not contains" || op === "!=" ? "不含" : "含";
       return `最新持仓${verb}${entity?.label || raw(filter.value)}`;
     }
+    if (op === "in" || op === "not in" || op === "contains_any") return `${fieldLabel(filter.field)} ${operatorLabels[op] || op} ${filterValues(filter).join("、")}`;
     if (op === "is empty" || op === "is not empty") return `${fieldLabel(filter.field)} ${operatorLabels[op] || op}`;
     return `${fieldLabel(filter.field)} ${operatorLabels[op] || op} ${raw(filter.value)}${filter.unit || ""}`;
+  }
+
+  function zhDate(value) {
+    const date = dateFrom(value);
+    if (!date) return raw(value) || "未披露";
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  }
+
+  function compactEvidenceText(text, entityLabel = "") {
+    let value = raw(text)
+      .split("；来源")[0]
+      .split("；规则")[0]
+      .replace(/｜(verified|derived|candidate).*$/i, "")
+      .trim();
+    if (entityLabel && value.startsWith(entityLabel)) {
+      value = value
+        .slice(entityLabel.length)
+        .replace(/^\s*[0-9]+(?:\.[0-9]+)?%\s*[:：]?\s*/, "")
+        .trim();
+    }
+    return value || raw(text);
+  }
+
+  function holdingEvidenceRows(evidence) {
+    const rows = [];
+    (evidence.evidences || []).forEach((item) => {
+      const label = item.entity?.label || evidence.entity?.label || raw(item.term);
+      const weight = num(item.weight) || 0;
+      if (!item.hasEntity && weight <= 0) return;
+      const details = (item.labels || [])
+        .map((text) => compactEvidenceText(text, label))
+        .filter(Boolean)
+        .slice(0, 3);
+      rows.push({ label, weight, details });
+    });
+    if (!rows.length) {
+      (evidence.entitySummaries || []).forEach((item) => {
+        if (!item.hasEntity) return;
+        rows.push({
+          label: item.label,
+          weight: num(item.weight) || 0,
+          details: (item.labels || []).map((text) => compactEvidenceText(text, item.label)).filter(Boolean).slice(0, 2),
+        });
+      });
+    }
+    return rows.slice(0, 8);
+  }
+
+  function hitReasonItems(row, parsed) {
+    return activeFilters(parsed)
+      .filter((filter) => !filter.system)
+      .map((filter) => {
+        const label = filter.label || filterLabel(filter);
+        if (filter.field === "__holding_entity") {
+          const evidence = holdingEntityEvidenceForFilter(row, filter);
+          const isNegative = filter.op === "not contains" || filter.op === "!=";
+          const rows = holdingEvidenceRows(evidence);
+          return {
+            condition: label,
+            result: isNegative
+              ? `当前最新仓位未发现${evidence.entity?.label || raw(filter.value)}`
+              : `当前最新仓位${evidence.weight ? ` ${formatPct(evidence.weight)}` : ""}`,
+            meta: evidence.date ? `持仓日 ${zhDate(evidence.date)}` : "",
+            details: rows.map((item) => ({
+              label: item.label,
+              value: item.weight ? formatPct(item.weight) : "",
+              notes: item.details,
+            })),
+          };
+        }
+        if (filter.field === "__gf_any" || filter.field === "__source_any") {
+          return {
+            condition: label,
+            result: `机构/渠道/策略名称命中“${raw(filter.value)}”`,
+            details: [
+              { label: "策略名称", value: raw(row.策略名称 || "未披露") },
+              { label: "投顾机构", value: raw(row.投顾机构 || "未披露") },
+              { label: "渠道", value: raw(row.渠道 || "未披露") },
+            ],
+          };
+        }
+        if (filter.field === "黄金判断") {
+          const gold = goldEvidence(row);
+          return {
+            condition: label,
+            result: gold.hasGold ? `当前最新仓位含黄金 ${formatPct(gold.goldWeight)}` : "当前最新仓位未持有黄金",
+            meta: gold.date ? `持仓日 ${zhDate(gold.date)}` : "",
+            details: (gold.labels || []).slice(0, 4).map((item) => ({ label: item, value: "" })),
+          };
+        }
+        if (filter.field === "海外资产判断" || filter.field === "海外资产权重" || filter.field === "海外资产分类") {
+          const overseas = overseasEvidence(row);
+          return {
+            condition: label,
+            result: overseas.hasOverseas ? `当前最新仓位含海外资产 ${formatPct(overseas.overseasWeight)}` : "当前最新仓位未命中海外资产",
+            meta: overseas.date ? `持仓日 ${zhDate(overseas.date)}` : "",
+            details: (overseas.labels || []).slice(0, 6).map((item) => ({ label: item, value: "" })),
+          };
+        }
+        const value = fieldValue(row, filter.field);
+        if (filter.field === "成立日期") {
+          return { condition: label, result: `成立日 ${zhDate(value)}` };
+        }
+        if (isDateField(filter.field)) {
+          return { condition: label, result: `${fieldLabel(filter.field)} ${zhDate(value)}` };
+        }
+        if (["最大回撤", "当前回撤", "累计收益率", "近6月", "近1年", "近三月", "近一月", "近一周", "今年以来", "年化收益", "波动率", "权益基金权重", "债券基金权重", "货币基金权重", "QDII权重", "指数基金权重", "主动基金权重", "单次平均换手率", "年化换手率"].includes(filter.field)) {
+          return { condition: label, result: `${fieldLabel(filter.field)} ${formatPct(value)}` };
+        }
+        return { condition: label, result: `${fieldLabel(filter.field)}：${raw(value) || "未披露"}` };
+      });
   }
 
   function syncParsedFromFilters(parsed) {
@@ -2117,32 +2539,14 @@
   }
 
   function hitReason(row, parsed) {
-    return activeFilters(parsed)
-      .filter((filter) => !filter.system)
-      .map((filter) => {
-        if (filter.field === "__holding_entity") {
-          const evidence = holdingEntityEvidenceForFilter(row, filter);
-          const name = evidence.entity?.label || raw(filter.value);
-          const summaryLabels = (evidence.entitySummaries || [])
-            .filter((item) => item.hasEntity)
-            .map((item) => `${item.label}${item.weight ? ` ${formatPct(item.weight)}` : ""}${item.labels.length ? `：${item.labels.join("、")}` : ""}`)
-            .slice(0, 4);
-          const fallbackLabels = evidence.labels.slice(0, 3);
-          return `最新持仓命中${name}${evidence.weight ? ` ${formatPct(evidence.weight)}` : ""}${summaryLabels.length ? `：${summaryLabels.join("；")}` : (fallbackLabels.length ? `：${fallbackLabels.join("、")}` : "")}`;
-        }
-        if (filter.field === "__gf_any") return `机构/渠道/策略名称命中“${raw(filter.value)}”`;
-        if (filter.field === "__source_any") return `机构/渠道/策略名称命中“${raw(filter.value)}”`;
-        const value = fieldValue(row, filter.field);
-        if (filter.field === "海外资产权重") return `海外资产${formatPct(value)}`;
-        if (["最大回撤", "当前回撤", "累计收益率", "近6月", "近1年", "近三月", "近一月", "近一周", "今年以来", "年化收益"].includes(filter.field)) return `${fieldLabel(filter.field)}${formatPct(value)}`;
-        return `${fieldLabel(filter.field)}=${raw(value) || "未披露"}`;
-      })
+    return hitReasonItems(row, parsed)
+      .map((item) => `${item.condition}：${item.result}`)
       .join("；");
   }
 
   function applyFilters(parsed) {
     syncParsedFromFilters(parsed);
-    const missing = { generic: 0 };
+    const missing = { generic: 0, rowIds: new Set() };
     let base = allRows.slice();
     if (parsed.completeOnly) base = base.filter(isCompleteStrategy);
     const filters = activeFilters(parsed);
@@ -2150,10 +2554,14 @@
       return filters.every((filter) => compareFilter(row, filter, missing));
     });
     rows.forEach((row) => {
+      row._aiMatchScore = rowMatchScore(row, parsed);
+      row._aiHitReasonItems = hitReasonItems(row, parsed);
       row._aiHitReason = hitReason(row, parsed);
     });
     const sortField = allowedReturnMetrics.has(parsed.returnMetric.field) ? parsed.returnMetric.field : state.sortField;
     rows.sort((a, b) => {
+      const scoreDiff = (num(b._aiMatchScore) || 0) - (num(a._aiMatchScore) || 0);
+      if (Math.abs(scoreDiff) > 0.0001) return scoreDiff;
       const av = num(a[sortField]);
       const bv = num(b[sortField]);
       if (av !== null && bv !== null && av !== bv) return state.sortDir === "asc" ? av - bv : bv - av;
@@ -2297,6 +2705,9 @@
     const result = applyFilters(parsed);
     state.rows = result.rows;
     pruneSelectedToRows(result.rows);
+    if (state.selectedScatterId && !result.rows.some((row) => raw(row.统一策略ID || row.策略代码 || row.策略名称) === state.selectedScatterId)) {
+      state.selectedScatterId = "";
+    }
     renderResults(parsed, result);
   }
 
@@ -2326,7 +2737,7 @@
   function renderKpis(parsed, result) {
     const total = allRows.length;
     const complete = allRows.filter(isCompleteStrategy).length;
-    const invalid = Object.values(result.missing || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+    const missingRows = result.missing?.rowIds?.size || 0;
     const latest = latestDataDate();
     const holdingEvidenceCount = holdingEvidenceByStrategy().size;
     const modelStatus = parsed.model?.status === "used"
@@ -2339,7 +2750,7 @@
         <section class="ai-kpi"><span>候选结果</span><strong>${result.rows.length.toLocaleString("zh-CN")}</strong><small>按当前条件命中</small></section>
         <section class="ai-kpi"><span>参与样本</span><strong>${result.baseCount.toLocaleString("zh-CN")}</strong><small>全量 ${total.toLocaleString("zh-CN")}，完整 ${complete.toLocaleString("zh-CN")}</small></section>
         <section class="ai-kpi"><span>收益口径</span><strong>${B.esc(parsed.returnMetric.field)}</strong><small>${parsed.returnMetric.explicit ? "用户指定或明确命中" : "系统默认"}；${B.esc(modelStatus)}</small></section>
-        <section class="ai-kpi ${invalid ? "is-warn" : "is-ok"}"><span>数据核验</span><strong>${invalid ? `${invalid} 条未入选` : "通过"}</strong><small>业绩 ${dateText(latest)}；持仓核验 ${holdingEvidenceCount.toLocaleString("zh-CN")} 策</small></section>
+        <section class="ai-kpi ${missingRows ? "is-warn" : "is-ok"}"><span>数据核验</span><strong>${missingRows ? `字段缺失 ${missingRows} 条` : "通过"}</strong><small>${missingRows ? "字段缺失或待核验的策略未进入严格结果；" : ""}业绩 ${dateText(latest)}；持仓核验 ${holdingEvidenceCount.toLocaleString("zh-CN")} 策</small></section>
       </div>
     `;
   }
@@ -2432,7 +2843,7 @@
     const id = raw(row.统一策略ID);
     const checked = state.selectedCompareIds.includes(id);
     const disabled = !checked && state.selectedCompareIds.length >= compareMaxCount;
-    return `<td class="ai-select-cell"><input class="ai-compare-check" type="checkbox" aria-label="选择${B.esc(row.策略名称 || id)}" data-ai-compare-id="${B.esc(id)}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}></td>`;
+    return `<td class="ai-select-cell ai-sticky-select"><input class="ai-compare-check" type="checkbox" aria-label="选择${B.esc(row.策略名称 || id)}" data-ai-compare-id="${B.esc(id)}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}></td>`;
   }
 
   function bindCompareSelection(rows) {
@@ -2479,6 +2890,9 @@
     const row = (state.lastResult?.rows || state.rows || []).find((item) => raw(item.统一策略ID) === raw(id))
       || allRows.find((item) => raw(item.统一策略ID) === raw(id));
     if (!row) return;
+    const reasonItems = Array.isArray(row._aiHitReasonItems) && row._aiHitReasonItems.length
+      ? row._aiHitReasonItems
+      : (row._aiHitReason || "暂无命中说明").split("；").map((item) => ({ condition: "筛选条件", result: item }));
     B.byId("aiHitReasonDialog")?.remove();
     const dialog = document.createElement("dialog");
     dialog.id = "aiHitReasonDialog";
@@ -2492,7 +2906,32 @@
         <button type="button" data-ai-close-reason aria-label="关闭">关闭</button>
       </div>
       <div class="ai-hit-dialog-body">
-        ${(row._aiHitReason || "暂无命中说明").split("；").map((item) => `<p>${B.esc(item)}</p>`).join("")}
+        <div class="ai-hit-reason-list">
+          ${reasonItems.map((item) => `
+            <section class="ai-hit-reason-item">
+              <div class="ai-hit-reason-condition">
+                <span>筛选条件</span>
+                <strong>${B.esc(item.condition || "筛选条件")}</strong>
+              </div>
+              <div class="ai-hit-reason-result">
+                <span class="status-badge ok">符合</span>
+                <p>${B.esc(item.result || "已满足该条件")}</p>
+                ${item.meta ? `<em>${B.esc(item.meta)}</em>` : ""}
+                ${(item.details || []).length ? `
+                  <ul>
+                    ${item.details.map((detail) => `
+                      <li>
+                        <b>${B.esc(detail.label || "")}</b>
+                        ${detail.value ? `<strong>${B.esc(detail.value)}</strong>` : ""}
+                        ${(detail.notes || []).length ? `<small>${detail.notes.map((note) => B.esc(note)).join("；")}</small>` : ""}
+                      </li>
+                    `).join("")}
+                  </ul>
+                ` : ""}
+              </div>
+            </section>
+          `).join("")}
+        </div>
       </div>
     `;
     document.body.appendChild(dialog);
@@ -2513,6 +2952,34 @@
     });
   }
 
+  function bindCandidateScrollbars() {
+    root.querySelectorAll(".ai-candidate-table-shell").forEach((shell) => {
+      const wrap = shell.querySelector("[data-ai-table-wrap]");
+      const bars = Array.from(shell.querySelectorAll("[data-ai-scrollbar]"));
+      if (!wrap || !bars.length) return;
+      const inners = bars.map((bar) => bar.querySelector(".strategy-scrollbar-inner")).filter(Boolean);
+      const resize = () => {
+        inners.forEach((inner) => {
+          inner.style.width = `${wrap.scrollWidth}px`;
+        });
+      };
+      let syncing = false;
+      const syncTo = (left, source) => {
+        if (syncing) return;
+        syncing = true;
+        if (source !== wrap) wrap.scrollLeft = left;
+        bars.forEach((bar) => {
+          if (bar !== source) bar.scrollLeft = left;
+        });
+        syncing = false;
+      };
+      wrap.addEventListener("scroll", () => syncTo(wrap.scrollLeft, wrap));
+      bars.forEach((bar) => bar.addEventListener("scroll", () => syncTo(bar.scrollLeft, bar)));
+      resize();
+      requestAnimationFrame(resize);
+    });
+  }
+
   function nearMissRows(parsed, checks) {
     const target = checks.find((check) => /回撤/.test(raw(check.field)) && ["<=", "<"].includes(check.filter?.op));
     if (!target) return [];
@@ -2530,13 +2997,43 @@
       .slice(0, 8);
   }
 
+  function candidateCellClass(field, isHead = false) {
+    const classes = [];
+    if (isHead) classes.push("ai-candidate-head");
+    if (field === "命中说明") classes.push("ai-sticky-hit", "ai-hit-reason-col");
+    if (field === "策略名称") classes.push("ai-sticky-name", "strategy-name-cell");
+    if (field === "投顾机构") classes.push("ai-sticky-advisor");
+    if (field === "渠道") classes.push("ai-sticky-channel");
+    if (["累计收益率", "年化收益", "近6月", "近1年", "当前回撤", "最大回撤", "持仓实体权重"].includes(field)) classes.push("narrow");
+    if (["业务分类", "研报产品类型", "风险等级"].includes(field)) classes.push("wide");
+    return classes.join(" ");
+  }
+
   function renderRowsTable(rows, headers, emptyText, options = {}) {
     const withSelection = !!options.withSelection;
-    const body = rows.length ? rows.map((row) => `<tr>${withSelection ? selectionCell(row) : ""}${headers.map((field) => `<td>${formatValue(row, field)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length + (withSelection ? 1 : 0)}"><div class="empty">${B.esc(emptyText)}</div></td></tr>`;
+    if (withSelection) {
+      const headerHtml = `${withSelection ? '<th class="ai-select-head ai-sticky-select">选择</th>' : ""}${headers.map((field) => `<th class="${candidateCellClass(field, true)}">${B.label(field)}</th>`).join("")}`;
+      const body = rows.length
+        ? rows.map((row) => `<tr>${selectionCell(row)}${headers.map((field) => `<td class="${candidateCellClass(field)}">${formatValue(row, field)}</td>`).join("")}</tr>`).join("")
+        : `<tr><td colspan="${headers.length + 1}"><div class="empty">${B.esc(emptyText)}</div></td></tr>`;
+      return `
+        <div class="strategy-table-shell ai-candidate-table-shell">
+          <div class="strategy-scrollbar ai-candidate-scrollbar is-top" data-ai-scrollbar aria-label="候选策略横向滚动条（上）"><div class="strategy-scrollbar-inner"></div></div>
+          <div class="strategy-table-wrap ai-candidate-table-wrap" data-ai-table-wrap>
+            <table class="strategy-table ai-candidate-table">
+              <thead><tr>${headerHtml}</tr></thead>
+              <tbody>${body}</tbody>
+            </table>
+          </div>
+          <div class="strategy-scrollbar ai-candidate-scrollbar is-bottom" data-ai-scrollbar aria-label="候选策略横向滚动条（下）"><div class="strategy-scrollbar-inner"></div></div>
+        </div>
+      `;
+    }
+    const body = rows.length ? rows.map((row) => `<tr>${headers.map((field) => `<td>${formatValue(row, field)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}"><div class="empty">${B.esc(emptyText)}</div></td></tr>`;
     return `
       <div class="table-wrap ai-result-table">
         <table>
-          <thead><tr>${withSelection ? '<th class="ai-select-head">选择</th>' : ""}${headers.map((field) => `<th>${B.label(field)}</th>`).join("")}</tr></thead>
+          <thead><tr>${headers.map((field) => `<th>${B.label(field)}</th>`).join("")}</tr></thead>
           <tbody>${body}</tbody>
         </table>
       </div>
@@ -2548,80 +3045,254 @@
     return Array.from({ length: count + 1 }, (_, index) => min + ((max - min) * index / count));
   }
 
-  function scatterColor(row) {
-    const key = raw(row.风险等级 || row.研报产品类型 || row.业务分类 || row.策略名称);
-    const palette = ["#2563eb", "#0f766e", "#a855f7", "#ea580c", "#dc2626", "#64748b"];
-    let hash = 0;
-    for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) % palette.length;
-    return palette[Math.abs(hash) % palette.length];
+  function isNonNegativeScatterField(field) {
+    return /回撤|波动|权重|持仓基金数|调仓次数|换手率/.test(raw(field));
+  }
+
+  function formatScatterMetric(field, value) {
+    const n = num(value);
+    if (n === null) return "未披露";
+    if (percentMetricFields.has(field)) return `${n.toFixed(2)}%`;
+    return n.toLocaleString("zh-CN", { maximumFractionDigits: Math.abs(n) >= 10 ? 1 : 4 });
+  }
+
+  function availableScatterFields(rows) {
+    return scatterMetricOptions.filter((field) => (rows || []).some((row) => num(row[field]) !== null));
+  }
+
+  function resolveScatterField(rows, requested, fallback) {
+    const fields = availableScatterFields(rows);
+    if (requested && fields.includes(requested)) return requested;
+    if (fallback && fields.includes(fallback)) return fallback;
+    return fields[0] || fallback || "累计收益率";
+  }
+
+  function resolveScatterInput(rows, value, fallback) {
+    const fields = availableScatterFields(rows);
+    const text = raw(value).trim();
+    if (fields.includes(text)) return text;
+    const normalized = normalizeSearchText(text);
+    const matched = fields.find((field) => normalizeSearchText(field).includes(normalized) || normalized.includes(normalizeSearchText(field)));
+    return matched || resolveScatterField(rows, fallback, fields[0]);
+  }
+
+  function scatterMetricSelect(id, label, current, fields) {
+    return `
+      <label class="ai-scatter-control">
+        <span>${B.esc(label)}</span>
+        <input id="${B.esc(id)}" class="control ai-scatter-metric-input" list="${B.esc(id)}List" value="${B.esc(current)}" placeholder="输入或选择指标">
+        <datalist id="${B.esc(id)}List">
+          ${fields.map((field) => `<option value="${B.esc(field)}"></option>`).join("")}
+        </datalist>
+      </label>
+    `;
+  }
+
+  function scatterGroup(row) {
+    return raw(row.风险等级 || row.研报产品类型 || row.业务分类 || "未分类");
+  }
+
+  function scatterThresholdForField(field, parsed) {
+    const drawdownField = parsed?.thresholds?.drawdownField || "最大回撤";
+    if (field === drawdownField) {
+      const value = num(parsed?.thresholds?.maxDrawdown);
+      return value === null ? null : { value, label: "回撤阈值" };
+    }
+    const returnField = parsed?.returnMetric?.field || "累计收益率";
+    if (field === returnField) {
+      const value = num(parsed?.thresholds?.minReturn);
+      return value === null ? null : { value, label: "收益阈值" };
+    }
+    return null;
+  }
+
+  function scatterDomain(values, threshold, field) {
+    const points = values.slice();
+    if (threshold && Number.isFinite(threshold.value)) points.push(threshold.value);
+    if (!points.length) return [0, 1];
+    let minValue = Math.min(...points);
+    let maxValue = Math.max(...points);
+    if (minValue === maxValue) {
+      minValue -= 1;
+      maxValue += 1;
+    }
+    const padding = Math.max(1, (maxValue - minValue) * 0.08);
+    const min = isNonNegativeScatterField(field) ? Math.max(0, minValue - padding) : minValue - padding;
+    const max = maxValue + padding;
+    return max <= min ? [min, min + 1] : [min, max];
+  }
+
+  function renderScatterDetail(row, xField, yField) {
+    if (!row) {
+      return `<div class="ai-scatter-detail is-empty"><strong>点阵选中策略</strong><p>点击图中的点查看该策略的机构、分类、关键指标和命中说明。</p></div>`;
+    }
+    const id = raw(row.统一策略ID || row.策略代码);
+    const metrics = [
+      [xField, row[xField]],
+      [yField, row[yField]],
+      ["最大回撤", row.最大回撤],
+      ["当前回撤", row.当前回撤],
+      ["累计收益率", row.累计收益率],
+      ["年化收益", row.年化收益],
+      ["近6月", row.近6月],
+      ["近1年", row.近1年],
+    ].filter((item, index, array) => item[0] && array.findIndex((candidate) => candidate[0] === item[0]) === index);
+    return `
+      <div class="ai-scatter-detail">
+        <div class="ai-scatter-detail-head">
+          <div>
+            <strong><a class="link" href="./strategy.html?id=${encodeURIComponent(id)}">${B.esc(row.策略名称 || "未命名策略")}</a></strong>
+            <span>${B.esc(row.投顾机构 || "未披露机构")}｜${B.esc(row.渠道 || "未披露渠道")}｜${B.esc(row.风险等级 || "未分类")}</span>
+          </div>
+          <button class="ai-hit-reason-btn" type="button" data-ai-hit-id="${B.esc(id)}">查看命中说明</button>
+        </div>
+        <div class="ai-scatter-detail-grid">
+          <div><span>业务分类</span><strong>${B.esc(row.业务分类 || "未分类")}</strong></div>
+          <div><span>研报产品类型</span><strong>${B.esc(row.研报产品类型 || "未分类")}</strong></div>
+          <div><span>最新业绩日期</span><strong>${B.esc(row.最新业绩日期 || "未披露")}</strong></div>
+          <div><span>最新持仓日</span><strong>${B.esc(row.最新持仓日 || "未披露")}</strong></div>
+          ${metrics.map(([field, value]) => `<div><span>${B.esc(field)}</span><strong>${B.esc(formatScatterMetric(field, value))}</strong></div>`).join("")}
+        </div>
+      </div>
+    `;
   }
 
   function renderCandidateScatter(rows, parsed) {
+    const fields = availableScatterFields(rows);
     const returnField = parsed?.returnMetric?.field || "累计收益率";
     const drawdownField = parsed?.thresholds?.drawdownField || "最大回撤";
+    const xField = resolveScatterField(rows, state.scatterXField, drawdownField);
+    const yField = resolveScatterField(rows, state.scatterYField, returnField);
+    state.scatterXField = xField;
+    state.scatterYField = yField;
     const sourceRows = (rows || []).slice(0, 500).map((row) => ({
       row,
-      x: num(row[drawdownField]),
-      y: num(row[returnField]),
-    })).filter((item) => item.x !== null && item.y !== null);
-    if (!sourceRows.length) return `<div class="ai-scatter-card"><div class="empty">候选策略缺少可绘制的收益或回撤字段。</div></div>`;
-    const width = 860;
-    const height = 360;
-    const pad = { left: 62, right: 26, top: 22, bottom: 52 };
+      id: raw(row.统一策略ID || row.策略代码 || row.策略名称),
+      x: num(row[xField]),
+      y: num(row[yField]),
+      group: scatterGroup(row),
+    })).filter((item) => item.id && item.x !== null && item.y !== null);
+    if (!sourceRows.length) return `<div class="ai-scatter-card"><div class="empty">候选策略缺少可绘制的 ${B.esc(xField)} 或 ${B.esc(yField)} 字段。</div></div>`;
+    const palette = ["#2563eb", "#0f766e", "#a855f7", "#ea580c", "#dc2626", "#64748b", "#0891b2", "#9333ea"];
+    const groups = Array.from(new Set(sourceRows.map((item) => item.group))).sort((a, b) => a.localeCompare(b, "zh-CN")).slice(0, palette.length);
+    const colorByGroup = new Map(groups.map((group, index) => [group, palette[index % palette.length]]));
+    const selected = sourceRows.find((item) => item.id === state.selectedScatterId);
+    const width = 900;
+    const height = 380;
+    const pad = { left: 68, right: 28, top: 24, bottom: 58 };
     const plotW = width - pad.left - pad.right;
     const plotH = height - pad.top - pad.bottom;
-    const xs = sourceRows.map((item) => item.x);
-    const ys = sourceRows.map((item) => item.y);
-    const thresholdX = num(parsed?.thresholds?.maxDrawdown);
-    const thresholdY = num(parsed?.thresholds?.minReturn);
-    const xMaxRaw = Math.max(...xs, thresholdX || 0, 1);
-    const yMinRaw = Math.min(...ys, 0, thresholdY || 0);
-    const yMaxRaw = Math.max(...ys, thresholdY || 0, 1);
-    const xMin = 0;
-    const xMax = xMaxRaw === xMin ? xMin + 1 : xMaxRaw * 1.08;
-    const yPadding = Math.max(1, (yMaxRaw - yMinRaw) * 0.08);
-    const yMin = yMinRaw - yPadding;
-    const yMax = yMaxRaw + yPadding;
+    const xThreshold = scatterThresholdForField(xField, parsed);
+    const yThreshold = scatterThresholdForField(yField, parsed);
+    const [xMin, xMax] = scatterDomain(sourceRows.map((item) => item.x), xThreshold, xField);
+    const [yMin, yMax] = scatterDomain(sourceRows.map((item) => item.y), yThreshold, yField);
     const xScale = (value) => pad.left + ((value - xMin) / (xMax - xMin)) * plotW;
     const yScale = (value) => pad.top + (1 - ((value - yMin) / (yMax - yMin))) * plotH;
     const xTicks = chartTicks(xMin, xMax, 5);
     const yTicks = chartTicks(yMin, yMax, 5);
-    const xLine = thresholdX !== null && thresholdX >= xMin && thresholdX <= xMax ? xScale(thresholdX) : null;
-    const yLine = thresholdY !== null && thresholdY >= yMin && thresholdY <= yMax ? yScale(thresholdY) : null;
+    const xLine = xThreshold && xThreshold.value >= xMin && xThreshold.value <= xMax ? xScale(xThreshold.value) : null;
+    const yLine = yThreshold && yThreshold.value >= yMin && yThreshold.value <= yMax ? yScale(yThreshold.value) : null;
     return `
-      <div class="ai-scatter-card">
+      <div class="ai-scatter-card" data-ai-scatter-card>
         <div class="ai-scatter-head">
           <div>
             <strong>候选策略点阵</strong>
-            <span>纵轴 ${B.esc(returnField)}，横轴 ${B.esc(drawdownField)}；展示 ${sourceRows.length.toLocaleString("zh-CN")} 条可绘制候选。</span>
+            <span>展示 ${sourceRows.length.toLocaleString("zh-CN")} 条可绘制候选；点击点查看策略说明。</span>
           </div>
-          <span class="pill">颜色按风险等级/分类区分</span>
+          <div class="ai-scatter-controls">
+            ${scatterMetricSelect("aiScatterXField", "X轴", xField, fields)}
+            ${scatterMetricSelect("aiScatterYField", "Y轴", yField, fields)}
+          </div>
         </div>
-        <div class="ai-scatter-wrap">
-          <svg class="ai-scatter-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="候选策略收益回撤点阵">
-            <rect x="${pad.left}" y="${pad.top}" width="${plotW}" height="${plotH}" class="ai-scatter-bg"></rect>
-            ${xTicks.map((tick) => {
-              const x = xScale(tick);
-              return `<line x1="${x}" y1="${pad.top}" x2="${x}" y2="${pad.top + plotH}" class="ai-scatter-grid"></line><text x="${x}" y="${height - 25}" text-anchor="middle" class="ai-scatter-axis">${B.esc(formatPct(tick))}</text>`;
-            }).join("")}
-            ${yTicks.map((tick) => {
-              const y = yScale(tick);
-              return `<line x1="${pad.left}" y1="${y}" x2="${pad.left + plotW}" y2="${y}" class="ai-scatter-grid"></line><text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" class="ai-scatter-axis">${B.esc(formatPct(tick))}</text>`;
-            }).join("")}
-            ${xLine === null ? "" : `<line x1="${xLine}" y1="${pad.top}" x2="${xLine}" y2="${pad.top + plotH}" class="ai-scatter-threshold"></line><text x="${xLine + 6}" y="${pad.top + 15}" class="ai-scatter-threshold-text">回撤阈值</text>`}
-            ${yLine === null ? "" : `<line x1="${pad.left}" y1="${yLine}" x2="${pad.left + plotW}" y2="${yLine}" class="ai-scatter-threshold"></line><text x="${pad.left + 8}" y="${yLine - 6}" class="ai-scatter-threshold-text">收益阈值</text>`}
-            <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" class="ai-scatter-axis-line"></line>
-            <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" class="ai-scatter-axis-line"></line>
-            ${sourceRows.map((item) => {
-              const label = `${item.row.策略名称 || "未命名策略"}｜${returnField} ${formatPct(item.y)}｜${drawdownField} ${formatPct(item.x)}｜${item.row.投顾机构 || ""}`;
-              return `<circle cx="${xScale(item.x).toFixed(2)}" cy="${yScale(item.y).toFixed(2)}" r="4.2" fill="${scatterColor(item.row)}" class="ai-scatter-dot"><title>${B.esc(label)}</title></circle>`;
-            }).join("")}
-            <text x="${pad.left + plotW / 2}" y="${height - 7}" text-anchor="middle" class="ai-scatter-label">${B.esc(drawdownField)}</text>
-            <text transform="translate(16 ${pad.top + plotH / 2}) rotate(-90)" text-anchor="middle" class="ai-scatter-label">${B.esc(returnField)}</text>
-          </svg>
+        <div class="ai-scatter-legend" aria-label="点阵图例">
+          ${groups.map((group) => `<span><i style="background:${colorByGroup.get(group)}"></i>${B.esc(group)}</span>`).join("")}
+          ${groups.length < new Set(sourceRows.map((item) => item.group)).size ? `<span><i style="background:#475569"></i>其他分类</span>` : ""}
+        </div>
+        <div class="ai-scatter-layout">
+          <div class="ai-scatter-wrap">
+            <svg class="ai-scatter-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="候选策略点阵">
+              <rect x="${pad.left}" y="${pad.top}" width="${plotW}" height="${plotH}" class="ai-scatter-bg"></rect>
+              ${xTicks.map((tick) => {
+                const x = xScale(tick);
+                return `<line x1="${x}" y1="${pad.top}" x2="${x}" y2="${pad.top + plotH}" class="ai-scatter-grid"></line><text x="${x}" y="${height - 28}" text-anchor="middle" class="ai-scatter-axis">${B.esc(formatScatterMetric(xField, tick))}</text>`;
+              }).join("")}
+              ${yTicks.map((tick) => {
+                const y = yScale(tick);
+                return `<line x1="${pad.left}" y1="${y}" x2="${pad.left + plotW}" y2="${y}" class="ai-scatter-grid"></line><text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" class="ai-scatter-axis">${B.esc(formatScatterMetric(yField, tick))}</text>`;
+              }).join("")}
+              ${xLine === null ? "" : `<line x1="${xLine}" y1="${pad.top}" x2="${xLine}" y2="${pad.top + plotH}" class="ai-scatter-threshold"></line><text x="${xLine + 6}" y="${pad.top + 15}" class="ai-scatter-threshold-text">${B.esc(xThreshold.label)}</text>`}
+              ${yLine === null ? "" : `<line x1="${pad.left}" y1="${yLine}" x2="${pad.left + plotW}" y2="${yLine}" class="ai-scatter-threshold"></line><text x="${pad.left + 8}" y="${yLine - 6}" class="ai-scatter-threshold-text">${B.esc(yThreshold.label)}</text>`}
+              <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" class="ai-scatter-axis-line"></line>
+              <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" class="ai-scatter-axis-line"></line>
+              ${sourceRows.map((item) => {
+                const label = `${item.row.策略名称 || "未命名策略"}｜${xField} ${formatScatterMetric(xField, item.x)}｜${yField} ${formatScatterMetric(yField, item.y)}｜${item.row.投顾机构 || ""}`;
+                const color = colorByGroup.get(item.group) || "#475569";
+                const selectedClass = item.id === state.selectedScatterId ? " is-selected" : "";
+                return `<circle cx="${xScale(item.x).toFixed(2)}" cy="${yScale(item.y).toFixed(2)}" r="4.6" fill="${color}" class="ai-scatter-dot${selectedClass}" data-ai-scatter-id="${B.esc(item.id)}" tabindex="0" role="button" aria-label="${B.esc(label)}"><title>${B.esc(label)}</title></circle>`;
+              }).join("")}
+              <text x="${pad.left + plotW / 2}" y="${height - 9}" text-anchor="middle" class="ai-scatter-label">${B.esc(xField)}</text>
+              <text transform="translate(17 ${pad.top + plotH / 2}) rotate(-90)" text-anchor="middle" class="ai-scatter-label">${B.esc(yField)}</text>
+            </svg>
+          </div>
+          <div id="aiScatterDetail" class="ai-scatter-detail-slot">
+            ${renderScatterDetail(selected?.row || null, xField, yField)}
+          </div>
         </div>
       </div>
     `;
+  }
+
+  function renderCandidateScatterIntoMount() {
+    const mount = B.byId("aiScatterMount");
+    if (!mount || !state.lastResult) return;
+    mount.innerHTML = renderCandidateScatter(state.lastResult.rows || state.rows || [], state.parsed);
+    bindCandidateScatter();
+  }
+
+  function selectCandidateScatterPoint(id) {
+    state.selectedScatterId = raw(id);
+    root.querySelectorAll(".ai-scatter-dot").forEach((dot) => {
+      dot.classList.toggle("is-selected", dot.getAttribute("data-ai-scatter-id") === state.selectedScatterId);
+    });
+    const row = (state.lastResult?.rows || state.rows || []).find((item) => raw(item.统一策略ID || item.策略代码 || item.策略名称) === state.selectedScatterId);
+    const detail = B.byId("aiScatterDetail");
+    if (!detail) return;
+    detail.innerHTML = renderScatterDetail(row || null, state.scatterXField, state.scatterYField);
+    detail.querySelector(".ai-hit-reason-btn")?.addEventListener("click", (event) => {
+      openHitReasonDialog(event.currentTarget?.dataset?.aiHitId || "");
+    });
+  }
+
+  function bindCandidateScatter() {
+    const xSelect = B.byId("aiScatterXField");
+    const ySelect = B.byId("aiScatterYField");
+    if (xSelect) {
+      xSelect.addEventListener("change", () => {
+        state.scatterXField = resolveScatterInput(state.lastResult?.rows || state.rows || [], xSelect.value, state.scatterXField);
+        xSelect.value = state.scatterXField;
+        renderCandidateScatterIntoMount();
+      });
+    }
+    if (ySelect) {
+      ySelect.addEventListener("change", () => {
+        state.scatterYField = resolveScatterInput(state.lastResult?.rows || state.rows || [], ySelect.value, state.scatterYField);
+        ySelect.value = state.scatterYField;
+        renderCandidateScatterIntoMount();
+      });
+    }
+    root.querySelectorAll(".ai-scatter-dot").forEach((dot) => {
+      const select = () => selectCandidateScatterPoint(dot.getAttribute("data-ai-scatter-id") || "");
+      dot.addEventListener("click", select);
+      dot.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          select();
+        }
+      });
+    });
+    B.byId("aiScatterDetail")?.querySelector(".ai-hit-reason-btn")?.addEventListener("click", (event) => {
+      openHitReasonDialog(event.currentTarget?.dataset?.aiHitId || "");
+    });
   }
 
   function dynamicHeaders(parsed) {
@@ -2629,12 +3300,10 @@
     const push = (field) => {
       if (field && !headers.includes(field)) headers.push(field);
     };
-    ["策略名称", "投顾机构", "渠道", "业务分类", "研报产品类型", "风险等级"].forEach(push);
+    ["命中说明", "策略名称", "投顾机构", "渠道", "业务分类", "研报产品类型", "风险等级"].forEach(push);
     (parsed?.filters || []).forEach((filter) => {
       if (filter.field === "__holding_entity") {
-        push("持仓实体判断");
         push("持仓实体权重");
-        push("持仓实体证据");
         return;
       }
       if (filter.field === "__gf_any" || filter.field === "__source_any") {
@@ -2655,7 +3324,7 @@
       }
       push(filter.field);
     });
-    ["累计收益率", "年化收益", "近6月", "近1年", "当前回撤", "最新业绩日期", "最新持仓日", "命中说明"].forEach(push);
+    ["累计收益率", "年化收益", "近6月", "近1年", "当前回撤", "最新业绩日期", "最新持仓日"].forEach(push);
     return headers;
   }
 
@@ -2665,7 +3334,7 @@
     return `
       ${renderCompareToolbar(rows)}
       ${renderRowsTable(visible, headers, "当前条件下暂无策略命中", { withSelection: true })}
-      ${rows.length ? renderCandidateScatter(rows, state.parsed) : ""}
+      ${rows.length ? `<div id="aiScatterMount">${renderCandidateScatter(rows, state.parsed)}</div>` : ""}
       ${rows.length > state.limit ? `<p class="desc">当前仅展示前 ${state.limit} 条，建议继续增加机构、产品类型或收益区间条件缩小范围。</p>` : ""}
     `;
   }
@@ -2679,7 +3348,7 @@
     if (shouldUseModelParser(allowModel)) {
       B.byId("aiResult").innerHTML = `
         <section class="panel">
-          <div class="panel-head"><div><h2>解析中</h2><p class="desc">正在调用本机模型解析筛选条件；若接口不可用会自动回退本地规则。</p></div></div>
+          <div class="panel-head"><div><h2>解析中</h2><p class="desc">正在调用 ${B.esc(aiConfig.model || "模型")} 解析筛选条件；若接口不可用会自动回退本地规则。</p></div></div>
         </section>
       `;
     }
@@ -2699,14 +3368,19 @@
       : "";
     B.byId("aiResult").innerHTML = `
       ${renderKpis(parsed, result)}
+      <details class="panel ai-parse-panel">
+        <summary class="ai-parse-summary">
+          <div><h2>解析条件</h2><p class="desc">自然语言已转换为受控筛选条件；字段可手工调整，结果仍只来自本地真实宽表。</p></div>
+          <span>查看筛选详细规则</span>
+        </summary>
+        <div class="ai-parse-body">
+          ${renderChips(parsed)}
+          ${assumptionHtml}
+          ${renderFilterEditor(parsed)}
+        </div>
+      </details>
       <section class="panel">
-        <div class="panel-head"><div><h2>解析条件</h2><p class="desc">自然语言已转换为受控筛选条件；字段可手工调整，结果仍只来自本地真实宽表。</p></div></div>
-        ${renderChips(parsed)}
-        ${assumptionHtml}
-        ${renderFilterEditor(parsed)}
-      </section>
-      <section class="panel">
-        <div class="panel-head"><div><h2>候选策略</h2><p class="desc">按 ${B.esc(parsed.returnMetric.field)} 从高到低排序，回撤作为次排序。</p></div><span class="pill">${result.rows.length.toLocaleString("zh-CN")} 条</span></div>
+        <div class="panel-head"><div><h2>候选策略</h2><p class="desc">按匹配得分排序：优先展示收益更高、回撤更低、持仓实体权重更贴合条件的策略；${B.esc(parsed.returnMetric.field)} 和回撤作为同分次排序。</p></div><span class="pill">${result.rows.length.toLocaleString("zh-CN")} 条</span></div>
         ${renderTable(result.rows)}
       </section>
       ${result.rows.length ? "" : renderNoResultDiagnostics(parsed)}
@@ -2714,12 +3388,223 @@
     bindFilterEditor();
     bindCompareSelection(result.rows);
     bindHitReasonButtons();
+    bindCandidateScrollbars();
+    bindCandidateScatter();
+  }
+
+  function modelHeadersText(config = aiConfig) {
+    try {
+      return JSON.stringify(config.headers || {}, null, 2);
+    } catch (error) {
+      return "{}";
+    }
+  }
+
+  function renderModelSettings() {
+    const config = aiConfig;
+    const base = modelBaseUrl(config);
+    return `
+      <details class="ai-model-panel">
+        <summary class="ai-model-summary">
+          <div>
+            <strong>模型设置与连通性测试</strong>
+            <span>默认使用配置文件中的内网模型；需要调试时展开编辑，本页设置可保存到当前浏览器。</span>
+          </div>
+        </summary>
+        <div class="ai-model-body">
+          <div class="ai-model-grid">
+            <label>启用模型解析
+              <select id="aiModelEnabled" class="control">
+                <option value="true"${config.enabled !== false ? " selected" : ""}>启用</option>
+                <option value="false"${config.enabled === false ? " selected" : ""}>关闭，仅本地规则</option>
+              </select>
+            </label>
+            <label>调用模式
+              <select id="aiModelMode" class="control">
+                <option value="hybrid-parse"${raw(config.mode || "hybrid-parse") === "hybrid-parse" ? " selected" : ""}>混合解析</option>
+                <option value="local-only"${raw(config.mode) === "local-only" ? " selected" : ""}>仅本地规则</option>
+                <option value="off"${raw(config.mode) === "off" ? " selected" : ""}>关闭模型</option>
+              </select>
+            </label>
+            <label>Provider
+              <input id="aiModelProvider" class="control" value="${B.esc(config.provider || "inner-ds-openai-compatible")}">
+            </label>
+            <label>模型
+              <input id="aiModelName" class="control" value="${B.esc(config.model || "deepseek-v4-flash-inner")}">
+            </label>
+            <label class="ai-model-wide">Base URL
+              <input id="aiModelBaseUrl" class="control" value="${B.esc(base)}" placeholder="/llmapi/v1">
+            </label>
+            <label class="ai-model-wide">Chat Completions Endpoint
+              <input id="aiModelEndpoint" class="control" value="${B.esc(modelChatEndpoint(config))}" placeholder="/llmapi/v1/chat/completions">
+            </label>
+            <label>API Key
+              <input id="aiModelApiKey" class="control" type="password" autocomplete="off" value="${B.esc(config.apiKey || "")}">
+            </label>
+            <label>超时毫秒
+              <input id="aiModelTimeout" class="control" type="number" min="800" max="120000" step="1000" value="${B.esc(config.timeoutMs || 45000)}">
+            </label>
+            <label>JSON 返回格式
+              <select id="aiModelResponseFormat" class="control">
+                <option value="true"${config.responseFormat !== false ? " selected" : ""}>要求 JSON Object</option>
+                <option value="false"${config.responseFormat === false ? " selected" : ""}>不强制</option>
+              </select>
+            </label>
+            <label>失败退避毫秒
+              <input id="aiModelBackoff" class="control" type="number" min="1000" max="600000" step="1000" value="${B.esc(config.rateLimitBackoffMs || 60000)}">
+            </label>
+            <label class="ai-model-wide">额外 Headers JSON
+              <textarea id="aiModelHeaders" class="control ai-model-headers" rows="3" spellcheck="false">${B.esc(modelHeadersText(config))}</textarea>
+            </label>
+          </div>
+          <div class="ai-model-actions">
+            <button id="aiModelSave" type="button">保存配置</button>
+            <button id="aiModelTest" type="button">测试连通性</button>
+            <button id="aiModelReset" type="button">恢复文件默认</button>
+            <span id="aiModelTestResult" class="ai-model-test-result">未测试</span>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  function collectModelSettingsForm() {
+    const baseUrl = raw(B.byId("aiModelBaseUrl")?.value).trim();
+    const endpointInput = raw(B.byId("aiModelEndpoint")?.value).trim();
+    const endpoint = normalizeModelEndpoint(endpointInput, baseUrl);
+    return {
+      enabled: raw(B.byId("aiModelEnabled")?.value) !== "false",
+      mode: raw(B.byId("aiModelMode")?.value || "hybrid-parse"),
+      provider: raw(B.byId("aiModelProvider")?.value || "inner-ds-openai-compatible").trim(),
+      baseUrl: normalizeModelBaseUrl(baseUrl || endpoint),
+      endpoint,
+      model: raw(B.byId("aiModelName")?.value || "deepseek-v4-flash-inner").trim(),
+      apiKey: raw(B.byId("aiModelApiKey")?.value),
+      timeoutMs: Number(B.byId("aiModelTimeout")?.value) || 45000,
+      responseFormat: raw(B.byId("aiModelResponseFormat")?.value) !== "false",
+      rateLimitBackoffMs: Number(B.byId("aiModelBackoff")?.value) || 60000,
+      headers: parseHeadersJson(B.byId("aiModelHeaders")?.value),
+    };
+  }
+
+  function updateModelStatusPill() {
+    const pill = B.byId("aiModelStatusPill");
+    if (pill) pill.textContent = modelDisplayLabel(aiConfig);
+  }
+
+  function setModelTestResult(kind, message) {
+    const node = B.byId("aiModelTestResult");
+    if (!node) return;
+    node.className = `ai-model-test-result is-${kind}`;
+    node.textContent = message;
+  }
+
+  async function requestModelConnectivity(config) {
+    const endpoint = modelChatEndpoint(config);
+    if (!endpoint) throw new Error("模型 endpoint 未配置");
+    const timeoutMs = Math.min(Math.max(Number(config.timeoutMs) || 45000, 800), 120000);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    const headers = { "Content-Type": "application/json", ...(config.headers || {}) };
+    if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+    const payload = {
+      model: config.model || "deepseek-v4-flash-inner",
+      temperature: 0,
+      max_tokens: 80,
+      messages: [
+        { role: "system", content: "你是连通性测试服务，只输出 JSON 对象。" },
+        { role: "user", content: "请输出 {\"ok\":true,\"message\":\"pong\"}" },
+      ],
+    };
+    if (config.responseFormat !== false) payload.response_format = { type: "json_object" };
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`模型接口返回 ${response.status}: ${text.slice(0, 220)}`);
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch (error) {
+        throw new Error(`模型返回非 JSON：${text.slice(0, 220)}`);
+      }
+      const content = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || data?.output_text || "";
+      return {
+        model: data?.model || config.model || "",
+        content: raw(content).slice(0, 120),
+      };
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  function fillModelSettingsForm(config = aiConfig) {
+    const setValue = (id, value) => {
+      const node = B.byId(id);
+      if (node) node.value = value;
+    };
+    setValue("aiModelEnabled", config.enabled === false ? "false" : "true");
+    setValue("aiModelMode", config.mode || "hybrid-parse");
+    setValue("aiModelProvider", config.provider || "inner-ds-openai-compatible");
+    setValue("aiModelName", config.model || "deepseek-v4-flash-inner");
+    setValue("aiModelBaseUrl", modelBaseUrl(config));
+    setValue("aiModelEndpoint", modelChatEndpoint(config));
+    setValue("aiModelApiKey", config.apiKey || "");
+    setValue("aiModelTimeout", config.timeoutMs || 45000);
+    setValue("aiModelResponseFormat", config.responseFormat === false ? "false" : "true");
+    setValue("aiModelBackoff", config.rateLimitBackoffMs || 60000);
+    setValue("aiModelHeaders", modelHeadersText(config));
+  }
+
+  function bindModelSettings() {
+    B.byId("aiModelSave")?.addEventListener("click", () => {
+      try {
+        const config = applyRuntimeModelConfig(collectModelSettingsForm(), true);
+        fillModelSettingsForm(config);
+        updateModelStatusPill();
+        setModelTestResult("ok", "已保存到当前浏览器，本页立即生效");
+      } catch (error) {
+        setModelTestResult("bad", `配置无效：${raw(error?.message || error).slice(0, 180)}`);
+      }
+    });
+    B.byId("aiModelTest")?.addEventListener("click", async () => {
+      let config = null;
+      try {
+        config = applyRuntimeModelConfig(collectModelSettingsForm(), false);
+        fillModelSettingsForm(config);
+        updateModelStatusPill();
+        setModelTestResult("running", "正在测试模型接口...");
+        const started = performance.now();
+        const result = await requestModelConnectivity(config);
+        const elapsed = Math.round(performance.now() - started);
+        setModelTestResult("ok", `连通成功，${result.model || config.model}，${elapsed}ms`);
+      } catch (error) {
+        let message = raw(error?.name === "AbortError" ? "模型测试超时" : error?.message || error);
+        if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
+          message = isCodexProxyConfig(config || aiConfig)
+            ? "本机模型代理不可访问"
+            : "模型接口不可访问，请检查内网、CORS 跨域或 API Key";
+        }
+        setModelTestResult("bad", message.slice(0, 220));
+      }
+    });
+    B.byId("aiModelReset")?.addEventListener("click", () => {
+      clearStoredModelConfig();
+      Object.keys(aiConfig).forEach((key) => delete aiConfig[key]);
+      Object.assign(aiConfig, aiConfigFileDefault);
+      applyRuntimeModelConfig(aiConfig, false);
+      fillModelSettingsForm(aiConfig);
+      updateModelStatusPill();
+      setModelTestResult("ok", "已恢复配置文件默认值");
+    });
   }
 
   function renderShell() {
-    const modelLabel = aiConfig.enabled
-      ? `模型解析 ${raw(aiConfig.model || "codex")} @ ${raw(aiConfig.endpoint || "未配置")}`
-      : "模型解析未启用";
+    const modelLabel = modelDisplayLabel(aiConfig);
     root.innerHTML = `
       <section class="panel ai-query-panel">
         <div class="panel-head">
@@ -2727,7 +3612,7 @@
             <h2>Ai选策略</h2>
             <p class="desc">输入自然语言条件，系统解析为可核验筛选条件后在当前策略宽表中执行。</p>
           </div>
-          <div class="title-pills"><span class="pill">策略宽表 ${allRows.length.toLocaleString("zh-CN")} 条</span><span class="pill">${B.esc(modelLabel)}</span></div>
+          <div class="title-pills"><span class="pill">策略宽表 ${allRows.length.toLocaleString("zh-CN")} 条</span><span id="aiModelStatusPill" class="pill">${B.esc(modelLabel)}</span></div>
         </div>
         <textarea id="aiQuery" class="control ai-query-box" rows="3" placeholder="例如：找成立一年以上，回撤在15个点以内，收益率在15个点以上，持仓含德国、日本的策略。">${B.esc(state.query)}</textarea>
         <div class="ai-action-row">
@@ -2735,6 +3620,7 @@
           <button id="aiRun" type="button">执行筛选</button>
           <button id="aiClear" type="button">清空</button>
         </div>
+        ${renderModelSettings()}
       </section>
       ${renderAiExplanation()}
       <div id="aiResult"></div>
@@ -2747,6 +3633,7 @@
     B.byId("aiQuery").addEventListener("keydown", (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") runSearch({ allowModel: true });
     });
+    bindModelSettings();
     runSearch({ allowModel: false });
   }
 

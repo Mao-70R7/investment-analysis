@@ -121,9 +121,25 @@ fi
 if [[ -f "$pid_file" ]]; then
   old_pid="$(cat "$pid_file" 2>/dev/null || true)"
   if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" 2>/dev/null; then
-    log_line "[INFO] Server already running with PID $old_pid"
-    log_line "[INFO] Log file     : $log_file"
-    exit 0
+    old_cmd=""
+    if [[ -r "/proc/$old_pid/cmdline" ]]; then
+      old_cmd="$(tr '\0' ' ' < "/proc/$old_pid/cmdline" 2>/dev/null || true)"
+    elif command -v ps >/dev/null 2>&1; then
+      old_cmd="$(ps -p "$old_pid" -o args= 2>/dev/null || true)"
+    fi
+    if [[ "$old_cmd" == *"serve_basic_data_site.py"* ]]; then
+      log_line "[INFO] Server already running with PID $old_pid"
+      log_line "[INFO] Log file     : $log_file"
+      exit 0
+    fi
+    log_line "[WARN] Existing server PID $old_pid is not the AI proxy server; restarting it"
+    kill "$old_pid" 2>/dev/null || true
+    sleep 1
+    if kill -0 "$old_pid" 2>/dev/null; then
+      log_line "[ERROR] Failed to stop existing server PID $old_pid. Stop it manually and rerun."
+      exit 1
+    fi
+    rm -f "$pid_file"
   fi
 fi
 
@@ -139,15 +155,34 @@ log_line "[INFO] Log file     : $log_file"
 log_line "[INFO] PID file     : $pid_file"
 log_line "[INFO] Static page server only; no data refresh will be started."
 
+proxy_env_file="${AI_STRATEGY_PROXY_ENV_FILE:-$project_root/config/ai_strategy_proxy.env}"
+if [[ -f "$proxy_env_file" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$proxy_env_file"
+  set +a
+  log_line "[INFO] AI proxy env : $proxy_env_file"
+fi
+
+server_script="$project_root/scripts/serve_basic_data_site.py"
+server_args=()
+if [[ -f "$server_script" ]]; then
+  server_args=("$server_script" "--directory" "$site_dir" "--host" "$host" "--port" "$port")
+  log_line "[INFO] AI proxy     : /llmapi/v1/* -> ${AI_STRATEGY_UPSTREAM_BASE_URL:-http://10.89.189.109:8000/llmapi/v1}"
+else
+  server_args=("-m" "http.server" "$port" "--bind" "$host")
+  log_line "[WARN] AI proxy script not found; falling back to static-only http.server"
+fi
+
 if [[ "$foreground" -eq 1 ]]; then
   log_line "[INFO] Starting in foreground mode"
   cd "$site_dir"
-  "$python_bin" -m http.server "$port" --bind "$host" 2>&1 | tee -a "$log_file"
+  "$python_bin" "${server_args[@]}" 2>&1 | tee -a "$log_file"
 else
   log_line "[INFO] Starting in background mode"
   (
     cd "$site_dir"
-    nohup "$python_bin" -m http.server "$port" --bind "$host" >> "$log_file" 2>&1 &
+    nohup "$python_bin" "${server_args[@]}" >> "$log_file" 2>&1 &
     echo "$!" > "$pid_file"
   )
   server_pid="$(cat "$pid_file")"

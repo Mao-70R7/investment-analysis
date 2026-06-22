@@ -1,28 +1,28 @@
 // Ai选策略模型服务配置。
-// 本机默认使用 Codex 本地桥接；迁移到内网服务器时，通常只需要修改“内网 DS 直连配置”中的 endpoint/model/apiKey。
+// 当前部署默认走报表服务同源代理，不依赖 Codex，也不让浏览器跨域直连模型服务。
 // 不要把页面字段口径、筛选规则、调仓逻辑放到这里。
 
 window.__AI_STRATEGY_LOCAL_CONFIG__ = {
   // 是否启用模型解析。false 表示只使用本地规则解析，不请求模型。
   enabled: true,
 
-  // 当前电脑默认保留 Codex 桥接模式；内网服务器可改成 "inner-ds-openai-compatible"。
-  provider: "codex-cli-local-proxy",
+  // 报表服务同源 LLM 代理。
+  provider: "same-origin-llm-proxy",
 
-  // 当前电脑 Codex 桥接地址。内网 DS 直连时改成内网 OpenAI 兼容 chat/completions 地址。
-  endpoint: "http://127.0.0.1:8787/v1/chat/completions",
+  // 浏览器只请求当前报表服务，由 start_basic_data_site_linux.sh 启动的代理转发到模型服务。
+  baseUrl: "/llmapi/v1",
+  endpoint: "/llmapi/v1/chat/completions",
 
-  // 当前电脑通过 Codex 桥接调用的模型名。内网 DS 可改成本地服务暴露的模型名，例如 "deepseek-r1"、"deepseek-v3"。
-  model: "gpt-5.4-mini",
+  // 当前使用的快速模型。
+  model: "deepseek-v4-flash-inner",
 
-  // 浏览器等待模型返回的超时时间，单位毫秒。内网大模型响应慢时可调大，但前端最大会限制在 120000。
+  // 浏览器等待模型返回的超时时间，单位毫秒。前端最大会限制在 120000。
   timeoutMs: 45000,
 
   // 建议保留 hybrid-parse：先用本地规则解析，再让模型补充复杂自然语言意图。
   mode: "hybrid-parse",
 
-  // 内网接口需要 Bearer Token 时填写；不需要鉴权时保持空字符串。
-  // 注意：这个文件会随页面一起部署，若内网多人可访问，请优先使用无密钥内网网关或服务端代理。
+  // 浏览器侧不填写 API Key；服务器侧代理会从 config/ai_strategy_proxy.env 注入上游鉴权。
   apiKey: "",
 
   // 额外请求头。常见用法：{ "X-API-Key": "xxx" }。没有额外头时保持空对象。
@@ -31,10 +31,10 @@ window.__AI_STRATEGY_LOCAL_CONFIG__ = {
   // 模型限流或接口失败后的退避时间，单位毫秒。
   rateLimitBackoffMs: 60000,
 
-  // 是否要求 OpenAI 兼容接口返回 JSON 对象。多数 DS/OpenAI-compatible 服务支持；不支持时设为 false。
-  responseFormat: true,
+  // 是否要求 OpenAI 兼容接口返回 JSON 对象。为兼容内网网关默认不强制；前端仍会从模型文本中抽取 JSON。
+  responseFormat: false,
 
-  // 仅 Codex 桥接脚本读取；内网 DS 直连不需要启动桥接脚本。
+  // 仅 Codex 桥接脚本读取；当前内网 DS 直连不需要启动桥接脚本。
   codexBridge: {
     host: "127.0.0.1",
     port: 8787,
@@ -51,11 +51,12 @@ window.__AI_STRATEGY_LOCAL_CONFIG__ = {
   }
 };
 
-// 内网 DS 直连配置示例：迁移到内网服务器后，把上面的对应字段改成下面这些值。
+// 如确需绕过同源代理、让浏览器直连内网 DS，可改成下面这些值；但模型服务必须允许 CORS。
 // window.__AI_STRATEGY_LOCAL_CONFIG__ = {
 //   enabled: true,
 //   provider: "inner-ds-openai-compatible",
-//   endpoint: "http://10.0.0.8:8000/v1/chat/completions",
+//   baseUrl: "http://10.89.189.109:8000/llmapi/v1",
+//   endpoint: "http://10.89.189.109:8000/llmapi/v1/chat/completions",
 //   model: "deepseek-r1",
 //   timeoutMs: 90000,
 //   mode: "hybrid-parse",

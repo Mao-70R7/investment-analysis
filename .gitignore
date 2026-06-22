@@ -10,3 +10,6 @@ advisor_update.local.bat
 
 .DS_Store
 Thumbs.db
+__pycache__/
+*.py[cod]
+*.env

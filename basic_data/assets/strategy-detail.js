@@ -120,21 +120,23 @@
       type,
       rows: rows.filter((row) => row.实体类型 === type).slice(0, type === "资产大类" ? 8 : 12),
     })).filter((group) => group.rows.length);
-    return `<section class="panel entity-panel">
-      <div class="panel-head">
+    return `<details class="panel entity-panel collapsible-panel">
+      <summary class="collapsible-summary">
         <div>
           <h2>实体图谱</h2>
           <p class="desc">基于最新持仓基金的分类快照、资产暴露和基金名称抽取；权重为策略持仓权重按基金暴露比例汇总，优先使用季报穿透。</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 个实体</span>
+      </summary>
+      <div class="collapsible-body">
+        ${groups.length ? groups.map((group) => `
+          <div class="entity-group">
+            <h3>${B.esc(group.type)}</h3>
+            <div class="entity-grid">${group.rows.map(entityBadge).join("")}</div>
+          </div>
+        `).join("") : '<div class="empty">当前策略暂无可展示实体。请先重建 AI 语义索引。</div>'}
       </div>
-      ${groups.length ? groups.map((group) => `
-        <div class="entity-group">
-          <h3>${B.esc(group.type)}</h3>
-          <div class="entity-grid">${group.rows.map(entityBadge).join("")}</div>
-        </div>
-      `).join("") : '<div class="empty">当前策略暂无可展示实体。请先重建 AI 语义索引。</div>'}
-    </section>`;
+    </details>`;
   }
   function currentHoldingSnapshot() {
     return snapshots.find((snap) => snap.id === "current") || snapshots.find((snap) => snap.类型 === "当前仓位") || snapshots[0] || { holdings: [] };
@@ -937,18 +939,23 @@
       </div>
       <div id="contributionChart" class="chart"></div>
     </section>
-    <section class="panel">
-      <div class="panel-head"><div><h2>数据质量与其他信息</h2><p class="desc">保留原详情页的质量检查、持仓口径和低覆盖字段；低覆盖或空值较多的字段默认折叠。</p></div></div>
-      <div class="quality-grid">
-        ${(detail.qualityChecks || []).map((row) => `<div class="quality-card"><h3>${B.esc(row.项目)}</h3>${B.statusBadge(row.结论)}<p>${B.esc(row.说明)}</p></div>`).join("")}
+    <details class="panel collapsible-panel">
+      <summary class="collapsible-summary">
+        <div><h2>数据质量与其他信息</h2><p class="desc">质量检查、持仓口径和低覆盖字段默认折叠，展开后用于核验。</p></div>
+        <span class="pill">${(detail.qualityChecks || []).length.toLocaleString("zh-CN")} 项质检</span>
+      </summary>
+      <div class="collapsible-body">
+        <div class="quality-grid">
+          ${(detail.qualityChecks || []).map((row) => `<div class="quality-card"><h3>${B.esc(row.项目)}</h3>${B.statusBadge(row.结论)}<p>${B.esc(row.说明)}</p></div>`).join("")}
+        </div>
+        <details class="fold-block">
+          <summary>持仓口径与其他字段</summary>
+          ${B.valueList(classificationInfoRows())}
+          ${B.valueList(Object.entries(detail.holdingMeta || {}).map(([字段, 值]) => ({ 字段, 值 })))}
+          ${B.valueList(otherRows())}
+        </details>
       </div>
-      <details class="fold-block">
-        <summary>持仓口径与其他字段</summary>
-        ${B.valueList(classificationInfoRows())}
-        ${B.valueList(Object.entries(detail.holdingMeta || {}).map(([字段, 值]) => ({ 字段, 值 })))}
-        ${B.valueList(otherRows())}
-      </details>
-    </section>
+    </details>
   `;
   const globalBenchmarkSelect = B.byId("globalBenchmarkSelect");
   if (globalBenchmarkSelect) {

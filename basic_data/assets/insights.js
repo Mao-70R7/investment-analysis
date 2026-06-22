@@ -9,6 +9,7 @@
     insight.调仓事件 = summary.rebalanceEvents || [];
   }
   const root = B.byId("insightsPage");
+  const compareStandalone = document.body?.dataset?.page === "compare";
   const riskOrder = ["低风险", "R0 现金/超低波", "中低风险", "中低风险(R2)", "R1 低波", "R2 稳健收益", "中风险", "中风险(R3)", "R3 均衡稳健", "中高风险", "中高风险(R4)", "R4 均衡成长", "高风险", "R5 权益/进取", "未披露"];
   const riskOrderMap = new Map(riskOrder.map((risk, index) => [risk, index]));
   const dateRanges = [
@@ -22,8 +23,7 @@
   const tabs = [
     ["market", "市场总览"],
     ["holding", "仓位分析"],
-    ["rebalance", "调仓分析"],
-    ["compare", "策略对比"]
+    ["rebalance", "调仓分析"]
   ];
   const xAxisOptions = ["最大回撤", "波动率", "夏普比率", "卡玛比率"];
   const reportTypeOrder = ["纯债型", "固收+型", "股债混合型", "股票型", "多元配置型", "持仓缺失/不入池"];
@@ -31,14 +31,14 @@
   const reportAssetSet = new Set(reportAssetOrder);
   const highFrequencyHoldingThreshold = 0.5;
   const state = {
-    tab: "market",
+    tab: compareStandalone ? "compare" : "market",
     risk: "",
     business: "",
     region: "",
     clientScope: "",
     gfScope: "",
     institution: "",
-    range: "1y",
+    range: "3m",
     scatterX: "最大回撤",
     viewPct: 100,
     selectedPointId: "",
@@ -62,7 +62,7 @@
     rebalanceFundRankType: "netIn",
     rebalanceFundSecondaryCategory: "",
     rebalanceFundCompany: "",
-    rebalanceMode: "month",
+    rebalanceMode: "range",
     rebalanceMonth: "",
     reportType: "",
     compareQuery: "",
@@ -76,7 +76,8 @@
   };
   const initParams = new URLSearchParams(window.location.search);
   const initTab = initParams.get("tab");
-  if (tabs.some(([key]) => key === initTab)) state.tab = initTab;
+  if (compareStandalone) state.tab = "compare";
+  else if (tabs.some(([key]) => key === initTab)) state.tab = initTab;
   if (initTab === "cockpit") state.tab = "market";
   state.range = initParams.get("range") || state.range;
   state.risk = initParams.get("risk") || state.risk;
@@ -2287,17 +2288,17 @@
     if (thin) cards.push({
       title: "先补货架",
       value: thin.维度,
-      body: `${thin.维度}市场${countText(thin.市场数量)}个、广发${countText(thin.广发数量)}个，覆盖${pct(thin.广发覆盖率)}；${thin.经营判断} 门禁：${thin.经营门禁}。`
+      body: `${thin.维度}市场${countText(thin.市场数量)}个、广发${countText(thin.广发数量)}个，覆盖${pct(thin.广发覆盖率)}；${thin.经营判断}。`
     });
     if (review) cards.push({
       title: "先复盘能力",
       value: signedPct(review.收益差),
-      body: `${review.维度}广发中位${rangeLabel()}收益相对市场${signedPctText(review.收益差)}，代表竞品：${review.代表竞品} 门禁：${review.经营门禁}。`
+      body: `${review.维度}广发中位${rangeLabel()}收益相对市场${signedPctText(review.收益差)}，代表竞品：${review.代表竞品}。`
     });
     if (packageable) cards.push({
       title: "可转销售话术",
       value: packageable.维度,
-      body: `${packageable.维度}广发中位不弱于市场，回撤优势${packageable.回撤优势 === null ? "未披露" : `${Number(packageable.回撤优势).toFixed(2)}pct`}；代表产品：${packageable.广发代表} 门禁：${packageable.经营门禁}。`
+      body: `${packageable.维度}广发中位不弱于市场，回撤优势${packageable.回撤优势 === null ? "未披露" : `${Number(packageable.回撤优势).toFixed(2)}pct`}；代表产品：${packageable.广发代表}。`
     });
     cards.push({
       title: "全局位置",
@@ -2385,9 +2386,8 @@
   }
 
   function managerActionQueueTable(rows) {
-    return tableBlock(["优先级", "业务维度", "场景", "核验证据", "经营动作", "经营门禁", "证据", "下一步", "负责人关注点"], rows, (row, h) => {
+    return tableBlock(["优先级", "业务维度", "场景", "核验证据", "经营动作", "证据", "下一步", "负责人关注点"], rows, (row, h) => {
       if (h === "经营动作") return `<span class="insight-chip ${managerActionClass(row[h])}">${B.esc(row[h])}</span>`;
-      if (h === "经营门禁") return `<span class="insight-chip ${managerGateClass(row[h])}" title="${B.esc(row.门禁说明 || "")}">${B.esc(row[h])}</span>`;
       if (h === "优先级") return `<span class="insight-chip ${row[h] === "高" ? "bad" : (row[h] === "中" ? "warn" : "")}">${B.esc(row[h])}</span>`;
       if (h === "核验证据") return managerEvidenceLink(row.业务维度, row.场景, row.经营动作);
       if (h === "证据" || h === "下一步" || h === "负责人关注点") return `<span class="small">${B.esc(row[h])}</span>`;
@@ -2396,11 +2396,10 @@
   }
 
   function managerTable(rows, label) {
-    return tableBlock([label, "核验证据", "经营动作", "经营门禁", "市场数量", "广发数量", "广发覆盖率", "市场中位收益", "广发中位收益", "收益差", "回撤优势", "经营判断"], rows, (row, h) => {
+    return tableBlock([label, "核验证据", "经营动作", "市场数量", "广发数量", "广发覆盖率", "市场中位收益", "广发中位收益", "收益差", "回撤优势", "经营判断"], rows, (row, h) => {
       if (h === label) return B.fmt(row.维度);
       if (h === "核验证据") return managerEvidenceLink(label, row.维度, row.经营动作);
       if (h === "经营动作") return `<span class="insight-chip ${managerActionClass(row[h])}">${B.esc(row[h])}</span>`;
-      if (h === "经营门禁") return `<span class="insight-chip ${managerGateClass(row[h])}" title="${B.esc(row.门禁说明 || "")}">${B.esc(row[h])}</span>`;
       if (h.includes("数量")) return countText(row[h]);
       if (h.includes("覆盖率")) return pct(row[h]);
       if (h.includes("收益") || h === "收益差") return signedPct(row[h]);
@@ -2411,10 +2410,9 @@
   }
 
   function managerBenchmarkTable(rows, label) {
-    return tableBlock([label, "核验证据", "经营门禁", "代表竞品", "广发代表", "市场数量", "广发数量", "广发覆盖率"], rows, (row, h) => {
+    return tableBlock([label, "核验证据", "代表竞品", "广发代表", "市场数量", "广发数量", "广发覆盖率"], rows, (row, h) => {
       if (h === label) return B.fmt(row.维度);
       if (h === "核验证据") return managerEvidenceLink(label, row.维度, row.经营动作);
-      if (h === "经营门禁") return `<span class="insight-chip ${managerGateClass(row[h])}" title="${B.esc(row.门禁说明 || "")}">${B.esc(row[h])}</span>`;
       if (h === "代表竞品" || h === "广发代表") return `<span class="small">${B.esc(row[h])}</span>`;
       if (h.includes("数量")) return countText(row[h]);
       if (h.includes("覆盖率")) return pct(row[h]);
@@ -2531,13 +2529,8 @@
       </section>
       <section class="panel" id="data-risk">
         <div class="panel-head"><div><h2>数据可用性与误读风险</h2><p class="desc">把不能直接用于经营判断的数据单独说明，避免用缺失样本、非对客样本或混合可比池得出结论。</p></div></div>
-        ${tableBlock(["项目", "数值", "经营门禁", "业务含义", "核验证据"], dataQualityRows(rows), (row, h) => {
+        ${tableBlock(["项目", "数值", "业务含义", "核验证据"], dataQualityRows(rows), (row, h) => {
           if (h === "数值") return countText(row[h]);
-          if (h === "经营门禁") {
-            const gate = dataQualityGate(row);
-            const cls = gate === "阻断经营结论" ? "action-watch" : (gate === "销售/披露前补齐" ? "action-hold" : "action-attack");
-            return `<span class="insight-chip ${cls}">${B.esc(gate)}</span>`;
-          }
           if (h === "核验证据") return strategyEvidenceLink(row);
           return B.fmt(row[h]);
         })}
@@ -3037,6 +3030,8 @@
   }
 
   function rebalanceEventKey(row) {
+    const eventId = raw(row.调仓事件ID).trim();
+    if (eventId) return eventId;
     const turn = num(row.单次换手率);
     const businessKey = [
       row.统一策略ID,
@@ -3046,8 +3041,7 @@
       row.涉及资产,
       turn === null ? "" : turn.toFixed(4)
     ].map(raw).join("｜");
-    if (raw(row.统一策略ID).trim() && raw(row.调仓日期).trim()) return businessKey;
-    return raw(row.调仓事件ID).trim() || businessKey;
+    return businessKey;
   }
 
   function uniqueRebalanceEvents(rows) {
@@ -5188,8 +5182,8 @@
     root.innerHTML = `
       <section class="page-title">
         <div>
-          <h1>数据洞察</h1>
-          <p class="desc">按市场总览、仓位分析、调仓分析和策略对比四类视角展示策略表现、底层基金配置和调仓变化。</p>
+          <h1>${compareStandalone ? "策略对比" : "数据洞察"}</h1>
+          <p class="desc">${compareStandalone ? "搜索或从同类推荐中加入策略，横向比较收益、风险、费率、持仓和调仓行为。" : "按市场总览、仓位分析和调仓分析三类视角展示策略表现、底层基金配置和调仓变化。"}</p>
         </div>
         <div class="title-pills">
           <span class="pill">产品 ${countText(displayCount)} 个</span>
@@ -5208,8 +5202,8 @@
           ${filterField("策略范围", gfScopeSelect("insightGfScope", state.gfScope))}
           ${filterField("投顾机构", institutionSelect("insightInstitution", state.institution))}
         </div>
-        <div class="insight-tabs">${tabs.map(([key, label]) => `<button type="button" class="insight-tab-button ${key === state.tab ? "is-active" : ""}" data-tab="${key}">${B.esc(label)}</button>`).join("")}</div>
-        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于市场总览、仓位分析、调仓分析和策略对比的所有图表和表格；默认展示完整策略，以及已具备最新披露业绩和最新持仓明细的扩展样本；D0 持仓缺失和持仓缺失/不入池策略仍然剔除。对客范围可剔除明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；时间区间同时用于区间收益、仓位时间序列、调仓事件和对比曲线；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
+        ${compareStandalone ? "" : `<div class="insight-tabs">${tabs.map(([key, label]) => `<button type="button" class="insight-tab-button ${key === state.tab ? "is-active" : ""}" data-tab="${key}">${B.esc(label)}</button>`).join("")}</div>`}
+        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于${compareStandalone ? "策略对比候选池、同类推荐、散点图和对比曲线" : "市场总览、仓位分析和调仓分析的所有图表和表格"}；默认展示完整策略，以及已具备最新披露业绩和最新持仓明细的扩展样本；D0 持仓缺失和持仓缺失/不入池策略仍然剔除。对客范围可剔除明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；时间区间同时用于区间收益、仓位时间序列、调仓事件和对比曲线；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
       </section>
       <div class="insight-panel-stack">${renderContent()}</div>
     `;
@@ -5318,7 +5312,7 @@
     if (rebalancePrev) rebalancePrev.addEventListener("click", () => { state.rebalancePage = Math.max(1, state.rebalancePage - 1); render(); });
     if (rebalanceNext) rebalanceNext.addEventListener("click", () => { state.rebalancePage += 1; render(); });
     if (rebalancePageSize) rebalancePageSize.addEventListener("change", () => { state.rebalancePageSize = Number(rebalancePageSize.value) || 20; state.rebalancePage = 1; render(); });
-    if (rebalanceMode) rebalanceMode.addEventListener("change", () => { state.rebalanceMode = rebalanceMode.value || "month"; state.rebalancePage = 1; render(); });
+    if (rebalanceMode) rebalanceMode.addEventListener("change", () => { state.rebalanceMode = rebalanceMode.value || "range"; state.rebalancePage = 1; render(); });
     if (rebalanceMonth) rebalanceMonth.addEventListener("change", () => { state.rebalanceMonth = rebalanceMonth.value || ""; state.rebalancePage = 1; render(); });
     if (rebalanceReportType) rebalanceReportType.addEventListener("change", () => { state.reportType = rebalanceReportType.value || ""; state.rebalancePage = 1; render(); });
     if (rebalanceFundRankType) rebalanceFundRankType.addEventListener("change", () => { state.rebalanceFundRankType = rebalanceFundRankType.value || "netIn"; render(); });

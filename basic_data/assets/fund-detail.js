@@ -107,21 +107,23 @@
       type,
       rows: rows.filter((row) => row.实体类型 === type).slice(0, 12),
     })).filter((group) => group.rows.length);
-    return `<section class="panel entity-panel">
-      <div class="panel-head">
+    return `<details class="panel entity-panel collapsible-panel">
+      <summary class="collapsible-summary">
         <div>
           <h2>基金实体描述</h2>
           <p class="desc">基于基金分类快照、资产暴露、行业主题、研报大类资产和基金名称抽取；优先使用季报穿透，缺失时使用规则估算兜底。</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 个实体</span>
+      </summary>
+      <div class="collapsible-body">
+        ${groups.length ? groups.map((group) => `
+          <div class="entity-group">
+            <h3>${B.esc(group.type)}</h3>
+            <div class="entity-grid">${group.rows.map(fundEntityBadge).join("")}</div>
+          </div>
+        `).join("") : '<div class="empty">当前基金暂无可展示实体。请先重建 AI 语义索引。</div>'}
       </div>
-      ${groups.length ? groups.map((group) => `
-        <div class="entity-group">
-          <h3>${B.esc(group.type)}</h3>
-          <div class="entity-grid">${group.rows.map(fundEntityBadge).join("")}</div>
-        </div>
-      `).join("") : '<div class="empty">当前基金暂无可展示实体。请先重建 AI 语义索引。</div>'}
-    </section>`;
+    </details>`;
   }
 
   function factGrid(fields, data) {
@@ -185,22 +187,30 @@
   ]);
   const monthlyDisplayFields = monthlyFields.slice(1);
   document.title = `${fundData[nameField] || "基金详情"}｜基金详情`;
+  const heroMetrics = pickFields(fundFields, ["总权重", "持仓策略数", "中位权重", "区间收益率", "增持策略数", "减持策略数"]);
+  const profileFields = summaryFields.filter((field) => !heroMetrics.includes(field));
 
   root.innerHTML = `
-    <section class="panel hero-panel">
+    <section class="panel hero-panel fund-hero-panel">
       <div class="panel-head">
         <div>
           <p class="eyebrow">底层基金详情</p>
           <h1>${B.esc(fundData[nameField] || "未命名基金")}</h1>
           <p class="desc">${B.esc(fundData[codeField] || "未披露代码")}｜${B.esc(fundData[fundFields[2]] || "未披露基金公司")}｜${B.esc(fundData[fundFields[3]] || "未披露类型")}</p>
+          <div class="fund-chip-row">
+            ${["基金类型", "二级分类", "研报大类资产", "基金分类来源", "基金穿透报告期"].filter((field) => fundData[field]).map((field) => `<span>${B.label(field)} ${valueHtml(field, fundData[field])}</span>`).join("")}
+          </div>
         </div>
         <a class="link" href="./insights.html">返回数据洞察</a>
       </div>
-      <h2>基金基础信息</h2>
-      ${factGrid(summaryFields, fundData)}
+      <div class="fund-hero-metrics">${factGrid(heroMetrics, fundData)}</div>
+      <details class="fund-profile-details" open>
+        <summary>基金基础信息</summary>
+        ${factGrid(profileFields, fundData)}
+      </details>
     </section>
     ${fundEntitySection(fundData)}
-    <section class="panel">
+    <section class="panel fund-table-panel">
       <div class="panel-head">
         <div>
           <h2>持仓策略</h2>
@@ -209,7 +219,7 @@
       </div>
       ${table(holdingDisplayFields, fundHoldings, holdingValueHtml)}
     </section>
-    <section class="panel">
+    <section class="panel fund-table-panel">
       <div class="panel-head">
         <div>
           <h2>月度调仓</h2>

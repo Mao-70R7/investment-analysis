@@ -32,6 +32,14 @@
     return values.map((value) => `<option value="${B.esc(value)}">${B.esc(value)}</option>`).join("");
   }
 
+  function filterControl(label, html, hint) {
+    return `<label class="strategy-filter-field">
+      <span>${B.esc(label)}</span>
+      ${html}
+      <em>${B.esc(hint)}</em>
+    </label>`;
+  }
+
   function isGfStrategy(row) {
     return row?.是否广发 === "是" || row?.是否广发策略 === "是" || /广发基金|广发投顾/.test(`${row?.投顾机构 || ""} ${row?.渠道 || ""}`);
   }
@@ -157,26 +165,26 @@
 
   root.innerHTML = `
     <section class="panel">
-      <div class="filters">
-        <input id="searchInput" class="control" type="search" placeholder="搜索策略、机构、代码、渠道、风险等级、业务分类、研报类型">
-        <select id="strategyScopeSelect" class="control">
-          <option value="">全部策略</option>
-          <option value="gf">仅看广发策略</option>
-          <option value="nonGf">仅看非广发策略</option>
-        </select>
-        <select id="clientScopeSelect" class="control">
-          <option value="">全部策略</option>
-          <option value="client">只看对客策略</option>
-          <option value="nonClient">只看非对客策略</option>
-        </select>
-        <select id="institutionSelect" class="control"><option value="">全部投顾机构</option>${options(unique("投顾机构"))}</select>
-        <select id="channelSelect" class="control"><option value="">全部渠道</option>${options(unique("渠道"))}</select>
-        <select id="reportTypeSelect" class="control"><option value="">全部研报产品类型</option>${options(orderedUnique("研报产品类型", reportTypeOrder))}</select>
-        <select id="businessSelect" class="control"><option value="">全部业务分类</option>${options(unique("业务分类"))}</select>
-        <select id="riskSelect" class="control"><option value="">全部风险等级</option>${options(orderedUnique("风险等级", riskOrder))}</select>
-        <select id="regionSelect" class="control"><option value="">全部市场地域</option>${options(unique("市场地域"))}</select>
-        <select id="activePassiveSelect" class="control"><option value="">全部主动/被动</option>${options(unique("主动被动"))}</select>
-        <select id="sortSelect" class="control">
+      <div class="filters strategy-filter-grid">
+        ${filterControl("关键词", '<input id="searchInput" class="control" type="search" placeholder="策略、机构、代码、渠道、分类">', "模糊匹配：策略名称、代码、机构、渠道和分类字段")}
+        ${filterControl("策略归属", `<select id="strategyScopeSelect" class="control">
+          <option value="">全部归属</option>
+          <option value="gf">广发策略</option>
+          <option value="nonGf">非广发策略</option>
+        </select>`, "精确判断：按投顾机构、渠道和广发标记识别")}
+        ${filterControl("对客状态", `<select id="clientScopeSelect" class="control">
+          <option value="">全部对客状态</option>
+          <option value="client">对客展示</option>
+          <option value="nonClient">非对客/隐藏</option>
+        </select>`, "排除明确非对客、隐藏或不展示状态")}
+        ${filterControl("投顾机构", `<select id="institutionSelect" class="control"><option value="">全部投顾机构</option>${options(unique("投顾机构"))}</select>`, "精确匹配投顾机构")}
+        ${filterControl("渠道", `<select id="channelSelect" class="control"><option value="">全部渠道</option>${options(unique("渠道"))}</select>`, "精确匹配数据来源渠道")}
+        ${filterControl("研报产品类型", `<select id="reportTypeSelect" class="control"><option value="">全部研报产品类型</option>${options(orderedUnique("研报产品类型", reportTypeOrder))}</select>`, "投研可比口径：纯债、固收+、股债、股票、多元配置")}
+        ${filterControl("业务分类", `<select id="businessSelect" class="control"><option value="">全部业务分类</option>${options(unique("业务分类"))}</select>`, "运营货架口径，可能比研报产品类型更细")}
+        ${filterControl("风险等级", `<select id="riskSelect" class="control"><option value="">全部风险等级</option>${options(orderedUnique("风险等级", riskOrder))}</select>`, "系统统一风险等级，非渠道原始披露风险")}
+        ${filterControl("市场地域", `<select id="regionSelect" class="control"><option value="">全部市场地域</option>${options(unique("市场地域"))}</select>`, "按国内、海外或跨市场分类")}
+        ${filterControl("主动/被动", `<select id="activePassiveSelect" class="control"><option value="">全部主动/被动</option>${options(unique("主动被动"))}</select>`, "按底层持仓主动、指数或混合实现判断")}
+        ${filterControl("排序", `<select id="sortSelect" class="control">
           <option value="name">按策略名称</option>
           <option value="return">按累计收益率</option>
           <option value="week">按近一周收益</option>
@@ -188,9 +196,18 @@
           <option value="sharpe">按夏普比率</option>
           <option value="holdingDate">按最新持仓日</option>
           <option value="rebalance">按最近调仓日</option>
-        </select>
+        </select>`, "只影响列表顺序，不改变筛选结果")}
         <button id="resetButton" class="control" type="button">重置</button>
       </div>
+      <details class="filter-help-details">
+        <summary>查看筛选字段说明</summary>
+        <div class="filter-help-grid">
+          <span><b>研报产品类型</b> 投研可比池，适合同类业绩和风险比较。</span>
+          <span><b>业务分类</b> 运营货架口径，适合产品线和销售场景管理。</span>
+          <span><b>风险等级</b> 使用系统统一风险口径，避免渠道披露等级混用。</span>
+          <span><b>对客状态</b> 用于区分可对客展示产品和仅保留核验样本。</span>
+        </div>
+      </details>
       <div class="pager">
         <p id="resultCount" class="desc"></p>
         <div class="pager-controls">
