@@ -242,7 +242,7 @@
     if (/波动/.test(text)) return `${field} = 日收益率标准差 × sqrt(252)。`;
     if (/夏普/.test(text)) return `${field} = 年化收益率 ÷ 年化波动率；当前无风险收益率按0处理。`;
     if (/数量|数$|事件数|样本数/.test(text)) return `${field} = 当前筛选口径下去重计数；策略按统一策略ID，基金按基金代码，事件按调仓事件ID。`;
-    return description ? "详见下方字段口径；该字段按导出阶段固定规则从标准字段或外部采集字段加工。" : "当前字段暂无专门字典项，按页面所在模块的标准链路推断。";
+    return description ? "详见下方业务含义；该字段按当前页面的业务口径展示。" : "当前字段暂无专门说明，请结合页面标题和当前筛选条件理解。";
   }
 
   function factorsForMetric(field, description) {
@@ -492,15 +492,15 @@
         ${renderImportantMissingMetrics(importantMissing)}
         <section class="metric-lineage">
           <div>
-            <strong>加工逻辑</strong>
+            <strong>业务含义</strong>
             <p>${B.esc(description || "该字段暂无专门字典项。")}</p>
           </div>
           <div>
-            <strong>计算公式</strong>
+            <strong>计算口径</strong>
             <p>${B.esc(formulaForMetric(field, description))}</p>
           </div>
           <div>
-            <strong>数据链路</strong>
+            <strong>业务用途</strong>
             <p>${B.esc(sourceText)}</p>
           </div>
           <div>

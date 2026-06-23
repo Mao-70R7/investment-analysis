@@ -7,11 +7,36 @@
   const allRows = summary.strategies || [];
   const holdingPack = window.__BASIC_HOLDING_SNAPSHOT_PACK__ || null;
   const semanticIndex = window.__AI_STRATEGY_SEMANTIC_INDEX__ || null;
+  const topicPack = window.__BASIC_AI_TOPIC_EVIDENCE_PACK__ || window.__BASIC_TOPIC_ANALYSIS_PACK__ || null;
   const fundDetailPack = window.__BASIC_DATA__?.fundDetailPack || null;
-  const modelConfigStorageKey = "aiStrategyModelConfigV3";
+  const modelConfigStorageKey = "aiStrategyModelConfigV4";
   const aiConfigFileDefault = Object.assign({}, window.__AI_STRATEGY_CONFIG__ || {});
   const aiConfig = Object.assign({}, aiConfigFileDefault, readStoredModelConfig());
   window.__AI_STRATEGY_CONFIG__ = aiConfig;
+  const builtInModelProfiles = {
+    local: {
+      label: "本地模型（同源代理）",
+      provider: "same-origin-llm-proxy",
+      baseUrl: "/llmapi/v1",
+      endpoint: "/llmapi/v1/chat/completions",
+      model: "deepseek-v4-flash-inner",
+      timeoutMs: 45000,
+      responseFormat: false,
+      apiKey: "",
+      headers: {},
+    },
+    codex: {
+      label: "Codex桥接模型",
+      provider: "codex-cli-local-proxy",
+      baseUrl: "http://127.0.0.1:8787/v1",
+      endpoint: "http://127.0.0.1:8787/v1/chat/completions",
+      model: "gpt-5.4-mini",
+      timeoutMs: 45000,
+      responseFormat: true,
+      apiKey: "",
+      headers: {},
+    },
+  };
   let modelBackoffUntil = 0;
   const allowedReturnMetrics = new Set(["近一周", "近一月", "近三月", "近6月", "近1年", "今年以来", "累计收益率", "年化收益"]);
   const allowedReportTypes = new Set(["固收+型", "纯债型", "股票型", "多元配置型", "股债混合型", "海外/全球型", "主题/行业型", "现金管理型", "偏股配置型"]);
@@ -74,6 +99,46 @@
       aliases: ["黄金", "商品黄金", "贵金属"],
       categoryPattern: /黄金|贵金属|商品黄金/i,
       note: "优先使用最新持仓快照分类和基金名称证据。"
+    },
+    {
+      key: "ai_core",
+      label: "AI核心",
+      type: "行业主题",
+      aliases: ["AI", "AI主题", "AI核心", "人工智能", "人工智能主题", "AI产业链"],
+      evidenceAliases: ["人工智能", "AI", "AIGC", "大模型", "算力", "光模块", "CPO", "光通信", "数据中心", "GPU", "半导体", "芯片"],
+      categoryPattern: /人工智能|AIGC|大模型|算力|光模块|CPO|光通信|数据中心|GPU|半导体|芯片/i,
+      parentKeys: ["technology"],
+      note: "AI核心严格口径，不因泛泛科技/TMT自动命中。"
+    },
+    {
+      key: "ai_compute",
+      label: "算力/云计算/数据中心",
+      type: "行业主题",
+      aliases: ["算力", "云计算", "数据中心", "IDC", "GPU", "服务器"],
+      evidenceAliases: ["算力", "云计算", "数据中心", "IDC", "GPU", "服务器"],
+      categoryPattern: /算力|云计算|数据中心|IDC|GPU|服务器/i,
+      parentKeys: ["ai_core"],
+      note: "AI算力和云数据中心基础设施。"
+    },
+    {
+      key: "optical_module_cpo",
+      label: "光模块/CPO/光通信",
+      type: "行业主题",
+      aliases: ["光模块", "CPO", "光通信", "光器件", "硅光", "800G"],
+      evidenceAliases: ["光模块", "CPO", "光通信", "光器件", "硅光", "800G"],
+      categoryPattern: /光模块|CPO|光通信|光器件|硅光|800G/i,
+      parentKeys: ["ai_core", "communication"],
+      note: "光模块、CPO、光通信等AI算力网络链条；普通通信不自动等同光模块。"
+    },
+    {
+      key: "semiconductor",
+      label: "半导体/芯片",
+      type: "行业主题",
+      aliases: ["半导体", "芯片", "集成电路", "晶圆", "封测"],
+      evidenceAliases: ["半导体", "芯片", "集成电路", "晶圆", "封测"],
+      categoryPattern: /半导体|芯片|集成电路|晶圆|封测/i,
+      parentKeys: ["ai_core", "technology"],
+      note: "半导体/芯片主题，单独的电子宽口径不自动等同半导体。"
     },
     {
       key: "tech_manufacturing",
@@ -282,7 +347,8 @@
   function modelDisplayLabel(config = aiConfig) {
     if (config.enabled === false) return "模型解析未启用";
     const endpoint = modelBaseUrl(config) || modelChatEndpoint(config) || "未配置";
-    return `模型解析 ${raw(config.model || "未配置模型")} @ ${endpoint}`;
+    const profile = modelProfiles(config)[inferModelProfileKey(config)]?.label || raw(config.provider || "模型");
+    return `${profile} ${raw(config.model || "未配置模型")} @ ${endpoint}`;
   }
 
   function parseHeadersJson(text) {
@@ -293,9 +359,49 @@
     return parsed;
   }
 
+  function modelProfiles(config = aiConfig) {
+    const fileProfiles = config.modelProfiles && typeof config.modelProfiles === "object" && !Array.isArray(config.modelProfiles)
+      ? config.modelProfiles
+      : {};
+    return { ...builtInModelProfiles, ...fileProfiles };
+  }
+
+  function inferModelProfileKey(config = aiConfig) {
+    const explicit = raw(config.profile || config.modelProfile).trim();
+    if (explicit) return explicit;
+    const provider = raw(config.provider);
+    const endpoint = raw(config.endpoint || config.baseUrl);
+    if (/codex/i.test(provider) || /127\.0\.0\.1:8787|localhost:8787/.test(endpoint)) return "codex";
+    if (/same-origin|inner-ds|deepseek|llmapi/i.test(provider) || /\/llmapi\/v1|10\.89\.189\.109/.test(endpoint)) return "local";
+    return "custom";
+  }
+
+  function applyModelProfile(profileKey, persist = false) {
+    const key = raw(profileKey || "custom");
+    if (key === "custom") {
+      aiConfig.profile = "custom";
+      if (persist) writeStoredModelConfig(aiConfig);
+      return aiConfig;
+    }
+    const profile = modelProfiles(aiConfig)[key];
+    if (!profile) return aiConfig;
+    const next = {
+      ...aiConfig,
+      ...profile,
+      profile: key,
+      enabled: aiConfig.enabled !== false,
+      mode: aiConfig.mode || "hybrid-parse",
+      rateLimitBackoffMs: aiConfig.rateLimitBackoffMs || profile.rateLimitBackoffMs || 60000,
+      modelProfiles: aiConfig.modelProfiles || aiConfigFileDefault.modelProfiles || {},
+      codexBridge: aiConfig.codexBridge || aiConfigFileDefault.codexBridge || {},
+    };
+    return applyRuntimeModelConfig(next, persist);
+  }
+
   function applyRuntimeModelConfig(nextConfig, persist = true) {
     const normalized = {
       enabled: nextConfig.enabled !== false,
+      profile: raw(nextConfig.profile || nextConfig.modelProfile || inferModelProfileKey(nextConfig)).trim() || "custom",
       provider: raw(nextConfig.provider || "inner-ds-openai-compatible").trim() || "inner-ds-openai-compatible",
       baseUrl: normalizeModelBaseUrl(nextConfig.baseUrl || nextConfig.endpoint || ""),
       endpoint: normalizeModelEndpoint(nextConfig.endpoint || "", nextConfig.baseUrl || nextConfig.endpoint || ""),
@@ -306,6 +412,8 @@
       headers: nextConfig.headers && typeof nextConfig.headers === "object" && !Array.isArray(nextConfig.headers) ? nextConfig.headers : {},
       rateLimitBackoffMs: Math.max(Number(nextConfig.rateLimitBackoffMs) || 60000, 1000),
       responseFormat: nextConfig.responseFormat !== false,
+      modelProfiles: nextConfig.modelProfiles || aiConfig.modelProfiles || aiConfigFileDefault.modelProfiles || {},
+      codexBridge: nextConfig.codexBridge || aiConfig.codexBridge || aiConfigFileDefault.codexBridge || {},
     };
     Object.assign(aiConfig, normalized);
     window.__AI_STRATEGY_CONFIG__ = aiConfig;
@@ -646,8 +754,22 @@
   function hasNegativeCueForAlias(text, alias) {
     if (!raw(alias).trim()) return false;
     const aliasPattern = escapedRegExp(alias);
-    const negativeCue = "(?:不含|不包含|不持有|未持有|未|没有|无|剔除|排除|不要|不想|不能有|不得持有|避免)";
-    return new RegExp(`${negativeCue}[^\\s，。；、,.]{0,10}${aliasPattern}`, "i").test(text);
+    const negativeCue = "(?:不含|不包含|不持有|未持有|不是|非|未|没有|无|剔除|排除|不要|不想|不能有|不得持有|避免)";
+    if (new RegExp(`${negativeCue}[^\\s，。；、,.]{0,12}${aliasPattern}`, "i").test(text)) return true;
+    if (new RegExp(`${aliasPattern}[^\\s，。；、,.]{0,8}(?:除外|排除|剔除|不要|不含|不包含)`, "i").test(text)) return true;
+    const compactText = normalizeSearchText(text);
+    const compactAlias = normalizeSearchText(alias);
+    return !!compactAlias && [
+      `不含${compactAlias}`,
+      `不包含${compactAlias}`,
+      `不持有${compactAlias}`,
+      `不是${compactAlias}`,
+      `非${compactAlias}`,
+      `排除${compactAlias}`,
+      `剔除${compactAlias}`,
+      `${compactAlias}除外`,
+      `${compactAlias}不要`
+    ].some((pattern) => compactText.includes(pattern));
   }
 
   function hasNegativeCueForEntity(text, entity) {
@@ -724,6 +846,83 @@
     ].map(raw).filter(Boolean).join(" ");
   }
 
+  function aiTopicTheme() {
+    const themes = Array.isArray(topicPack?.themes) ? topicPack.themes : [];
+    return themes.find((theme) => /AI核心|人工智能|AI/.test(raw(theme.name || theme.id))) || null;
+  }
+
+  let aiTopicStrategyCache = null;
+  function aiTopicEvidenceByStrategy() {
+    if (aiTopicStrategyCache) return aiTopicStrategyCache;
+    aiTopicStrategyCache = new Map();
+    const theme = aiTopicTheme();
+    if (!theme) return aiTopicStrategyCache;
+    const rows = [...(Array.isArray(theme.points) ? theme.points : []), ...(Array.isArray(theme.selected) ? theme.selected : [])];
+    rows.forEach((row) => {
+      const strategyId = raw(row.统一策略ID);
+      if (!strategyId) return;
+      const current = num(row.当前AI核心暴露) || 0;
+      const existing = aiTopicStrategyCache.get(strategyId);
+      if (!existing || current > (num(existing.当前AI核心暴露) || 0)) aiTopicStrategyCache.set(strategyId, row);
+    });
+    return aiTopicStrategyCache;
+  }
+
+  function aiTopicFundPattern(entityKey) {
+    const key = raw(entityKey);
+    if (key === "ai_core") return /./;
+    if (key === "semiconductor") return /半导体|芯片|集成电路/i;
+    if (key === "ai_theme") return /直接AI|人工智能|AIGC|大模型|机器学习/i;
+    if (key === "robotics") return /机器人/i;
+    if (key === "ai_compute") return /算力|云计算|数据中心|GPU|服务器|液冷|东数西算/i;
+    if (key === "optical_module_cpo") return /光模块|CPO|光通信|光器件|硅光|800G|1\.6T/i;
+    if (key === "communication") return /通信设备|5G|6G/i;
+    return null;
+  }
+
+  function aiTopicEntityEvidence(row, entity) {
+    const key = raw(entity?.key || entity);
+    const theme = aiTopicTheme();
+    const topicRow = aiTopicEvidenceByStrategy().get(raw(row.统一策略ID));
+    if (!theme || !key) return { known: false, hasEntity: false, entity, weight: 0, date: raw(row.最新持仓日), labels: [] };
+    const currentWeight = num(topicRow?.当前AI核心暴露) || 0;
+    const funds = Array.isArray(topicRow?.主要AI核心基金) ? topicRow.主要AI核心基金 : [];
+    const pattern = aiTopicFundPattern(key);
+    if (!pattern) return { known: false, hasEntity: false, entity, weight: 0, date: raw(row.最新持仓日), labels: [] };
+    const matchedFunds = key === "ai_core"
+      ? funds
+      : funds.filter((fund) => pattern.test(`${raw(fund.name)} ${raw(fund.hits)}`));
+    const weight = key === "ai_core"
+      ? currentWeight
+      : Math.min(100, matchedFunds.reduce((total, fund) => total + (num(fund.weight) || 0), 0));
+    const fundLabels = matchedFunds.slice(0, 6).map((fund) => {
+      const source = raw(fund.hits);
+      return `${raw(fund.name || fund.code || "未命名基金")}${fund.weight ? ` ${formatPct(fund.weight)}` : ""}${source ? `：${source}` : ""}`;
+    });
+    const hasEntity = weight > 0.0001 && matchedFunds.length > 0;
+    return {
+      known: aiTopicEvidenceByStrategy().size > 0,
+      hasEntity,
+      entity,
+      weight,
+      date: raw(topicRow?.峰值日期 || row.最新持仓日),
+      labels: hasEntity ? [`${entity?.label || key} ${formatPct(weight)}：${fundLabels.join("、")}`] : [],
+      matches: matchedFunds.map((fund) => ({
+        entityKey: key,
+        entityName: entity?.label || key,
+        entityType: entity?.type || "行业主题",
+        weight: num(fund.weight) || 0,
+        date: raw(topicRow?.峰值日期 || row.最新持仓日),
+        evidence: `${raw(fund.name || fund.code)}${fund.hits ? `：${fund.hits}` : ""}`,
+        sourceField: "AI专题包",
+        sourceValue: raw(fund.hits || theme.name || "AI核心行情"),
+        ruleId: "topic_pack:ai_core_exposure",
+      })),
+      strict: true,
+      source: "topic_analysis_pack",
+    };
+  }
+
   let strategyEntityCache = null;
   function strategyEntitiesByStrategy() {
     if (strategyEntityCache) return strategyEntityCache;
@@ -785,12 +984,14 @@
     const rows = strategyEntitiesByStrategy().get(raw(row.统一策略ID)) || [];
     if (!semanticIndex?.strategyEntities || !key) return { known: false, hasEntity: false, entity, weight: 0, date: raw(row.最新持仓日), labels: [] };
     const matches = rows.filter((item) => item.entityKey === key);
-    const weight = matches.reduce((total, item) => total + (num(item.weight) || 0), 0);
+    const rawWeight = matches.reduce((total, item) => total + (num(item.weight) || 0), 0);
+    const weight = Math.min(100, rawWeight);
+    const topicEvidence = aiTopicEntityEvidence(row, entity || (matches[0] ? { key, label: matches[0].entityName, type: matches[0].entityType } : { key, label: key }));
+    if (topicEvidence.hasEntity && (!matches.length || (num(topicEvidence.weight) || 0) > weight)) return topicEvidence;
     const labels = matches
       .map((item) => {
-        const source = [item.sourceField, item.sourceValue].filter(Boolean).join(":");
-        const rule = item.ruleId ? `规则:${item.ruleId}` : "";
-        return `${item.entityName || entity?.label || key}${item.weight ? ` ${formatPct(item.weight)}` : ""}${item.evidence ? `：${item.evidence}` : ""}${source ? `；来源:${source}` : ""}${rule ? `；${rule}` : ""}`;
+        const displayWeight = Math.min(100, num(item.weight) || 0);
+        return `${item.entityName || entity?.label || key}${displayWeight ? ` ${formatPct(displayWeight)}` : ""}${item.evidence ? `：${item.evidence}` : ""}`;
       })
       .slice(0, 6);
     return {
@@ -820,7 +1021,7 @@
       known: evidence.checked > 0,
       hasEntity: matches.length > 0,
       date: evidence.date,
-      weight: weightedMatches.reduce((total, item) => total + (num(item.weight) || 0), 0),
+      weight: Math.min(100, weightedMatches.reduce((total, item) => total + (num(item.weight) || 0), 0)),
       matches,
       labels,
     };
@@ -906,7 +1107,7 @@
     const entityLabels = items.map((item, index) => evidences[index]?.entity?.label || item.label || item.term).filter(Boolean);
     const entitySummaries = evidences.map((evidence, index) => ({
       label: evidence.entity?.label || items[index]?.label || items[index]?.term || "",
-      weight: num(evidence.weight) || 0,
+      weight: Math.min(100, num(evidence.weight) || 0),
       hasEntity: !!evidence.hasEntity,
       labels: (evidence.labels || []).slice(0, 2),
     }));
@@ -918,7 +1119,7 @@
       term: entityLabels.join("、"),
       aliases: items.flatMap((item) => entityAliases(resolveSemanticEntity(item.key || item.term), item.term)),
       date: evidences.find((evidence) => evidence.date)?.date || raw(row.最新持仓日),
-      weight: matched.reduce((total, evidence) => total + (num(evidence.weight) || 0), 0),
+      weight: Math.min(100, matched.reduce((total, evidence) => total + (num(evidence.weight) || 0), 0)),
       matches: evidences.flatMap((evidence) => evidence.matches || []),
       labels,
       evidences,
@@ -1173,6 +1374,64 @@
         ${dimensionBlocks.map(([title, rows, open]) => renderFundDimensionBlock(title, rows, open)).join("")}
       </div>
     </details>`;
+  }
+
+  function renderAiExplanationShell() {
+    return `<details id="aiExplanationLazyPanel" class="panel ai-help-panel">
+      <summary class="ai-help-summary">
+        <div><h2>Ai说明：可识别维度与实体字典</h2><p class="desc">默认不展开，打开后再根据当前数据生成可识别字段、实体和基金维度字典。</p></div>
+        <div class="title-pills"><span class="pill">策略 ${zhCount(allRows.length)}</span><span class="pill">展开后加载</span></div>
+      </summary>
+      <div id="aiExplanationLazyBody" class="ai-help-body">
+        <div class="empty">展开后加载筛选维度、实体字典和基金维度统计。</div>
+      </div>
+    </details>`;
+  }
+
+  function bindAiExplanationLazyLoad() {
+    const panel = B.byId("aiExplanationLazyPanel");
+    const body = B.byId("aiExplanationLazyBody");
+    if (!panel || !body) return;
+    panel.addEventListener("toggle", () => {
+      if (!panel.open || panel.dataset.loaded === "1" || panel.dataset.loaded === "loading") return;
+      panel.dataset.loaded = "loading";
+      body.innerHTML = `<div class="empty">正在加载实体字典...</div>`;
+      window.setTimeout(() => {
+        const holder = document.createElement("div");
+        holder.innerHTML = renderAiExplanation();
+        const loadedBody = holder.querySelector(".ai-help-body");
+        const loadedPills = holder.querySelector(".ai-help-summary .title-pills");
+        if (loadedBody) body.innerHTML = loadedBody.innerHTML;
+        else body.innerHTML = holder.innerHTML;
+        const pills = panel.querySelector(".ai-help-summary .title-pills");
+        if (pills && loadedPills) pills.innerHTML = loadedPills.innerHTML;
+        panel.dataset.loaded = "1";
+      }, 0);
+    });
+  }
+
+  function renderInitialResultPlaceholder() {
+    return `<section class="panel ai-result-placeholder">
+      <div class="panel-head">
+        <div>
+          <h2>候选策略</h2>
+          <p class="desc">页面已加载，默认示例会在首屏显示后用本地规则预览；点击“执行筛选”时才会按模型设置调用模型解析。</p>
+        </div>
+      </div>
+      <div class="empty">正在准备本地筛选预览...</div>
+    </section>`;
+  }
+
+  let initialSearchTimer = null;
+  function scheduleInitialSearchPreview() {
+    if (initialSearchTimer) window.clearTimeout(initialSearchTimer);
+    const seq = state.searchSeq;
+    initialSearchTimer = window.setTimeout(() => {
+      initialSearchTimer = null;
+      if (state.searchSeq !== seq) return;
+      if (!B.byId("aiQuery") || !B.byId("aiResult")) return;
+      runSearch({ allowModel: false });
+    }, 120);
   }
 
   function optionHtml(options, selected) {
@@ -1438,6 +1697,8 @@
       rule.values.forEach((item) => {
         const alias = item.aliases.find((candidate) => containsAlias(query, [candidate]));
         if (!alias) return;
+        if (rule.field === "研报产品类型" && !hasProductTypeContext(query)) return;
+        if (rule.field === "业务分类" && !hasBusinessClassificationContext(query, item.value, alias)) return;
         const negative = hasNegativeCueForAlias(query, alias);
         const exact = /^(研报产品类型|市场地域|运作状态|基础数据等级)$/.test(rule.field);
         const op = negative ? (exact ? "!=" : "not contains") : (exact ? "=" : "contains");
@@ -1457,6 +1718,20 @@
     return /策略类型|产品类型|研报产品|类型为|类别为|分类为|策略分类|产品分类/.test(text)
       || /(固收|纯债|短债|股票|多元|股债).{0,6}(策略|产品|组合)/.test(text)
       || /(策略|产品|组合).{0,6}(固收|纯债|短债|股票|多元|股债)/.test(text);
+  }
+
+  function hasBusinessClassificationContext(query, value, alias) {
+    const text = raw(query);
+    if (/业务分类|业务类型|产品分类|策略分类|分类为|类型为|类别为|客群类型|产品线/.test(text)) return true;
+    if (/主题\/行业型|行业主题型|主题型产品|行业型产品/.test(text)) return value === "主题/行业型";
+    if (/现金管理型|活钱产品|零钱产品|流动性管理产品/.test(text)) return value === "现金管理型";
+    if (/目标日期|养老型|生命周期产品|养老产品/.test(text)) return value === "目标日期/养老型";
+    if (/海外\/全球型|全球型产品|海外型产品/.test(text)) return value === "海外/全球型";
+    if (/固收增强型|稳健增强型/.test(text)) return value === "固收增强型";
+    if (/多资产配置型/.test(text)) return value === "多资产配置型";
+    if (value === "主题/行业型" && /(持仓|配置|投资|涉及|含|包含|寻找|找).{0,12}(AI|人工智能|光模块|算力|半导体|石油|黄金|红利|新能源|美股|纳指|科技|医药|消费)/i.test(text)) return false;
+    if (value === "主题/行业型" && /(AI|人工智能|光模块|算力|半导体|石油|黄金|红利|新能源|美股|纳指|科技|医药|消费).{0,8}(主题|相关|策略)/i.test(text)) return false;
+    return false;
   }
 
   function addProductTypeContextFilters(parsed, query) {
@@ -1534,6 +1809,49 @@
     return "";
   }
 
+  function semanticEntityHasAncestor(childKey, ancestorKey, seen = new Set()) {
+    if (!childKey || !ancestorKey || childKey === ancestorKey || seen.has(childKey)) return false;
+    seen.add(childKey);
+    const entity = resolveSemanticEntity(childKey);
+    return (entity?.parentKeys || []).some((parentKey) => parentKey === ancestorKey || semanticEntityHasAncestor(parentKey, ancestorKey, seen));
+  }
+
+  function isStandardSemanticEntityKey(key) {
+    return !!raw(key) && !raw(key).includes(":");
+  }
+
+  function semanticMatchSpecificity(item) {
+    const entity = resolveSemanticEntity(item.key || item.term || item.label);
+    const key = raw(entity?.key || item.key);
+    const term = normalizeSearchText(item.term || item.label || "");
+    let depth = 0;
+    const walk = (entityKey, seen = new Set()) => {
+      if (!entityKey || seen.has(entityKey)) return 0;
+      seen.add(entityKey);
+      const current = resolveSemanticEntity(entityKey);
+      const parentDepth = Math.max(0, ...(current?.parentKeys || []).map((parentKey) => walk(parentKey, seen) + 1));
+      return parentDepth;
+    };
+    depth = walk(key);
+    const exactLabel = normalizeSearchText(entity?.label || "") === term ? 1 : 0;
+    const exactAlias = (entity?.aliases || []).some((alias) => normalizeSearchText(alias) === term) ? 1 : 0;
+    const staticScore = isStandardSemanticEntityKey(key) ? 100 : 0;
+    return depth * 10 + exactLabel * 4 + exactAlias * 2 + staticScore;
+  }
+
+  function shouldReplaceSemanticTermMatch(existing, item) {
+    const existingKey = raw(existing?.key);
+    const itemKey = raw(item?.key);
+    const existingStandard = isStandardSemanticEntityKey(existingKey);
+    const itemStandard = isStandardSemanticEntityKey(itemKey);
+    if (existingStandard !== itemStandard) return itemStandard;
+    if (existingKey && itemKey) {
+      if (semanticEntityHasAncestor(itemKey, existingKey)) return true;
+      if (semanticEntityHasAncestor(existingKey, itemKey)) return false;
+    }
+    return semanticMatchSpecificity(item) > semanticMatchSpecificity(existing);
+  }
+
   function detectSemanticEntities(query) {
     const text = raw(query);
     const detections = [];
@@ -1558,11 +1876,7 @@
         byTerm.set(termKey, item);
         return;
       }
-      const itemStatic = !raw(item.key).includes(":");
-      const existingStatic = !raw(existing.key).includes(":");
-      const itemExact = normalizeSearchText(item.label) === normalizeSearchText(item.term);
-      const existingExact = normalizeSearchText(existing.label) === normalizeSearchText(existing.term);
-      if ((itemStatic && !existingStatic) || (itemExact && !existingExact)) byTerm.set(termKey, item);
+      if (shouldReplaceSemanticTermMatch(existing, item)) byTerm.set(termKey, item);
     });
     return Array.from(byTerm.values());
   }
@@ -1747,6 +2061,7 @@
     addCategoricalIntentFilters(parsed, query);
     addProductTypeContextFilters(parsed, query);
     addRiskProfileFilters(parsed, query);
+    addKycRecommendationFilters(parsed, query);
 
     const goldEntity = semanticEntityCatalog.find((entity) => entity.key === "gold");
     if (goldEntity && hasNegativeCueForEntity(query, goldEntity)) {
@@ -1829,7 +2144,9 @@
       ["多元", "多元配置型"],
       ["股债", "股债混合型"],
     ];
-    const pool = poolMap.find(([key]) => query.includes(key) && !hasNegativeCueForAlias(query, key));
+    const pool = hasProductTypeContext(query)
+      ? poolMap.find(([key]) => query.includes(key) && !hasNegativeCueForAlias(query, key))
+      : null;
     if (pool) {
       parsed.thresholds.reportType = pool[1];
       parsed.filters.push({ field: "研报产品类型", op: "=", value: pool[1], label: pool[1] });
@@ -1985,7 +2302,7 @@
       messages: [
         {
           role: "system",
-          content: "你只做中文投顾策略筛选意图解析。只输出 JSON 对象，不要输出策略名单、解释或 Markdown。模型只能输出筛选条件，不能输出候选结果，也不能发明基金/策略实体标签。常用字段：returnMetric,minReturn,drawdownField,maxDrawdown,minAgeYears,includeOverseas,excludeGold,excludeQdii,onlyGf,excludeGf,gfTerm,entityTerm,holdingEntities,holdingEntityWeightMin,reportType,filters。returnMetric 只能是近一周、近一月、近三月、近6月、近1年、今年以来、累计收益率、年化收益；注意年化投顾费率、年化波动、年化换手不是收益口径，应放入 filters。drawdownField 只能是最大回撤或当前回撤；用户只说回撤时按最大回撤。KYC 风险偏好用 filters 输出字段“风险等级序号”：保守/低风险/R2以内 => <=2，稳健/均衡 => <=3，进取/高风险 => >=4。费用、波动率、夏普、权益/债券/货币/QDII/指数基金权重、调仓频率、年化换手率等量化诉求放入 filters。产品/客群偏好可落到研报产品类型、业务分类、市场地域、主动被动、运作状态、基础数据等级等字段；同一单值字段若有多个候选分类，应使用 contains_any 或 in 表达“任一满足”，不要输出多个互斥 AND 条件。holdingEntities 只能引用下方提供的标准实体或查询别名，每项为 {term, key, negative}；key 使用标准实体 key，term 保留用户词，negative 表示不含。若用户词不能唯一映射到标准实体，不要强行输出 holdingEntities，改用 entityTerm 或 filters。基金公司仓位、持仓占比、配置比例等阈值输出 holdingEntityWeightMin。用户说“同时/且/并且/和”默认多个实体都要命中；用户说“或/或者/任一/任意”才是任一命中。多个实体带权重阈值默认按合计仓位判断，只有用户说分别/各自/都超过才按每个实体分别达标。用户说不持有/未持有/不含/没有/无黄金时，excludeGold=true，且不要再输出正向黄金 holdingEntities。只有用户明确说海外/全球/QDII/海外资产/全球资产时 includeOverseas=true；港股、美股这类具体资产输出 holdingEntities，不要同时输出海外宽口径，除非用户也明确说海外资产。不要因为纳指、纳斯达克100或标普500自动增加海外宽口径。gfTerm 仅用于“广发基金/广发投顾/广发产品”等可能匹配机构、渠道或策略名称的歧义条件；其他投顾机构、渠道或策略名称关键词用 entityTerm。基金公司、基金名称、行业、主题、国家地区、指数应优先映射到已知标准实体；无法映射时不要输出标准实体。filters 是数组，每项为 {field,op,value}，字段必须来自用户消息给出的可用字段。所有百分比或“几个点”数值统一输出百分数数值，例如 5个点输出 5，不要输出 0.05。未知字段输出 null 或 false。"
+          content: "你只做中文投顾策略筛选意图解析。只输出 JSON 对象，不要输出策略名单、解释或 Markdown。模型只能输出筛选条件，不能输出候选结果，也不能发明基金/策略实体标签。常用字段：returnMetric,minReturn,drawdownField,maxDrawdown,minAgeYears,includeOverseas,excludeGold,excludeQdii,onlyGf,excludeGf,gfTerm,entityTerm,holdingEntities,holdingEntityWeightMin,reportType,filters。returnMetric 只能是近一周、近一月、近三月、近6月、近1年、今年以来、累计收益率、年化收益；注意年化投顾费率、年化波动、年化换手不是收益口径，应放入 filters。drawdownField 只能是最大回撤或当前回撤；用户只说回撤时按最大回撤。KYC 风险偏好用 filters 输出字段“风险等级序号”：保守/低风险/R2以内 => <=2，稳健/均衡 => <=3，进取/高风险 => >=4。费用、波动率、夏普、权益/债券/货币/QDII/指数基金权重、调仓频率、年化换手率等量化诉求放入 filters。产品/客群偏好可落到研报产品类型、业务分类、市场地域、主动被动、运作状态、基础数据等级等字段；同一单值字段若有多个候选分类，应使用 contains_any 或 in 表达“任一满足”，不要输出多个互斥 AND 条件。用户说AI主题、光模块、算力、半导体、石油、黄金、红利等投资主题时，优先输出 holdingEntities，不要把“主题”误解为 reportType=主题/行业型；只有用户明确要求产品类型、业务分类或行业主题型产品时才输出 reportType。holdingEntities 只能引用下方提供的标准实体或查询别名，每项为 {term, key, negative}；key 使用标准实体 key，term 保留用户词，negative 表示不含。若用户词不能唯一映射到标准实体，不要强行输出 holdingEntities，改用 entityTerm 或 filters。基金公司仓位、持仓占比、配置比例等阈值输出 holdingEntityWeightMin。用户说“同时/且/并且/和”默认多个实体都要命中；用户说“或/或者/任一/任意”才是任一命中。多个实体带权重阈值默认按合计仓位判断，只有用户说分别/各自/都超过才按每个实体分别达标。用户说不持有/未持有/不含/没有/无黄金时，excludeGold=true，且不要再输出正向黄金 holdingEntities。只有用户明确说海外/全球/QDII/海外资产/全球资产时 includeOverseas=true；港股、美股这类具体资产输出 holdingEntities，不要同时输出海外宽口径，除非用户也明确说海外资产。不要因为纳指、纳斯达克100或标普500自动增加海外宽口径。gfTerm 仅用于“广发基金/广发投顾/广发产品”等可能匹配机构、渠道或策略名称的歧义条件；其他投顾机构、渠道或策略名称关键词用 entityTerm。基金公司、基金名称、行业、主题、国家地区、指数应优先映射到已知标准实体；无法映射时不要输出标准实体。filters 是数组，每项为 {field,op,value}，字段必须来自用户消息给出的可用字段。所有百分比或“几个点”数值统一输出百分数数值，例如 5个点输出 5，不要输出 0.05。未知字段输出 null 或 false。"
         },
         {
           role: "user",
@@ -2952,6 +3269,41 @@
     });
   }
 
+  function hasFilterOnField(parsed, field) {
+    return (parsed.filters || []).some((filter) => filter.field === field)
+      || (parsed.thresholds.genericFilters || []).some((filter) => filter.field === field);
+  }
+
+  function addKycRecommendationFilters(parsed, query) {
+    const text = raw(query);
+    const retireeContext = /退休老人|退休|老年|老人|养老资金|养老金|60岁|六十岁|父母|长辈/.test(text);
+    const depositBenchmark = /跑赢.{0,8}(定存|存款|银行理财)|定存|存款利率|五年期定存|5年期定存/.test(text);
+    const preserveCapital = /本金安全|不想亏|少亏|稳一点|稳健|保守|低风险/.test(text);
+    if (!retireeContext && !depositBenchmark && !preserveCapital) return;
+
+    if (!hasFilterOnField(parsed, "风险等级序号")) {
+      const maxRisk = retireeContext ? 3 : 4;
+      addGenericFilter(parsed, {
+        field: "风险等级序号",
+        op: "<=",
+        value: maxRisk,
+        label: `KYC稳健约束：风险等级 <= R${maxRisk}`,
+      });
+    }
+    if (parsed.thresholds.maxDrawdown === undefined && !hasFilterOnField(parsed, "最大回撤")) {
+      const maxDrawdown = retireeContext || preserveCapital ? 6 : 8;
+      parsed.thresholds.drawdownField = "最大回撤";
+      parsed.thresholds.maxDrawdown = maxDrawdown;
+      parsed.filters.push({ field: "最大回撤", op: "<=", value: maxDrawdown, unit: "%", label: `KYC稳健约束：最大回撤 <= ${maxDrawdown}%` });
+    }
+    if (depositBenchmark && parsed.thresholds.minReturn === undefined) {
+      parsed.returnMetric = { field: "年化收益", explicit: true, source: "kyc_deposit_benchmark" };
+      parsed.thresholds.minReturn = 3;
+      parsed.filters.push({ field: "年化收益", op: ">=", value: 3, unit: "%", label: "跑赢定存：年化收益 >= 3%" });
+    }
+    parsed.assumptions.push("识别到KYC/推荐型描述，默认采用稳健可解释约束：控制风险等级和最大回撤，并按收益目标排序；如客户明确给出风险等级、回撤或收益目标，则以客户条件为准。");
+  }
+
   function bindCandidateScrollbars() {
     root.querySelectorAll(".ai-candidate-table-shell").forEach((shell) => {
       const wrap = shell.querySelector("[data-ai-table-wrap]");
@@ -3403,16 +3755,27 @@
   function renderModelSettings() {
     const config = aiConfig;
     const base = modelBaseUrl(config);
+    const profiles = modelProfiles(config);
+    const activeProfile = inferModelProfileKey(config);
+    const profileOptions = [
+      ...Object.entries(profiles).map(([key, profile]) => `<option value="${B.esc(key)}"${activeProfile === key ? " selected" : ""}>${B.esc(profile.label || key)}</option>`),
+      `<option value="custom"${activeProfile === "custom" ? " selected" : ""}>自定义配置</option>`,
+    ].join("");
     return `
       <details class="ai-model-panel">
         <summary class="ai-model-summary">
           <div>
             <strong>模型设置与连通性测试</strong>
-            <span>默认使用配置文件中的内网模型；需要调试时展开编辑，本页设置可保存到当前浏览器。</span>
+            <span>可选择本地模型或 Codex 桥接模型；需要调试时展开编辑，本页设置可保存到当前浏览器。</span>
           </div>
         </summary>
         <div class="ai-model-body">
           <div class="ai-model-grid">
+            <label>模型来源
+              <select id="aiModelProfile" class="control">
+                ${profileOptions}
+              </select>
+            </label>
             <label>启用模型解析
               <select id="aiModelEnabled" class="control">
                 <option value="true"${config.enabled !== false ? " selected" : ""}>启用</option>
@@ -3474,6 +3837,7 @@
     const endpoint = normalizeModelEndpoint(endpointInput, baseUrl);
     return {
       enabled: raw(B.byId("aiModelEnabled")?.value) !== "false",
+      profile: raw(B.byId("aiModelProfile")?.value || "custom"),
       mode: raw(B.byId("aiModelMode")?.value || "hybrid-parse"),
       provider: raw(B.byId("aiModelProvider")?.value || "inner-ds-openai-compatible").trim(),
       baseUrl: normalizeModelBaseUrl(baseUrl || endpoint),
@@ -3484,6 +3848,8 @@
       responseFormat: raw(B.byId("aiModelResponseFormat")?.value) !== "false",
       rateLimitBackoffMs: Number(B.byId("aiModelBackoff")?.value) || 60000,
       headers: parseHeadersJson(B.byId("aiModelHeaders")?.value),
+      modelProfiles: aiConfig.modelProfiles || aiConfigFileDefault.modelProfiles || {},
+      codexBridge: aiConfig.codexBridge || aiConfigFileDefault.codexBridge || {},
     };
   }
 
@@ -3548,6 +3914,7 @@
       if (node) node.value = value;
     };
     setValue("aiModelEnabled", config.enabled === false ? "false" : "true");
+    setValue("aiModelProfile", inferModelProfileKey(config));
     setValue("aiModelMode", config.mode || "hybrid-parse");
     setValue("aiModelProvider", config.provider || "inner-ds-openai-compatible");
     setValue("aiModelName", config.model || "deepseek-v4-flash-inner");
@@ -3561,6 +3928,20 @@
   }
 
   function bindModelSettings() {
+    B.byId("aiModelProfile")?.addEventListener("change", (event) => {
+      const key = raw(event.target?.value || "custom");
+      if (key === "custom") {
+        aiConfig.profile = "custom";
+        fillModelSettingsForm(aiConfig);
+        updateModelStatusPill();
+        setModelTestResult("running", "已切换为自定义配置，可手动编辑参数");
+        return;
+      }
+      const config = applyModelProfile(key, false);
+      fillModelSettingsForm(config);
+      updateModelStatusPill();
+      setModelTestResult("running", `已切换为${modelProfiles(config)[key]?.label || key}，保存后写入当前浏览器`);
+    });
     B.byId("aiModelSave")?.addEventListener("click", () => {
       try {
         const config = applyRuntimeModelConfig(collectModelSettingsForm(), true);
@@ -3622,8 +4003,8 @@
         </div>
         ${renderModelSettings()}
       </section>
-      ${renderAiExplanation()}
-      <div id="aiResult"></div>
+      ${renderAiExplanationShell()}
+      <div id="aiResult">${renderInitialResultPlaceholder()}</div>
     `;
     B.byId("aiRun").addEventListener("click", () => runSearch({ allowModel: true }));
     B.byId("aiClear").addEventListener("click", () => {
@@ -3634,7 +4015,8 @@
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") runSearch({ allowModel: true });
     });
     bindModelSettings();
-    runSearch({ allowModel: false });
+    bindAiExplanationLazyLoad();
+    scheduleInitialSearchPreview();
   }
 
   window.__AI_STRATEGY_DEBUG__ = {

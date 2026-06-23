@@ -2,6 +2,44 @@
   const B = window.BasicData;
   const summary = B.state.summary || {};
   const insight = { ...(summary.insightData || {}) };
+  const insightLazyMeta = insight.__lazyPack || {};
+  let insightLazyLoadPromise = null;
+  function mergeInsightLazyPack(pack) {
+    const data = pack?.insightData || pack || {};
+    Object.assign(insight, data);
+    insight.__lazyLoaded = true;
+  }
+  if (window.__BASIC_INSIGHT_DATA_PACK__) mergeInsightLazyPack(window.__BASIC_INSIGHT_DATA_PACK__);
+  function insightLazyLoaded() {
+    return Boolean(
+      insight.__lazyLoaded ||
+      window.__BASIC_INSIGHT_DATA_PACK__ ||
+      Array.isArray(insight.当前持仓策略基金明细) ||
+      Array.isArray(insight.策略资产变化明细)
+    );
+  }
+  function ensureInsightLazyPack() {
+    if (insightLazyLoaded()) return true;
+    const src = insightLazyMeta.externalScript || "./data/insight_data_pack.js";
+    if (!src || !B.loadScript) return false;
+    if (!insightLazyLoadPromise) {
+      insightLazyLoadPromise = B.loadScript(src)
+        .then(() => {
+          mergeInsightLazyPack(window.__BASIC_INSIGHT_DATA_PACK__);
+          render();
+        })
+        .catch((error) => {
+          window.__BASIC_INSIGHT_DATA_PACK_ERROR__ = error?.message || String(error);
+          render();
+        });
+    }
+    return false;
+  }
+  function insightLazyLoadingPanel(label) {
+    const error = window.__BASIC_INSIGHT_DATA_PACK_ERROR__;
+    const text = error ? `大明细数据加载失败：${error}` : `${label}大明细加载中，请稍候。`;
+    return `<section class="panel"><div class="empty">${B.esc(text)}</div></section>`;
+  }
   if (!Array.isArray(insight.策略表现点) || !insight.策略表现点.length) {
     insight.策略表现点 = summary.strategies || [];
   }
@@ -1753,15 +1791,27 @@
   function ensureRebalanceFundCategoryPack() {
     if (loadedRebalanceFundCategoryPack()) return true;
     const meta = insight.调仓基金分类明细 || {};
-    if (!meta.external || typeof fetch !== "function") return false;
     if (!rebalanceFundCategoryPackPromise) {
-      rebalanceFundCategoryPackPromise = fetch(meta.external, { cache: "no-store" })
-        .then((response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.json();
+      const scriptSrc = meta.externalScript || "./data/rebalance_fund_category_pack.js";
+      const loadByScript = scriptSrc && B.loadScript
+        ? B.loadScript(scriptSrc).then(() => {
+          if (!loadedRebalanceFundCategoryPack()) throw new Error("明细脚本未返回数据");
         })
-        .then((pack) => {
-          window.__BASIC_REBALANCE_FUND_CATEGORY_PACK__ = pack;
+        : Promise.reject(new Error("脚本加载不可用"));
+      const loadByFetch = () => {
+        if (!meta.external || typeof fetch !== "function") throw new Error("明细数据不可访问");
+        return fetch(meta.external, { cache: "no-store" })
+          .then((response) => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+          })
+          .then((pack) => {
+            window.__BASIC_REBALANCE_FUND_CATEGORY_PACK__ = pack;
+          });
+      };
+      rebalanceFundCategoryPackPromise = loadByScript
+        .catch(() => loadByFetch())
+        .then(() => {
           rebalanceFundCategoryRowsCache = null;
           render();
         })
@@ -2420,6 +2470,12 @@
     });
   }
 
+  function insightDetailCount(rows, fallback) {
+    if (Array.isArray(rows)) return rows.filter(dimensionMatch).length;
+    if (state.risk || state.business || state.region || state.clientScope || state.gfScope || state.institution) return null;
+    return fallback ?? null;
+  }
+
   function dataQualityRows(rows) {
     const sourceTotal = num(summary.overview?.策略总数) || masterStrategies.length || allPoints.length;
     const hiddenDetailGap = Math.max(0, sourceTotal - masterStrategies.length);
@@ -2450,7 +2506,7 @@
       { 项目: "披露风险缺失", 数值: missingDisclosedRisk, 业务含义: "披露风险缺失不影响系统测算风险等级，但不能用于核验平台展示口径或销售适当性披露差异。", 链接参数: { dataIssue: "disclosedRisk" } },
       { 项目: "投资经理缺失", 数值: missingManager, 业务含义: "当前数据不足以做投资经理排行榜或经理画像；相关页面只能做产品和机构维度分析，需补采经理字段后再展开。", 链接参数: { dataIssue: "manager" } },
       { 项目: "调仓事件", 数值: (insight.调仓事件 || []).filter(dimensionMatch).length, 业务含义: "可用于调仓复盘的事件数量；需要按同类策略分池解读。", 链接参数: {} },
-      { 项目: "持仓基金明细", 数值: (insight.当前持仓策略基金明细 || []).filter(dimensionMatch).length, 业务含义: "用于底层基金、基金公司和资产分布分析的策略-基金持仓样本。", 链接参数: {} }
+      { 项目: "持仓基金明细", 数值: insightDetailCount(insight.当前持仓策略基金明细, insight.持仓明细行数), 业务含义: "用于底层基金、基金公司和资产分布分析的策略-基金持仓样本。", 链接参数: {} }
     ];
   }
 
@@ -5156,6 +5212,8 @@
 
   function renderContent() {
     if (state.tab === "compare") return compareTab();
+    if (state.tab === "holding" && !ensureInsightLazyPack()) return insightLazyLoadingPanel("仓位分析");
+    if (state.tab === "rebalance" && !ensureInsightLazyPack()) return insightLazyLoadingPanel("调仓分析");
     if (state.tab === "holding") return holdingTab();
     if (state.tab === "rebalance") return rebalanceTab();
     return marketTab();

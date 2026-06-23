@@ -5,6 +5,19 @@ window.BasicData = (() => {
   const byId = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   const dict = () => state.summary?.fieldDictionary || {};
+  const businessFieldDescriptions = {
+    "入选策略数": "业务口径：AI核心仓位达到入选标准的策略数量。同一策略只计算一次，用于判断当前主题下可进入重点观察池的产品规模。",
+    "均值达标策略数": "业务口径：最近一年平均AI核心仓位达到50%的策略数量。该指标更看重持续配置，而不是短期单次持有。",
+    "峰值达标策略数": "业务口径：最近一年曾在任一持仓快照中AI核心仓位达到50%的策略数量。该指标用于发现阶段性重仓AI主题的策略。",
+    "AI核心基金数": "业务口径：入选策略中贡献AI核心仓位的底层基金去重数量。用于判断入选结果是由少数基金集中贡献，还是覆盖了更多基金工具。",
+    "标准实体AI基金数": "业务口径：底层基金已被标准主题实体识别为AI核心相关的基金数量。只统计有明确主题证据的基金。",
+    "点阵样本数": "业务口径：当前点阵图中可比较的策略数量。样本需要具备收益、回撤和AI核心暴露等必要指标。",
+    "AI核心均值暴露": "业务口径：策略在观察期内平均持有AI核心相关基金的仓位比例。数值越高，代表策略对AI主题的持续配置越强。",
+    "AI核心峰值暴露": "业务口径：策略在观察期内AI核心相关基金仓位达到过的最高比例。用于识别阶段性重仓AI主题的策略。",
+    "当前AI核心暴露": "业务口径：策略最新持仓中AI核心相关基金的仓位比例。用于观察策略当前是否仍在配置AI主题。",
+    "峰值日期": "业务口径：策略AI核心仓位达到观察期最高值的日期。用于判断重仓AI主题发生在近期还是历史阶段。",
+    "主要AI核心基金": "业务口径：对策略AI核心仓位贡献较高的底层基金。展示这些基金是为了说明策略为什么被纳入AI主题观察池。",
+  };
   const collectedFieldNames = new Set([
     "数据更新至", "数据刷新时间", "渠道", "渠道类型", "策略数", "策略名称", "投顾机构", "策略类型", "风险等级",
     "成立日期", "运作状态", "策略代码", "统一策略ID", "起投金额", "投顾费率", "建议持有时长", "业绩基准",
@@ -54,22 +67,19 @@ window.BasicData = (() => {
   }
   function fieldSourceText(field) {
     const text = String(field || "");
-    const source = isDerivedField(text)
-      ? "口径属性：加工字段。由本地分析库在导出阶段按规则清洗、关联、聚合或计算，不是渠道原始字段。"
-      : "口径属性：采集/披露字段。优先来自渠道原始披露、公开净值、当前持仓或调仓记录；缺失时只使用明确的本地补全规则。";
     if (text.includes("基金") || text.includes("资产") || text.includes("行业")) {
-      return `${source}\n数据链路：策略当前持仓/推算持仓/调仓明细 -> 基金信息、基金标准分类字典、基金日度净值 -> 页面仓位与调仓洞察包。`;
+      return "业务说明：用于观察策略底层配置到哪些基金、资产类别或行业主题，以及这些配置在当前筛选范围内的占比和集中度。";
     }
     if (text.includes("调仓") || text.includes("调前") || text.includes("调后") || text.includes("净增配")) {
-      return `${source}\n数据链路：策略调仓事件、策略调仓明细、调仓质量事件分析和调仓质量基金明细；按当前筛选范围、研报产品类型和时间窗口重新汇总。`;
+      return "业务说明：用于观察策略在指定时间窗口内买入、卖出或调整仓位的方向和力度，帮助判断产品经理或投顾组合的配置变化。";
     }
     if (text.includes("收益") || text.includes("净值") || text.includes("回撤") || text.includes("波动") || text.includes("夏普")) {
-      return `${source}\n数据链路：策略日度业绩、策略标准业绩净值、基金日度净值和公开指数行情；优先使用官方披露曲线，必要时使用统一回放净值。`;
+      return "业务说明：用于评价策略或基金的收益风险表现。收益反映观察期涨跌幅，回撤反映阶段内最大承受损失，波动和夏普用于辅助判断收益稳定性。";
     }
     if (text.includes("持仓") || text.includes("仓位") || text.includes("权重")) {
-      return `${source}\n数据链路：策略当前持仓、策略当前持仓推算补齐和历史调仓明细；页面按当前筛选范围重新聚合。`;
+      return "业务说明：用于观察策略当前或历史配置强度。权重越高，代表该策略对相应基金、资产或主题的配置越集中。";
     }
-    return `${source}\n数据链路：当前分析库导出的 basic_summary、策略详情文件和洞察数据包；页面只负责展示与交互筛选。`;
+    return "业务说明：用于当前页面的筛选、排序、对比或概览展示。具体含义以字段名称、所在页面和当前筛选条件为准。";
   }
   function fallbackFieldDescription(field) {
     const text = String(field || "");
@@ -154,7 +164,7 @@ window.BasicData = (() => {
     if (text.includes("日期") || text.endsWith("日")) {
       return "计算口径：取该对象在对应业务表中的最大可用日期。策略业绩看最新业绩日，持仓看最新持仓日或推算持仓日，调仓看最新调仓日，基金净值看最新交易日期。";
     }
-    return "计算口径：该字段暂未配置专门字典项。页面按字段所在模块采用固定链路推断：策略类字段来自策略信息/业绩/持仓/调仓表；仓位类字段按当前筛选范围对基金权重和资产暴露聚合；调仓类字段按调仓明细的调前、调后权重计算。建议后续在 FIELD_DICTIONARY 或洞察包 FIELD_PATCH 中为该字段补充专门口径。";
+    return "业务口径：该指标用于当前页面的筛选、排序或展示。具体含义以字段名称、所在页面标题和当前筛选条件为准；涉及收益时通常表示观察期内涨跌幅，涉及回撤时表示相对阶段高点的下跌幅度，涉及数量时通常按策略、基金或事件去重统计。";
   }
   function showInfoModal(title, body) {
     byId("fieldModalTitle").textContent = title;
@@ -431,7 +441,7 @@ window.BasicData = (() => {
     const button = event.target.closest("[data-field]");
     if (!button) return;
     const field = button.getAttribute("data-field");
-    showInfoModal(field, `${fieldSourceText(field)}\n\n${dict()[field] || fallbackFieldDescription(field)}`);
+    showInfoModal(field, businessFieldDescriptions[field] || dict()[field] || fallbackFieldDescription(field));
   });
   document.addEventListener("click", (event) => {
     if (event.target.id === "fieldModal" || event.target.id === "fieldModalClose") {

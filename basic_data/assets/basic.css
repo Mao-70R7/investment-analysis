@@ -605,6 +605,71 @@ tr:last-child td { border-bottom: 0; }
 .fund-table-panel .table-wrap { border-radius:8px; }
 .fund-table-panel table tbody tr:nth-child(even) { background:#f8fbfd; }
 .fund-table-panel table td:first-child, .fund-table-panel table th:first-child { position:sticky; left:0; background:inherit; box-shadow:1px 0 0 #edf2f7; z-index:1; }
+.fund-hero { display:grid; grid-template-columns:minmax(0,1fr) minmax(360px,.86fr); gap:18px; padding:18px; background:linear-gradient(135deg,#f7fbfc 0%,#fff 58%,#fff7f2 100%); }
+.fund-hero h1 { font-size:28px; line-height:1.2; overflow-wrap:anywhere; }
+.fund-hero-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; align-content:start; }
+.fund-hero-metrics .hero-kpi { min-width:0; }
+.fund-profile-panel { border-left:4px solid #0f766e; }
+.fund-info-section { margin-top:14px; }
+.fund-info-section:first-of-type { margin-top:0; }
+.fund-info-section h3 { margin:0 0 8px; color:#172033; font-size:14px; }
+.fund-info-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; }
+.fund-info-card { min-width:0; border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:9px 10px; }
+.fund-info-card span { display:block; color:#667085; font-size:12px; line-height:1.35; }
+.fund-info-card strong { display:block; margin-top:4px; color:#172033; font-size:13px; line-height:1.45; overflow-wrap:anywhere; }
+.fund-info-card .field-label .info-button, .fund-kpi-strip .field-label .info-button { display:none; }
+.fund-theme-tags { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0 4px; }
+.fund-theme-tags span { border:1px solid #dbe4ee; border-radius:999px; background:#fff; color:#405063; padding:4px 8px; font-size:12px; }
+.fund-entity-section .panel-head { margin-bottom:6px; }
+.fund-nav-panel, .fund-asset-panel, .fund-holding-report-panel, .fund-classification-panel { border-left:4px solid #d92d20; }
+.fund-kpi-strip { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:9px; margin:12px 0; }
+.fund-kpi-strip > div { border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:8px 9px; min-width:0; }
+.fund-kpi-strip span { display:block; color:#667085; font-size:12px; line-height:1.35; }
+.fund-kpi-strip strong { display:block; margin-top:3px; color:#172033; font-size:14px; line-height:1.35; overflow-wrap:anywhere; }
+.fund-nav-svg-wrap { border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; overflow:hidden; }
+.fund-nav-svg-wrap { position:relative; }
+.fund-nav-svg-wrap svg { display:block; width:100%; min-height:320px; }
+.fund-nav-legend { display:flex; flex-wrap:wrap; gap:12px; padding:10px 12px 0; color:#526174; font-size:12px; }
+.fund-nav-legend span { display:inline-flex; align-items:center; gap:6px; }
+.fund-nav-legend i { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.fund-nav-hover-capture { fill:rgba(255,255,255,.001); cursor:crosshair; pointer-events:all; }
+.fund-nav-hover-line { stroke:#344054; stroke-width:1.2; stroke-dasharray:4 4; }
+.fund-nav-tooltip { position:absolute; z-index:12; min-width:270px; max-width:320px; border:1px solid #cdd6e1; border-radius:8px; background:#fff; box-shadow:0 12px 28px rgba(16,24,40,.16); padding:10px 12px; color:#344054; font-size:12px; pointer-events:none; }
+.fund-nav-tooltip strong { display:block; margin-bottom:7px; color:#172033; font-size:13px; }
+.fund-nav-tip-row { display:grid; grid-template-columns:minmax(0,1fr) 58px 76px; gap:8px; align-items:center; line-height:1.8; }
+.fund-nav-tip-row span { display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fund-nav-tip-row i { width:9px; height:9px; border-radius:50%; display:inline-block; flex:none; }
+.fund-nav-tip-row b, .fund-nav-tip-row em { text-align:right; font-style:normal; white-space:nowrap; }
+.fund-report-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:12px 0; }
+.fund-report-card, .fund-report-block { min-width:0; border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:12px; }
+.fund-report-block { margin-top:12px; }
+.fund-report-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.fund-report-card-head h3 { margin:0; color:#172033; font-size:14px; line-height:1.35; }
+.fund-report-card-head span { color:#667085; font-size:12px; font-weight:700; text-align:right; line-height:1.35; }
+.fund-report-meta { display:flex; flex-wrap:wrap; gap:8px 14px; color:#667085; font-size:12px; margin-top:10px; }
+.fund-asset-bars { display:grid; gap:8px; }
+.fund-asset-bars.compact { margin-top:8px; }
+.fund-asset-bar { display:grid; grid-template-columns:minmax(70px,110px) minmax(120px,1fr) 58px; gap:9px; align-items:center; }
+.fund-asset-bar span { color:#344054; font-size:12px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fund-asset-bar > div { height:10px; border-radius:999px; background:#edf2f7; overflow:hidden; }
+.fund-asset-bar i { display:block; height:100%; border-radius:999px; background:#1570ef; }
+.fund-asset-bar strong { color:#172033; font-size:12px; text-align:right; }
+.fund-two-col { display:grid; grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr); gap:12px; align-items:start; }
+.fund-two-col .fund-report-block { margin-top:0; }
+.fund-industry-bars { display:grid; gap:8px; }
+.fund-industry-bar { display:grid; grid-template-columns:minmax(76px,130px) minmax(120px,1fr) 58px 44px; gap:8px; align-items:center; }
+.fund-industry-bar span { color:#344054; font-size:12px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fund-industry-bar > div { height:10px; border-radius:999px; background:#edf2f7; overflow:hidden; }
+.fund-industry-bar i { display:block; height:100%; border-radius:999px; background:#0f766e; }
+.fund-industry-bar strong { color:#172033; font-size:12px; text-align:right; }
+.fund-industry-bar em { color:#667085; font-size:11px; font-style:normal; text-align:right; }
+.fund-coverage-panel { border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:12px; margin:12px 0; }
+.fund-coverage-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; }
+.fund-coverage-grid div { min-width:0; border:1px solid #e5eaf0; border-radius:7px; background:#fff; padding:8px; }
+.fund-coverage-grid span { display:block; color:#667085; font-size:11px; line-height:1.35; }
+.fund-coverage-grid strong { display:block; margin-top:3px; color:#172033; font-size:13px; line-height:1.35; overflow-wrap:anywhere; }
+.fund-coverage-grid .field-label .info-button { display:none; }
+.fund-coverage-panel p { margin:10px 0 0; color:#526174; font-size:12px; line-height:1.65; }
 .entity-group { margin-top:12px; }
 .entity-group h3 { margin:0 0 8px; color:#172033; font-size:14px; }
 .entity-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
@@ -1114,20 +1179,69 @@ tr:last-child td { border-bottom: 0; }
 .compare-point-actions button { border:1px solid #cdd6e1; background:#fff; color:#0f4f58; border-radius:7px; padding:6px 10px; font-size:12px; font-weight:750; cursor:pointer; }
 .compare-point-actions button:disabled { opacity:.45; cursor:not-allowed; }
 
+.topic-selector-panel { border-left:4px solid #0f766e; }
+.topic-selector-panel .panel-head { align-items:flex-start; }
+.topic-selector-panel .control { max-width:280px; }
+.topic-selector-controls { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; align-items:center; }
+.topic-selector-group { display:grid; gap:8px; margin-top:12px; }
+.topic-selector-group strong { color:#172033; font-size:13px; }
+.topic-chip-row { display:flex; flex-wrap:wrap; gap:8px; }
+.topic-theme-chip { border:1px solid #dbe4ee; border-radius:8px; background:#fff; color:#172033; padding:8px 10px; display:grid; gap:4px; min-width:172px; max-width:260px; text-align:left; cursor:pointer; }
+.topic-theme-chip span { font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.topic-theme-chip em { color:#667085; font-style:normal; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.topic-chip-bar { display:block; height:4px; border-radius:999px; background:#edf2f7; overflow:hidden; margin-top:2px; }
+.topic-chip-bar b { display:block; height:100%; border-radius:999px; background:#0f766e; }
+.topic-theme-chip:hover { border-color:#98a2b3; background:#fbfdff; }
+.topic-theme-chip.is-active { border-color:#0f766e; box-shadow:0 0 0 2px rgba(15,118,110,.12); background:#f0fdfa; }
+.topic-theme-chip.is-active .topic-chip-bar b { background:#d92d20; }
+.topic-skipped { margin-top:12px; border:1px dashed #dbe4ee; border-radius:8px; background:#fbfdff; padding:9px 10px; color:#526174; font-size:12px; }
+.topic-skipped summary { cursor:pointer; color:#344054; font-weight:750; }
+.topic-skipped p { margin:6px 0 0; line-height:1.5; }
 .topic-kpi-grid { margin-bottom:16px; }
 .topic-method-panel { border-left:4px solid #1570ef; }
 .topic-threshold { border:1px solid #f4c7c1; background:#fff6f3; color:#b42318; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:750; white-space:nowrap; }
+.topic-filter-panel { border-left:4px solid #d92d20; }
+.topic-filter-controls { display:grid; grid-template-columns:minmax(180px,.75fr) minmax(260px,1.2fr) minmax(280px,1fr); gap:12px; align-items:end; }
+.topic-filter-controls label { display:grid; gap:5px; color:#405063; font-size:12px; font-weight:750; min-width:0; }
+.topic-threshold-control { display:grid; grid-template-columns:minmax(160px,1fr) 84px 18px; gap:8px; align-items:center; }
+.topic-threshold-control input[type="range"] { width:100%; accent-color:#d92d20; }
+.topic-filter-counts { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.topic-filter-counts span { border:1px solid #dbe4ee; border-radius:999px; background:#fff; color:#526174; padding:6px 9px; font-size:12px; }
+.topic-filter-counts b { color:#172033; }
 .topic-logic-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
 .topic-logic-grid > div { border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:12px; min-width:0; }
 .topic-logic-grid strong { display:block; color:#172033; font-size:13px; margin-bottom:5px; }
 .topic-logic-grid p { margin:0; color:#526174; font-size:12px; line-height:1.65; }
 .topic-keyword-row { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
 .topic-keyword-row span { border:1px solid #dbe4ee; border-radius:999px; background:#fff; color:#405063; padding:4px 8px; font-size:12px; }
-.topic-chart { border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:12px; overflow:hidden; }
+.topic-chart { position:relative; border:1px solid #dbe4ee; border-radius:8px; background:#fbfdff; padding:12px; overflow:visible; }
 .topic-chart svg, .topic-scatter-wrap svg { display:block; width:100%; min-height:320px; }
 .topic-chart-legend, .topic-scatter-legend { display:flex; flex-wrap:wrap; gap:12px; color:#526174; font-size:12px; margin-bottom:8px; }
 .topic-chart-legend span, .topic-scatter-legend span { display:inline-flex; align-items:center; gap:6px; }
 .topic-chart-legend i, .topic-scatter-legend i { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.topic-trend-controls { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 12px; }
+.topic-select-label { display:grid; gap:5px; min-width:280px; color:#405063; font-size:12px; font-weight:750; }
+.topic-select-label .control { min-height:34px; }
+.topic-benchmark-checks { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; max-width:720px; }
+.topic-check { display:inline-flex; align-items:center; gap:5px; border:1px solid #dbe4ee; border-radius:999px; background:#fff; padding:5px 9px; color:#405063; font-size:12px; font-weight:700; cursor:pointer; }
+.topic-check input { margin:0; }
+.topic-axis-text { fill:#405063; font-size:12px; font-weight:700; }
+.topic-axis-title { fill:#344054; font-size:12px; font-weight:800; }
+.topic-line-dot { pointer-events:none; }
+.topic-hover-capture { fill:transparent; cursor:crosshair; }
+.topic-hover-line { stroke:#344054; stroke-width:1.2; stroke-dasharray:4 4; pointer-events:none; }
+.topic-hover-point { pointer-events:none; }
+.topic-chart-tooltip { position:absolute; z-index:20; min-width:230px; max-width:286px; border:1px solid #cdd6e1; border-radius:8px; background:#fff; box-shadow:0 10px 28px rgba(16,24,40,.16); padding:9px 10px; color:#344054; font-size:12px; line-height:1.45; pointer-events:none; }
+.topic-chart-tooltip strong { display:block; margin-bottom:6px; color:#172033; font-size:12px; }
+.topic-tip-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:2px 0; }
+.topic-tip-row span { display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.topic-tip-row i { flex:none; width:9px; height:9px; border-radius:50%; display:inline-block; }
+.topic-tip-row b { white-space:nowrap; }
+.topic-benchmark-note { margin-top:10px; border:1px solid #dbe4ee; border-radius:8px; background:#fff; padding:11px 12px; color:#526174; font-size:12px; line-height:1.65; }
+.topic-benchmark-note strong { display:block; color:#172033; font-size:13px; margin:0 0 3px; }
+.topic-benchmark-note p { margin:0 0 8px; }
+.topic-benchmark-note ul { margin:0; padding-left:18px; }
+.topic-benchmark-note li { margin:2px 0; }
 .topic-scatter-legend .is-selected { background:#d92d20; }
 .topic-scatter-legend .is-background { background:#cbd5e1; }
 .topic-line-path { filter:drop-shadow(0 1px 1px rgba(16,24,40,.08)); }
@@ -1149,6 +1263,9 @@ tr:last-child td { border-bottom: 0; }
 .topic-fund-chip span, .topic-fund-chip em { color:#667085; font-style:normal; white-space:nowrap; }
 .topic-fund-chip:hover { border-color:#98a2b3; color:#175cd3; }
 .topic-selected-table table { min-width:1180px; }
+.topic-sort-head { color:#24364a; }
+.topic-sort-head.is-active { color:var(--brand-dark); }
+.topic-sort-head:focus-visible { outline:2px solid rgba(21,112,239,.35); outline-offset:2px; border-radius:4px; }
 .topic-selected-table td:first-child { min-width:160px; }
 .topic-selected-table td:last-child { min-width:260px; }
 @media (max-width: 1100px) {
@@ -1159,15 +1276,22 @@ tr:last-child td { border-bottom: 0; }
   .strategy-hero, .position-layout { grid-template-columns: 1fr; }
   .profile-compact { grid-template-columns: 1fr; }
   .strategy-info-block, .evaluation-block, .classification-block { grid-column:auto; grid-row:auto; }
+  .fund-hero, .fund-two-col { grid-template-columns: 1fr; }
+  .fund-info-grid, .fund-kpi-strip, .fund-coverage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fund-report-grid { grid-template-columns: 1fr; }
   .hero-kpis, .return-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .core-line-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .class-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .insight-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .insight-grid, .insight-layout, .insight-dimension-grid, .asset-trend-layout, .compare-fund-grid, .compare-rebalance-grid, .compare-search-row, .metric-search-row, .metric-lineage, .overlap-matrix-grid, .compare-ai-grid, .compare-distribution-grid, .compare-advisor-grid, .compare-strategy-distribution, .compare-profit-grid, .topic-logic-grid { grid-template-columns: 1fr; }
+  .insight-grid, .insight-layout, .insight-dimension-grid, .asset-trend-layout, .compare-fund-grid, .compare-rebalance-grid, .compare-search-row, .metric-search-row, .metric-lineage, .overlap-matrix-grid, .compare-ai-grid, .compare-distribution-grid, .compare-advisor-grid, .compare-strategy-distribution, .compare-profit-grid, .topic-logic-grid, .topic-filter-controls { grid-template-columns: 1fr; }
   .entity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .compare-pick-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .compare-point-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .topic-point-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .topic-filter-counts { justify-content:flex-start; }
+  .topic-trend-controls { align-items:stretch; flex-direction:column; }
+  .topic-benchmark-checks { justify-content:flex-start; max-width:none; }
+  .topic-select-label { min-width:0; width:100%; }
   .ai-kpi-grid, .ai-diagnostic-grid, .ai-help-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ai-editor-head { align-items:flex-start; flex-direction:column; }
   .ai-editor-actions { justify-content:flex-start; }
@@ -1190,9 +1314,9 @@ tr:last-child td { border-bottom: 0; }
   .grid, .filters, .value-list { grid-template-columns: 1fr; }
   .ai-condition-table { min-width:640px; }
   .quality-grid { grid-template-columns: 1fr; }
-  .hero-kpis, .return-grid, .hero-dates, .core-line-values, .class-chip-grid, .class-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero-kpis, .return-grid, .hero-dates, .core-line-values, .class-chip-grid, .class-metric-grid, .fund-hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profile-compact, .core-line { grid-template-columns: 1fr; }
-  .insight-filters, .insight-hero, .insight-bar-row, .signal-chart-row, .signal-x-axis, .opportunity-row, .insight-mini-grid, .rank-row, .metric-search-row, .metric-lineage, .strategy-decision-kpis, .strategy-decision-item, .compare-pick-grid, .compare-pick-card, .compare-point-kpis, .compare-share-row, .topic-point-kpis { grid-template-columns: 1fr; }
+  .insight-filters, .insight-hero, .insight-bar-row, .signal-chart-row, .signal-x-axis, .opportunity-row, .insight-mini-grid, .rank-row, .metric-search-row, .metric-lineage, .strategy-decision-kpis, .strategy-decision-item, .compare-pick-grid, .compare-pick-card, .compare-point-kpis, .compare-share-row, .topic-point-kpis, .topic-threshold-control, .fund-info-grid, .fund-kpi-strip, .fund-coverage-grid, .fund-asset-bar, .fund-industry-bar { grid-template-columns: 1fr; }
   .topic-threshold { white-space:normal; border-radius:7px; }
   .metric-analysis-title { flex-direction:column; }
   .ai-kpi-grid, .ai-diagnostic-grid, .ai-help-grid { grid-template-columns: 1fr; }
@@ -1213,5 +1337,5 @@ tr:last-child td { border-bottom: 0; }
   .asset-company-list { min-width:0; }
 }
 @media (max-width: 420px) {
-  .hero-kpis, .return-grid, .hero-dates, .core-line-values, .class-chip-grid, .class-metric-grid, .entity-grid { grid-template-columns: 1fr; }
+  .hero-kpis, .return-grid, .hero-dates, .core-line-values, .class-chip-grid, .class-metric-grid, .entity-grid, .fund-hero-metrics { grid-template-columns: 1fr; }
 }

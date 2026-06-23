@@ -1,25 +1,13 @@
 // Keep the Syncthing deploy folder focused on static site assets.
 // These folders are local scratch/runtime artifacts and are not needed on Linux.
-(?d).git
-(?d).git/**
-(?d).playwright-cli
-(?d).playwright-cli/**
 (?d).cache
 (?d).cache/**
 (?d).python
 (?d).python/**
-(?d)node_modules
-(?d)node_modules/**
 (?d)output
 (?d)output/**
 (?d)tmp
 (?d)tmp/**
-(?d)analysis_outputs
-(?d)analysis_outputs/**
-(?d)*.tmp
-(?d)*.temp
-(?d)*.part
-(?d)~$*
 (?d).stfolder.removed-*
 (?d).stfolder.removed-*/**
 (?d)logs

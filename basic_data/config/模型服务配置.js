@@ -7,6 +7,7 @@ window.__AI_STRATEGY_LOCAL_CONFIG__ = {
   enabled: true,
 
   // 报表服务同源 LLM 代理。
+  profile: "local",
   provider: "same-origin-llm-proxy",
 
   // 浏览器只请求当前报表服务，由 start_basic_data_site_linux.sh 启动的代理转发到模型服务。
@@ -33,6 +34,32 @@ window.__AI_STRATEGY_LOCAL_CONFIG__ = {
 
   // 是否要求 OpenAI 兼容接口返回 JSON 对象。为兼容内网网关默认不强制；前端仍会从模型文本中抽取 JSON。
   responseFormat: false,
+
+  // 前端“模型来源”下拉使用。local 走报表服务同源代理，codex 走本机 Codex 桥接服务。
+  modelProfiles: {
+    local: {
+      label: "本地模型（同源代理）",
+      provider: "same-origin-llm-proxy",
+      baseUrl: "/llmapi/v1",
+      endpoint: "/llmapi/v1/chat/completions",
+      model: "deepseek-v4-flash-inner",
+      timeoutMs: 45000,
+      responseFormat: false,
+      apiKey: "",
+      headers: {}
+    },
+    codex: {
+      label: "Codex桥接模型",
+      provider: "codex-cli-local-proxy",
+      baseUrl: "http://127.0.0.1:8787/v1",
+      endpoint: "http://127.0.0.1:8787/v1/chat/completions",
+      model: "gpt-5.4-mini",
+      timeoutMs: 45000,
+      responseFormat: true,
+      apiKey: "",
+      headers: {}
+    }
+  },
 
   // 仅 Codex 桥接脚本读取；当前内网 DS 直连不需要启动桥接脚本。
   codexBridge: {

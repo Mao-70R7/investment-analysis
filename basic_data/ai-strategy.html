@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ai选策略</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./assets/basic.css?v=basic_data_20260622_topic_analysis_v1">
+  <link rel="stylesheet" href="./assets/basic.css?v=basic_data_20260623_fund_nav_benchmark_v2">
 </head>
 <body>
   <header class="topbar">
@@ -21,11 +21,22 @@
 <a class="nav-link " href="./strategies.html">策略列表</a>
 <a class="nav-link " href="./insights.html">数据洞察</a>
 <a class="nav-link " href="./compare.html">策略对比</a>
+<a class="nav-link " href="./ai-topic-analysis.html">AI主题分析</a>
 <a class="nav-link " href="./topic-analysis.html">主题分析</a>
 <a class="nav-link is-active" href="./ai-strategy.html">Ai选策略</a></nav>
     </div>
   </header>
-  <main id="aiStrategyPage" class="page-shell"></main>
+  <main id="aiStrategyPage" class="page-shell">
+    <section class="panel ai-query-panel ai-loading-shell">
+      <div class="panel-head">
+        <div>
+          <h2>Ai选策略</h2>
+          <p class="desc">页面正在加载本地数据包；页面骨架会先显示，模型不可用不会阻塞页面打开。</p>
+        </div>
+      </div>
+      <div class="empty">正在加载策略宽表、持仓和实体索引...</div>
+    </section>
+  </main>
   <div id="fieldModal" class="modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="fieldModalTitle">
       <button id="fieldModalClose" class="modal-close" type="button" aria-label="关闭">×</button>
@@ -33,14 +44,15 @@
       <div id="fieldModalBody"></div>
     </div>
   </div>
-  <script src="./assets/basic-common.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./data/basic_summary.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./data/holding_snapshot_pack.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./data/fund_detail_pack.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./data/ai_semantic_index.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./config/模型服务配置.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./config/ai-strategy-local-config.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./assets/ai-strategy-config.js?v=basic_data_20260622_topic_analysis_v1"></script>
-  <script src="./assets/ai-strategy.js?v=basic_data_20260622_topic_analysis_v1"></script>
+  <script defer src="./assets/basic-common.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./data/basic_summary_core.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./data/holding_snapshot_pack.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./data/fund_detail_pack.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./data/ai_semantic_index.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./data/ai_topic_evidence_pack.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./config/模型服务配置.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./config/ai-strategy-local-config.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./assets/ai-strategy-config.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script defer src="./assets/ai-strategy.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
 </body>
 </html>

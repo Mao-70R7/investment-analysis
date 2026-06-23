@@ -1,10 +1,10 @@
 * text=auto eol=lf
-
 *.pdf binary
 *.png binary
 *.jpg binary
 *.jpeg binary
 *.gif binary
 *.webp binary
-
 basic_data/data/basic_summary.js filter=lfs diff=lfs merge=lfs -text
+basic_data/data/insight_data_pack.js filter=lfs diff=lfs merge=lfs -text
+basic_data/data/topic_analysis_pack.js filter=lfs diff=lfs merge=lfs -text
