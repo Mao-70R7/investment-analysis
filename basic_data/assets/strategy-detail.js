@@ -29,6 +29,8 @@
   const curveRows = ["披露业绩", "模拟业绩", "基准业绩", "沪深300业绩"];
   const holdingHeaders = ["基金代码", "基金名称", "二级分类", "权重", "上次调仓后权重", "权重变化", "基金净值", "净值日期", "日涨幅", "调仓后收益率", "调仓后收益贡献"];
   const snapshots = detail.positionSnapshots || [];
+  const signalEvents = detail.signalEvents || [];
+  const signalSummary = detail.signalSummary || {};
   const globalBenchmarks = B.state.summary?.globalBenchmarks || [];
   let activeRange = "all";
   let activePerformanceTab = "interval";
@@ -46,6 +48,10 @@
   }
   function raw(value) {
     return value === null || value === undefined ? "" : String(value);
+  }
+  function flagOn(value) {
+    if (value === true || value === 1) return true;
+    return /^(1|true|是|Y)$/i.test(raw(value).trim());
   }
   function fundDetailUrl(row) {
     const params = new URLSearchParams();
@@ -79,12 +85,16 @@
     "基金类型分类": "按持仓基金的资产类型、基金同类分组和基金详情包中的基金类型归并为现金类、固收类、股票类、混合类或其他。",
     "配置日": "该组合当前配置的起始日期。优先使用最新历史调仓日期；若没有历史调仓事件，则使用当前持仓日期。",
     "持有时长": "最新持仓日减去配置日得到的自然日天数。无法解析日期时显示未披露。",
-    "资产配置估算": "优先基于 fund_detail_pack 中的季报穿透资产暴露拆分股票、固收、现金、基金、其他和其中可转债；缺少季报穿透时按基金标准分类做兜底估算。",
-    "基金分类来源": "说明该基金分类和暴露字段的来源。东财F10季报穿透表示已读取基金季报资产配置；规则估算表示暂未取得季报穿透，使用基金类型、名称和平台披露分类兜底。",
-    "基金穿透报告期": "当前基金资产暴露使用的季报报告期。历史持仓快照会优先选择报告期不晚于持仓日期的分类快照。",
+    "资产配置估算": "优先基于 fund_detail_pack 中的基金经济暴露快照拆分股票、固收、现金、基金、其他和其中可转债；原始季报资产配置仅用于基金详情审计，不作为默认业务结论。",
+    "基金分类来源": "说明该基金分类和暴露字段的来源。基金经济暴露快照表示已对季报原始资产配置中的基金/其他、ETF联接、FOF、QDII、黄金和固收指数做业务重映射；规则估算表示暂未取得足够穿透数据，使用基金类型、名称和平台披露分类兜底。",
+    "基金穿透报告期": "当前基金经济暴露使用的报告期。历史持仓快照会优先选择报告期不晚于持仓日期的数据。",
     "基金穿透覆盖状态": "exact_quarterly_asset_and_stock 表示已有季报资产配置和股票持仓行业推导；exact_quarterly_asset_only 表示仅有季报资产配置；空值表示走规则估算兜底。",
     "基金持有区间收益": "优先使用策略详情中该基金调仓后收益率；缺失时使用基金详情包内的区间收益率。",
-    "基金近1年收益": "使用该基金日度净值计算的近1年收益率；缺失时显示未披露。"
+    "基金近1年收益": "使用该基金日度净值计算的近1年收益率；缺失时显示未披露。",
+    "历史发车信号": "信号类策略的历史发车、买入、卖出、加仓、减仓指令。每次信号按基金级权重变化拆成局部调仓，并用基金后续收益评价指令方向。",
+    "信号胜率": "买入/加仓后基金上涨判为胜，卖出/减仓后基金下跌判为胜；净值或观察期不足的指令不进入分母。",
+    "信号加权方向收益": "按基金指令调整强度加权的方向收益。买入/加仓取基金区间收益，卖出/减仓取基金区间收益的相反数。",
+    "权重变化_百分点": "该基金在本次信号中的调后权重减调前权重。正值代表买入或加仓，负值代表卖出或减仓。"
   });
   const fundPack = window.__BASIC_DATA__?.fundDetailPack || {};
   const fundFields = fundPack.fundFields || [];
@@ -124,7 +134,7 @@
       <summary class="collapsible-summary">
         <div>
           <h2>实体图谱</h2>
-          <p class="desc">基于最新持仓基金的分类快照、资产暴露和基金名称抽取；权重为策略持仓权重按基金暴露比例汇总，优先使用季报穿透。</p>
+          <p class="desc">基于最新持仓基金的经济暴露、主题标签和基金名称抽取；权重为策略持仓权重按基金经济暴露比例汇总。</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 个实体</span>
       </summary>
@@ -193,7 +203,7 @@
     return "其他";
   }
   function fallbackAllocation(row, data) {
-    const text = [row.资产类型, row.基金同类分组, row.分组, data.基金类型, data.研报大类资产, data.资产暴露].map(raw).join(" ");
+    const text = [row.资产类型, row.基金同类分组, row.分组, data.基金类型, data.研报大类资产, data.经济资产暴露, data.资产暴露].map(raw).join(" ");
     const allocation = { 股票: 0, 固收: 0, 现金: 0, 基金: 0, 其他: 0, 其中可转债: 0 };
     if (/可转债|转债/.test(text)) {
       allocation.固收 = 100;
@@ -207,7 +217,7 @@
   }
   function fundAllocation(row, data) {
     const allocation = { 股票: 0, 固收: 0, 现金: 0, 基金: 0, 其他: 0, 其中可转债: 0 };
-    const pairs = parseExposurePairs(data.资产暴露 || data.研报大类资产 || "");
+    const pairs = parseExposurePairs(data.经济资产暴露 || data.资产暴露 || data.研报大类资产 || "");
     if (!pairs.length) return fallbackAllocation(row, data);
     pairs.forEach((pair) => {
       const bucket = exposureBucket(pair.name);
@@ -254,6 +264,14 @@
   }
   function portfolioHoldingsSection() {
     const rows = portfolioFundRows();
+    const isSignalHoldingView = flagOn(detail.summary?.是否信号类组合);
+    const holdingTitle = isSignalHoldingView ? "信号/候选池基金明细" : "组合基金持仓";
+    const holdingDesc = isSignalHoldingView
+      ? "信号类策略按发车信号、买入/卖出指令或候选池口径展示基金明细；表内占比用于表达信号强度、候选池权重或披露份数换算，不应解读为真实组合持仓权重。资产配置列优先来自基金经济暴露；缺失时按基金分类兜底估算。"
+      : "参考组合持仓表模式展示底层基金、组合占比、配置日志和基金经济资产暴露。资产配置列优先来自基金经济暴露；缺失时按基金分类兜底估算。";
+    const holdingSuperHead = isSignalHoldingView ? "信号/候选池基金与占比" : "组合持仓与占比";
+    const holdingTotalLabel = isSignalHoldingView ? "口径合计" : "组合合计";
+    const holdingEmpty = isSignalHoldingView ? "暂无信号/候选池基金明细" : "暂无当前组合基金持仓";
     const maxWeight = Math.max(0, ...rows.map((row) => num(row.权重) || 0));
     const groups = new Map();
     rows.forEach((row) => {
@@ -297,8 +315,8 @@
     return `<section class="panel portfolio-holding-panel">
       <div class="panel-head">
         <div>
-          <h2>组合基金持仓</h2>
-          <p class="desc">参考组合持仓表模式展示底层基金、组合占比、配置日志和基金资产暴露。资产配置列优先来自基金季报穿透；缺失时按基金分类兜底估算。</p>
+          <h2>${holdingTitle}</h2>
+          <p class="desc">${holdingDesc}</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 只基金</span>
       </div>
@@ -306,9 +324,9 @@
         <table class="portfolio-holding-table">
           <thead>
             <tr class="portfolio-super-head">
-              <th colspan="7">组合持仓与占比</th>
+              <th colspan="7">${holdingSuperHead}</th>
               <th colspan="2">配置日志</th>
-              <th colspan="6">基金资产配置估算</th>
+              <th colspan="6">基金经济资产配置</th>
               <th colspan="2">区间个基表现</th>
             </tr>
             <tr>
@@ -331,10 +349,10 @@
               <th>${B.label("基金近1年收益")}</th>
             </tr>
           </thead>
-          <tbody>${body || '<tr><td colspan="17"><div class="empty">暂无当前组合基金持仓</div></td></tr>'}</tbody>
+          <tbody>${body || `<tr><td colspan="17"><div class="empty">${holdingEmpty}</div></td></tr>`}</tbody>
           <tfoot>
             <tr>
-              <td colspan="6">组合合计</td>
+              <td colspan="6">${holdingTotalLabel}</td>
               <td>${B.pct(totalWeight)}</td>
               <td>--</td>
               <td>--</td>
@@ -828,6 +846,195 @@
     renderContribution(snap);
   }
 
+  function signalMetricCard(labelName, value, formatter = B.fmt, sub = "") {
+    const htmlValue = value === null || value === undefined || value === "" ? "未披露" : formatter(value);
+    return `<div class="signal-metric"><span>${B.label(labelName)}</span><strong>${htmlValue}</strong>${sub ? `<em>${B.esc(sub)}</em>` : ""}</div>`;
+  }
+  function signalDirectionClass(direction) {
+    if (["买入", "加仓", "调入"].includes(raw(direction))) return "is-buy";
+    if (["卖出", "减仓", "调出"].includes(raw(direction))) return "is-sell";
+    return "is-neutral";
+  }
+  function signalReturnCell(row, labelName) {
+    const value = row[`方向收益_${labelName}`];
+    const rating = raw(row[`评价_${labelName}`]);
+    const status = rating && rating !== "不可评价" ? rating : "";
+    return `<span class="${returnTone(value)}">${B.pctSigned(value)}</span>${status ? `<small class="signal-rating">${B.esc(status)}</small>` : ""}`;
+  }
+  function signalInstructionTable(rows) {
+    const headers = ["基金代码", "基金名称", "分组名称", "指令方向", "调前权重", "调后权重", "权重变化", "1月", "3月", "6月", "1年", "数据状态"];
+    const body = rows.length ? rows.map((row) => `<tr>
+      <td>${fundLink(row, row.基金代码 || "--")}</td>
+      <td>${fundLink(row, row.基金名称 || row.基金代码 || "未命名基金")}</td>
+      <td>${B.esc(row.分组名称 || "--")}</td>
+      <td><span class="signal-direction ${signalDirectionClass(row.指令方向)}">${B.esc(row.指令方向 || "--")}</span></td>
+      <td>${B.pct(row.调前权重_百分比)}</td>
+      <td>${B.pct(row.调后权重_百分比)}</td>
+      <td class="${returnTone(row.权重变化_百分点)}">${B.pctSigned(row.权重变化_百分点)}</td>
+      <td>${signalReturnCell(row, "1月")}</td>
+      <td>${signalReturnCell(row, "3月")}</td>
+      <td>${signalReturnCell(row, "6月")}</td>
+      <td>${signalReturnCell(row, "1年")}</td>
+      <td>${B.esc(row.数据状态 || "--")}</td>
+    </tr>`).join("") : `<tr><td colspan="${headers.length}"><div class="empty">该信号暂无基金级指令明细</div></td></tr>`;
+    return `<div class="table-wrap"><table class="compact-table signal-instruction-table"><thead><tr>${headers.map((h) => `<th>${B.label(h)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+  function signalEventCard(event, index) {
+    const instructions = event.instructions || [];
+    const title = event.信号标题 || event.信号原因 || "信号调整";
+    const reason = event.信号原因 || "未披露具体信号原因";
+    const metrics = [
+      ["指令数", event.指令数, B.fmt, `买入${event.买入指令数 || 0} / 卖出${event.卖出指令数 || 0}`],
+      ["净买入权重", event.净买入权重_百分点, B.pctSigned, "调后-调前合计"],
+      ["总调整强度", event.总调整强度_百分点, B.pct, "权重变化绝对值合计"],
+      ["信号胜率", event.胜率_3月, B.pct, "3月方向评价"],
+      ["信号加权方向收益", event.加权方向收益_3月, B.pctSigned, "3月强度加权"],
+    ];
+    return `<details class="signal-event-card" ${index === 0 ? "open" : ""}>
+      <summary>
+        <div>
+          <strong>${B.esc(event.信号日期 || "未披露日期")} ${B.esc(event.信号时间 || "")}</strong>
+          <span>${B.esc(title)}</span>
+        </div>
+        <em>${instructions.length.toLocaleString("zh-CN")} 条基金指令</em>
+      </summary>
+      <div class="signal-event-body">
+        <p class="desc">${B.esc(reason)}</p>
+        <div class="signal-metric-grid">${metrics.map(([labelName, value, formatter, sub]) => signalMetricCard(labelName, value, formatter, sub)).join("")}</div>
+        ${signalInstructionTable(instructions)}
+        ${event.原始快照路径 ? `<p class="small">原始快照：${B.esc(event.原始快照路径)}</p>` : ""}
+      </div>
+    </details>`;
+  }
+  function signalSection() {
+    if (!signalEvents.length && !Number(signalSummary.信号事件数 || 0)) return "";
+    const desc = "信号类策略按发车信号和基金级买卖指令复盘。每条信号被视为一次局部调仓，胜率按买卖方向和后续基金收益评价。";
+    const metrics = [
+      ["信号事件数", signalSummary.信号事件数, B.fmt, "历史发车/调整次数"],
+      ["最近信号日", signalSummary.最近信号日, B.fmt, "最新披露信号"],
+      ["信号指令数", signalSummary.信号指令数, B.fmt, "基金级买卖指令"],
+      ["信号胜率", signalSummary.信号胜率_3月, B.pct, "3月方向胜率"],
+      ["信号加权方向收益", signalSummary.信号加权方向收益_3月, B.pctSigned, "3月强度加权"],
+    ];
+    return `<section class="panel signal-panel">
+      <div class="panel-head">
+        <div>
+          <h2>历史发车信号</h2>
+          <p class="desc">${B.esc(desc)}</p>
+        </div>
+        <span class="pill">${(signalEvents.length || Number(signalSummary.信号事件数 || 0)).toLocaleString("zh-CN")} 次信号</span>
+      </div>
+      <div class="signal-metric-grid">${metrics.map(([labelName, value, formatter, sub]) => signalMetricCard(labelName, value, formatter, sub)).join("")}</div>
+      <div class="signal-event-list">${signalEvents.length ? signalEvents.map(signalEventCard).join("") : '<div class="empty">已识别为信号类策略，但当前详情包暂无历史信号事件。请先运行“构建信号类策略事件.py”。</div>'}</div>
+    </section>`;
+  }
+
+  function governanceSection() {
+    const s = detail.summary || {};
+    const fields = [
+      ["治理状态", s.策略治理状态],
+      ["分析分组", s.分析分组],
+      ["是否纳入常规排名", s.是否纳入常规排名],
+      ["是否单独分析", s.是否单独分析],
+      ["业绩分析截止日期", s.业绩分析截止日期],
+      ["持仓处理方式", s.持仓处理方式],
+      ["调仓展示方式", s.调仓展示方式],
+      ["规则说明", s.治理规则说明],
+    ].filter(([, value]) => !isBlank(value));
+    if (!fields.length) return "";
+    const state = s.策略治理状态 || "正常运行";
+    const isSignal = flagOn(s.是否信号类组合);
+    const badges = [
+      s.是否测试组合 ? "测试组合剔除" : "",
+      isSignal ? "信号类策略" : "",
+      s.是否目标盈期次 ? "目标盈/期次" : "",
+      s.是否已停止 ? "已停止" : "",
+      Number(s.是否纳入常规排名 ?? 1) === 1 ? "纳入常规排名" : "不纳入常规排名",
+    ].filter(Boolean);
+    const desc = isSignal
+      ? "该策略按信号清单、买入/卖出指令和份数管理展示，不把候选基金池误当成真实持仓权重。"
+      : s.是否已停止 || s.是否目标盈期次
+        ? "该策略进入历史/期次复盘口径，业绩分析以停止或到期前可得披露数据为边界。"
+        : state === "当前基金权重未完整披露"
+          ? "App 当前详情未披露基金级权重，页面使用最新调仓后权重并按基金净值滚动补齐。"
+          : "该策略按普通投顾组合口径进入常规列表、排名、调仓和持仓分析。";
+    return `<section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>策略治理口径</h2>
+          <p class="desc">${B.esc(desc)}</p>
+        </div>
+        <span class="pill">${B.esc(state)}</span>
+      </div>
+      <div class="hero-meta">${badges.map((item) => `<span class="pill">${B.esc(item)}</span>`).join("")}</div>
+      ${B.valueList(fields.map(([字段, 值]) => ({ 字段, 值 })))}
+    </section>`;
+  }
+
+  function targetIssueNumber(name) {
+    const textValue = raw(name);
+    const match = textValue.match(/(?:第)?(\d{1,5})\s*期/) || textValue.match(/目标盈\s*(\d{6,8})/) || textValue.match(/(\d{6,8})$/);
+    return match ? Number(match[1]) : null;
+  }
+
+  function normalizeTargetFamilyName(name) {
+    let value = raw(name);
+    value = value.replace(/第?[零〇一二三四五六七八九十百千万\d]{1,5}期/g, "");
+    value = value.replace(/\d{1,5}期/g, "");
+    value = value.replace(/目标盈\s*\d{6,8}$/g, "目标盈");
+    value = value.replace(/\d{6,8}$/g, "");
+    value = value.replace(/[（(][^）)]{1,16}?版[）)]/g, "");
+    value = value.replace(/天天\d*/g, "");
+    value = value.replace(/年中版/g, "");
+    value = value.replace(/\s+/g, "");
+    value = value.replace(/[\\\-_—]+$/g, "");
+    value = value.replace(/（\s*）/g, "");
+    return value.trim() || raw(name);
+  }
+
+  function targetSeriesSection() {
+    const summary = detail.summary || {};
+    const isTarget = summary.业务分类 === "目标盈系列产品" || flagOn(summary.是否目标盈期次) || /目标盈|小目标|小赢家|小星愿|止盈/.test(raw(summary.策略名称));
+    if (!isTarget) return "";
+    const familyName = normalizeTargetFamilyName(summary.策略名称);
+    const allRows = (B.state.summary?.strategies || []).filter((row) => {
+      if (!(row.业务分类 === "目标盈系列产品" || flagOn(row.是否目标盈期次) || /目标盈|小目标|小赢家|小星愿|止盈/.test(raw(row.策略名称)))) return false;
+      return normalizeTargetFamilyName(row.策略名称) === familyName;
+    }).sort((a, b) => {
+      const ai = targetIssueNumber(a.策略名称);
+      const bi = targetIssueNumber(b.策略名称);
+      if (ai !== null || bi !== null) return (ai ?? 99999999) - (bi ?? 99999999);
+      return raw(a.成立日期).localeCompare(raw(b.成立日期), "zh-CN") || raw(a.策略名称).localeCompare(raw(b.策略名称), "zh-CN");
+    });
+    if (allRows.length <= 1) return "";
+    const activeRows = allRows.filter((row) => row.天天当前对客展示 === "是" && !/终止|到期|期满|stopped|已结束|非对客|下架/.test(`${row.运作状态 || ""} ${row.天天展示状态 || ""}`));
+    const currentId = summary.统一策略ID || detail.id;
+    return `<section class="panel target-related-panel">
+      <div class="panel-head">
+        <div>
+          <h2>同系列期次</h2>
+          <p class="desc">按产品名称去掉期次号、发行批次号、“天天”和版本括号后归为同一系列；版本差异仍保留在期次名称中。</p>
+        </div>
+        <div class="title-pills">
+          <span class="pill">${B.esc(familyName)}</span>
+          <span class="pill">${allRows.length.toLocaleString("zh-CN")} 期</span>
+          <span class="pill">运行中 ${activeRows.length.toLocaleString("zh-CN")} 期</span>
+        </div>
+      </div>
+      <div class="target-related-list">
+        ${allRows.map((row) => {
+          const isCurrent = row.统一策略ID === currentId;
+          const status = row.天天当前对客展示 === "是" ? "运行中/展示" : (row.运作状态 || row.天天展示状态 || "未披露");
+          return `<a class="target-related-chip ${isCurrent ? "is-current" : ""}" href="./strategy.html?id=${encodeURIComponent(row.统一策略ID || "")}">
+            <strong>${B.esc(row.策略名称 || row.统一策略ID)}</strong>
+            <span>${B.esc(status)}｜${B.esc(row.成立日期 || row.最新业绩日期 || "日期未披露")}｜${B.pctSigned(row.近1年)}</span>
+          </a>`;
+        }).join("")}
+      </div>
+      <p class="small"><a class="link" href="./target-profit-analysis.html">进入目标盈分析页查看全系列生命周期表现</a></p>
+    </section>`;
+  }
+
   root.innerHTML = `
     <section class="page-title">
       <div>
@@ -887,6 +1094,9 @@
         ${benchmarkInfo()}
       </div>
     </section>
+    ${governanceSection()}
+    ${targetSeriesSection()}
+    ${signalSection()}
     ${portfolioHoldingsSection()}
     ${entityGraphSection()}
     <section class="panel chart-panel">

@@ -2953,10 +2953,18 @@
     const op = filter.op || "contains";
     const value = filter.value === undefined || filter.value === null ? "" : raw(filter.value);
     const isSystem = !!filter.system;
+    const fieldText = fieldLabel(field);
     return `
       <tr class="ai-condition-row${isSystem ? " is-system" : ""}">
-        <td>
-          <select class="control ai-filter-field"${isSystem ? " disabled" : ""}>${optionHtml(filterFieldNames(), field)}</select>
+        <td class="ai-condition-field-cell">
+          <div class="ai-field-summary">
+            <span>当前字段</span>
+            <strong title="${B.esc(fieldText)}">${B.esc(fieldText)}</strong>
+          </div>
+          <details class="ai-field-picker${isSystem ? " is-disabled" : ""}">
+            <summary>字段字典</summary>
+            <select class="control ai-filter-field" aria-label="筛选字段"${isSystem ? " disabled" : ""}>${optionHtml(filterFieldNames(), field)}</select>
+          </details>
           ${filter.ambiguous ? `<div class="small">字段有歧义，默认合并匹配。</div>` : ""}
         </td>
         <td><select class="control ai-filter-op"${isSystem ? " disabled" : ""}>${operatorOptionHtml(op)}</select></td>
@@ -3010,6 +3018,28 @@
     }).filter((filter) => filter.field && (["is empty", "is not empty"].includes(filter.op) || raw(filter.value).trim() !== "" || filter.system));
   }
 
+  function refreshConditionFieldSummary(row) {
+    const select = row.querySelector(".ai-filter-field");
+    const target = row.querySelector(".ai-field-summary strong");
+    if (!select || !target) return;
+    const text = select.options[select.selectedIndex]?.textContent || fieldLabel(select.value);
+    target.textContent = text;
+    target.title = text;
+  }
+
+  function bindConditionRow(row) {
+    const remove = row.querySelector(".ai-remove-filter");
+    if (remove) {
+      remove.addEventListener("click", () => {
+        row.remove();
+      });
+    }
+    const fieldSelect = row.querySelector(".ai-filter-field");
+    if (fieldSelect) {
+      fieldSelect.addEventListener("change", () => refreshConditionFieldSummary(row));
+    }
+  }
+
   function applyEditedFilters() {
     const parsed = state.parsed;
     if (!parsed) return;
@@ -3035,20 +3065,12 @@
     if (addButton && body) {
       addButton.addEventListener("click", () => {
         body.insertAdjacentHTML("beforeend", conditionRowHtml({ field: "__any_text", op: "contains", value: "" }));
-        const lastRemove = body.querySelector(".ai-condition-row:last-child .ai-remove-filter");
-        if (lastRemove) {
-          lastRemove.addEventListener("click", () => {
-            lastRemove.closest(".ai-condition-row")?.remove();
-          });
-        }
+        const lastRow = body.querySelector(".ai-condition-row:last-child");
+        if (lastRow) bindConditionRow(lastRow);
       });
     }
     if (applyButton) applyButton.addEventListener("click", applyEditedFilters);
-    root.querySelectorAll(".ai-remove-filter").forEach((button) => {
-      button.addEventListener("click", () => {
-        button.closest(".ai-condition-row")?.remove();
-      });
-    });
+    root.querySelectorAll(".ai-condition-row").forEach(bindConditionRow);
   }
 
   function renderKpis(parsed, result) {

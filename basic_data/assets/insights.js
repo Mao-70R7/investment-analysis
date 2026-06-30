@@ -167,15 +167,15 @@
     "同类推荐": "以第一只已选策略为锚点，按所选同类口径筛选同业务分类、研报产品类型、风险等级或投顾机构策略；再按当前时间区间收益、最大回撤和波动率排序，剔除已选策略后给出可加入对比的候选。",
     "同类口径": "策略对比页自动推荐和风险收益散点使用的可比池。研报产品类型适合投研可比；业务分类适合运营货架；风险等级适合风险相近对比；投顾机构适合同机构内部产品比较。",
     "持仓重合度": "两只策略当前正权重基金的重叠程度。计算公式为 sum(min(策略A基金权重, 策略B基金权重))，基金按基金代码优先、基金名称兜底匹配，单位为百分比点。",
-    "行业重合度": "两只策略最新仓位在研报A股行业上的暴露重叠程度。计算公式为 sum(min(策略A行业暴露, 策略B行业暴露))；若研报A股行业缺失，则退回权益行业大类。行业暴露来自 holding_snapshot_pack 的分类拆分结果。",
-    "资产重合度": "两只策略最新仓位在研报大类资产上的暴露重叠程度。计算公式为 sum(min(策略A资产暴露, 策略B资产暴露))；资产暴露来自 holding_snapshot_pack，支持一只基金拆分到多个资产类别。",
+    "行业重合度": "两只策略最新仓位在经济行业/主题暴露上的重叠程度。计算公式为 sum(min(策略A行业暴露, 策略B行业暴露))；若研报A股行业缺失，则退回权益行业大类。行业暴露来自基金经济暴露快照和 holding_snapshot_pack 的分类拆分结果。",
+    "资产重合度": "两只策略最新仓位在经济大类资产上的暴露重叠程度。计算公式为 sum(min(策略A资产暴露, 策略B资产暴露))；资产暴露来自基金经济暴露快照生成的 holding_snapshot_pack，支持一只基金拆分到多个资产类别。",
     "调仓贡献对比": "选中策略最近一次历史调仓的基金级调仓后收益贡献汇总。正贡献和负贡献来自策略详情 holdings 中的调仓后收益贡献字段；若存在 contributionCurves，则同时展示调仓前仓位模拟与调仓后仓位实际的区间超额。",
     "风险收益散点": "横轴为最大回撤或波动率，纵轴为当前时间区间收益；样本为当前筛选和同类口径下的可比策略，已选策略高亮显示。",
     "风险收益点选": "点击散点只在图下方展示产品介绍、同类位置和加入按钮，不直接跳转；策略名称本身可进入策略详情页。",
     "重合度明细": "点击重合度矩阵中的非自身单元格后展示明细。基金重合度列出共同基金及两边权重；资产和行业重合度列出共同暴露分类及两边比例。",
     "对比基准": "策略对比曲线可叠加全局指数基准。默认按已选策略披露收益曲线与可用指数日收益相关性选择；有效样本不足时按策略组合资产结构选择股票、债券、货币或混合基准。",
-    "大类资产配置对比": "按 holding_snapshot_pack 最新持仓快照的研报大类资产分类聚合；一只基金可按拆分规则进入多个资产大类，页面展示每只策略的权重结构。",
-    "行业配置对比": "按 holding_snapshot_pack 最新持仓快照的研报A股行业分类聚合。行业暴露来自基金分类和拆分规则，不等同于基金公司披露的股票明细行业持仓。",
+    "大类资产配置对比": "按 holding_snapshot_pack 最新持仓快照的经济大类资产分类聚合；一只基金可按拆分规则进入多个资产大类，页面展示每只策略的权重结构。",
+    "行业配置对比": "按 holding_snapshot_pack 最新持仓快照的经济行业/主题分类聚合。行业暴露来自基金经济暴露快照、基金分类和拆分规则，不等同于基金公司披露的完整股票明细行业持仓。",
     "权益主题配置对比": "按 holding_snapshot_pack 最新持仓快照的权益行业主题分类聚合，用于观察权益方向主题集中度；缺少主题拆分的数据不强行归类。",
     "选基效果": "展示两类结果：历史调仓胜率按可评价调仓事件胜负计算；当前持仓基金近1月、近3月、近6月、近1年同类收益排名前50%的仓位占比按基金权重加总。",
     "历史调仓胜率": "按策略历史调仓事件的调仓评价或调仓超额收益判断胜负。跑赢、胜、正超额记为胜；跑输、负超额记为负；无收益窗口或评价不足的事件不纳入分母。",
@@ -3368,17 +3368,10 @@
       state.reportType = "";
       return "";
     }
-    if (!state.reportType || !available.includes(state.reportType)) {
-      const active = (overviewRows || [])
-        .filter((row) => (num(row.调仓产品数) || 0) > 0)
-        .sort((a, b) => {
-          const ac = raw(a.主资产方向) !== "未形成强方向" ? 1 : 0;
-          const bc = raw(b.主资产方向) !== "未形成强方向" ? 1 : 0;
-          return bc - ac || (num(b.调仓产品数) || 0) - (num(a.调仓产品数) || 0) || reportTypeRank(a.研报产品类型) - reportTypeRank(b.研报产品类型);
-        })[0];
-      state.reportType = active?.研报产品类型 || available[0];
+    if (state.reportType && !available.includes(state.reportType)) {
+      state.reportType = "";
     }
-    return state.reportType;
+    return state.reportType || "";
   }
 
   function rebalanceTypeControls(overviewRows) {
@@ -3393,9 +3386,9 @@
           <option value="range" ${state.rebalanceMode === "range" ? "selected" : ""}>自选区间模式</option>
         </select>`)}
         ${filterField("报告月份", `<select id="rebalanceMonth" class="control" ${state.rebalanceMode !== "month" ? "disabled" : ""}>${months.map((item) => `<option value="${item}" ${item === month ? "selected" : ""}>${B.esc(item)}</option>`).join("") || '<option value="">暂无月份</option>'}</select>`)}
-        ${filterField("研报产品类型", `<select id="rebalanceReportType" class="control">${availableTypes.map((type) => `<option value="${B.esc(type)}" ${type === state.reportType ? "selected" : ""}>${B.esc(type)}</option>`).join("") || '<option value="">暂无类型</option>'}</select>`)}
+        ${filterField("研报产品类型", `<select id="rebalanceReportType" class="control"><option value="" ${state.reportType ? "" : "selected"}>全部研报类型</option>${availableTypes.map((type) => `<option value="${B.esc(type)}" ${type === state.reportType ? "selected" : ""}>${B.esc(type)}</option>`).join("") || '<option value="">暂无类型</option>'}</select>`)}
       </div>
-      <div class="source-method"><strong>${B.label("调仓时间模式")}</strong> ${state.rebalanceMode === "month" ? `当前复盘 ${B.esc(month || "暂无月份")}；顶部时间区间不影响月度模式。` : `当前使用顶部“${B.esc(rangeLabel())}”时间区间过滤调仓事件、基金月度汇总和策略级资产变化。`} 类型深钻只比较同一研报产品类型，避免把纯债、固收+和股票型策略混在一起得出伪结论。</div>
+      <div class="source-method"><strong>${B.label("调仓时间模式")}</strong> ${state.rebalanceMode === "month" ? `当前复盘 ${B.esc(month || "暂无月份")}；顶部时间区间不影响月度模式。` : `当前使用顶部“${B.esc(rangeLabel())}”时间区间过滤调仓事件、基金月度汇总和策略级资产变化。`} 默认展示全部研报类型；需要同类产品深钻时再选择单一研报产品类型，避免把纯债、固收+和股票型策略混在一起得出伪结论。</div>
     </section>`;
   }
 
@@ -3525,7 +3518,11 @@
       const allStrategyAssetRows = filteredStrategyAssetChangeRows(false);
       const overviewRows = reportTypeOverviewRows(allEvents, allStrategyAssetRows);
       const selectedType = ensureReportTypeSelection(overviewRows);
-      const typeOverview = overviewRows.find((row) => row.研报产品类型 === selectedType) || {};
+      const typeOverview = selectedType ? (overviewRows.find((row) => row.研报产品类型 === selectedType) || {}) : {
+        产品数: sum(overviewRows, "产品数"),
+        调仓产品数: sum(overviewRows, "调仓产品数"),
+        调仓覆盖率: sum(overviewRows, "产品数") ? sum(overviewRows, "调仓产品数") / sum(overviewRows, "产品数") * 100 : null
+      };
       const events = rebalanceEvents(true);
       const evaluated = events.map(winValue).filter((value) => value !== null);
       const monthlyFunds = filteredRebalanceMonthlyFundRows(true);
@@ -3553,11 +3550,12 @@
       if (state.rebalancePage > totalPages) state.rebalancePage = totalPages;
       const detailStart = (state.rebalancePage - 1) * state.rebalancePageSize;
       const detailRows = events.slice(detailStart, detailStart + state.rebalancePageSize);
+      const latestEventDate = events[0]?.调仓日期 || "";
       return `
         ${rebalanceTypeControls(overviewRows)}
         <section class="insight-hero">
           ${kpi("观察窗口", B.esc(periodText), state.rebalanceMode === "month" ? "最近完整调仓月份优先" : "使用顶部时间区间")}
-          ${kpi("研报类型", B.esc(selectedType || "暂无类型"), "同类策略内比较")}
+          ${kpi("研报类型", B.esc(selectedType || "全部类型"), selectedType ? "同类策略内比较" : "全类型合计")}
           ${kpi("同类产品数", countText(typeOverview.产品数 || 0), "当前全局筛选后")}
           ${kpi("调仓产品数", countText(typeOverview.调仓产品数 || 0), `覆盖率 ${pct(typeOverview.调仓覆盖率)}`)}
           ${kpi("主资产方向", topDirection ? B.esc(topDirection.分类) : "方向分歧", topDirection ? `${topDirection.判断}，中位净变化${weightPoint(topDirection.中位净变化 ?? topDirection.典型变化)}` : "当前同类策略增减方向不集中")}
@@ -3568,18 +3566,18 @@
           ${reportTypeOverviewTable(overviewRows)}
         </section>
         <section class="panel">
-          <div class="panel-head"><div><h2>${B.esc(selectedType || "选中类型")}：大类资产调仓方向</h2><p class="desc">按策略级口径汇总：同一策略同一研报大类资产先合并区间变化，再统计增配策略数、减配策略数和中位变化。</p></div></div>
+          <div class="panel-head"><div><h2>${B.esc(selectedType || "全部类型")}：大类资产调仓方向</h2><p class="desc">按策略级口径汇总：同一策略同一研报大类资产先合并区间变化，再统计增配策略数、减配策略数和中位变化。</p></div></div>
           ${signalDirectionChart(assetSignalRows, "研报大类资产", assetSignalRows.length)}
           ${assetSignalTable(assetSignalRows, "研报大类资产", assetSignalRows.length)}
         </section>
         <section class="panel">
-          <div class="panel-head"><div><h2>${B.esc(selectedType || "选中类型")}：A股行业变化</h2><p class="desc">仅统计能从基金名称或主题明确识别行业的A股基金；宽基指数、主动权益和均衡混合不强行拆行业。</p></div></div>
+          <div class="panel-head"><div><h2>${B.esc(selectedType || "全部类型")}：A股行业变化</h2><p class="desc">仅统计能从基金名称或主题明确识别行业的A股基金；宽基指数、主动权益和均衡混合不强行拆行业。</p></div></div>
           ${signalDirectionChart(industrySignalRows, "研报A股行业", industrySignalRows.length)}
           ${assetSignalTable(industrySignalRows, "研报A股行业", industrySignalRows.length)}
           <div class="source-method"><strong>${B.label("研报A股行业")}</strong> 行业图按基金A股暴露和可识别行业主题拆分；宽基指数、主动权益和均衡混合基金没有底层股票/基准行业权重时不强行拆行业。</div>
         </section>
         <section class="panel">
-          <div class="panel-head"><div><h2>${B.esc(selectedType || "选中类型")}：权益主题变化</h2><p class="desc">作为研报行业变化的补充视角：宽基、主动权益、海外权益和明确主题基金都纳入，能解释“A股行业变化”覆盖不足的样本。</p></div></div>
+          <div class="panel-head"><div><h2>${B.esc(selectedType || "全部类型")}：权益主题变化</h2><p class="desc">作为研报行业变化的补充视角：宽基、主动权益、海外权益和明确主题基金都纳入，能解释“A股行业变化”覆盖不足的样本。</p></div></div>
           ${signalDirectionChart(themeSignalRows, "权益行业主题", themeSignalRows.length)}
           ${assetSignalTable(themeSignalRows, "权益行业主题", themeSignalRows.length)}
           <div class="source-method"><strong>${B.label("权益行业主题")}</strong> 该表仍按策略级净变化统计，不做底层股票穿透；宽基指数和主动权益基金归入宽基/主动权益。</div>
@@ -3639,8 +3637,8 @@
             ${industryPeriodHeatmap(holdingSnapshotRows, "研报A股行业", "研报A股行业")}
           </section>
         </details>
-        <details class="fold-block">
-          <summary>原始明细：当前同类策略调仓事件</summary>
+        <details class="fold-block" open>
+          <summary>原始明细：当前同类策略调仓事件（${countText(events.length)}条${latestEventDate ? `，最新${B.esc(latestEventDate)}` : ""}）</summary>
           <section class="panel">
             <div class="panel-head"><div><h2>近期调仓明细</h2><p class="desc">用于追溯具体事件，分页显示全部当前筛选结果。</p></div></div>
             ${tableBlock(["调仓日期", "策略名称", "投顾机构", "研报产品类型", "业务分类", "调仓逻辑", "单次换手率", "涉及资产", "胜负"], detailRows, (row, h) => {
@@ -4585,8 +4583,8 @@
     const desc = isFund
       ? "基金重合度按共同持有基金逐只取两边权重较小值后求和；下表列出主要共同基金及两边权重。"
       : metric === "资产重合度"
-        ? "资产重合度按研报大类资产拆分结果逐类取两边暴露较小值后求和，一只基金可按规则拆到多个资产类别。"
-        : "行业重合度优先使用研报A股行业拆分，缺失时回退权益行业大类，逐行业取两边暴露较小值后求和。";
+        ? "资产重合度按经济大类资产拆分结果逐类取两边暴露较小值后求和，一只基金可按规则拆到多个资产类别。"
+        : "行业重合度优先使用经济行业/研报A股行业拆分，缺失时回退权益行业大类，逐行业取两边暴露较小值后求和。";
     const tableRows = rows.slice(0, 12).map((item) => `<tr>
       <td>${isFund ? fundLink({ 基金代码: item.code, 基金名称: item.name }) : B.esc(item.name || item.key)}</td>
       <td>${weightPoint(item.策略A权重)}</td>
@@ -5165,11 +5163,11 @@
           </div>
         </section>
         <section class="panel">
-          <div class="panel-head"><div><h2>大类资产配置对比</h2><p class="desc">按最新持仓快照的研报大类资产拆分展示，支持一只基金按规则拆到多个资产大类。</p></div></div>
+          <div class="panel-head"><div><h2>大类资产配置对比</h2><p class="desc">按最新持仓快照的基金经济大类资产拆分展示，支持一只基金按规则拆到多个资产大类。</p></div></div>
           ${compareExposureConfigBlock(selected, "研报大类资产")}
         </section>
         <section class="panel">
-          <div class="panel-head"><div><h2>行业配置对比</h2><p class="desc">按最新持仓快照的研报A股行业拆分展示，用于观察权益行业暴露和行业集中度。</p></div></div>
+          <div class="panel-head"><div><h2>行业配置对比</h2><p class="desc">按最新持仓快照的经济行业/研报A股行业拆分展示，用于观察权益行业暴露和行业集中度。</p></div></div>
           ${compareExposureConfigBlock(selected, "研报A股行业")}
         </section>
         <section class="panel">

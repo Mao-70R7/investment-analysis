@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>策略详情</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./assets/basic.css?v=basic_data_20260623_fund_nav_benchmark_v2">
+  <link rel="stylesheet" href="./assets/basic.css?v=basic_data_20260624_target_profit_v10">
 </head>
 <body>
   <header class="topbar">
@@ -13,22 +13,27 @@
       <a class="brand" href="./index.html">
         <span class="brand-mark">BD</span>
         <span>
-          <strong>投顾业务分析</strong>
+          <strong>投顾基础数据</strong>
           <small>策略详情</small>
         </span>
       </a>
       <nav class="nav">
-        <a class="nav-link" href="./index.html">业务数据总览</a>
+        <a class="nav-link" href="./index.html">整体数据统计说明</a>
         <a class="nav-link" href="./strategies.html">策略列表</a>
         <a class="nav-link" href="./insights.html">数据洞察</a>
         <a class="nav-link" href="./compare.html">策略对比</a>
         <a class="nav-link" href="./ai-topic-analysis.html">AI主题分析</a>
         <a class="nav-link" href="./topic-analysis.html">主题分析</a>
+        <a class="nav-link" href="./target-profit-analysis.html">目标盈分析</a>
+        <a class="nav-link" href="./gf-rebalance-monitor.html">广发调仓监控</a>
+        <a class="nav-link" href="./qd-fund-report.html">QD专题分析</a>
         <a class="nav-link" href="./ai-strategy.html">Ai选策略</a>
+        <a class="nav-link" href="./data-quality.html">数据质量</a>
       </nav>
     </div>
   </header>
   <main id="strategyDetailPage" class="page-shell"></main>
+  <section id="globalQualityGate" class="global-quality-gate" hidden></section>
   <div id="fieldModal" class="modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="fieldModalTitle">
       <button id="fieldModalClose" class="modal-close" type="button" aria-label="关闭">×</button>
@@ -36,10 +41,12 @@
       <p id="fieldModalBody"></p>
     </div>
   </div>
-  <script src="./assets/basic-common.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
-  <script src="./data/basic_summary_core.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
-  <script src="./data/fund_detail_pack.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
-  <script src="./data/ai_semantic_index.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
-  <script src="./assets/strategy-detail.js?v=basic_data_20260623_fund_nav_benchmark_v2"></script>
+  <script src="./assets/basic-common.js?v=basic_data_20260624_target_profit_v10"></script>
+  <script src="./data/data_quality_pack.js?v=basic_data_20260624_target_profit_v10"></script>
+  <script src="./data/basic_summary_core.js?v=basic_data_20260624_target_profit_v10"></script>
+  <script src="./data/fund_detail_pack.js?v=basic_data_20260624_target_profit_v10"></script>
+  <script src="./data/ai_semantic_index.js?v=basic_data_20260624_target_profit_v10"></script>
+  <script>window.BasicData && window.BasicData.renderGlobalQualityGate && window.BasicData.renderGlobalQualityGate("strategy_detail");</script>
+  <script src="./assets/strategy-detail.js?v=basic_data_20260624_target_profit_v10"></script>
 </body>
 </html>

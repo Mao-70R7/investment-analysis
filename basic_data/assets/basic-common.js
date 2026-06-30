@@ -87,22 +87,22 @@ window.BasicData = (() => {
       return "计算口径：展示单只基金归类时命中的证据链。优先取基金代码/名称标准字典，其次取平台持仓披露的资产类型或分组，再用基金名称、跟踪指数、QDII/ETF/FOF/REIT/黄金/商品/短债/纯债/可转债等关键词兜底。该字段用于解释为什么基金被归入当前基金类型。";
     }
     if (text.includes("基金分类来源")) {
-      return "计算口径：说明该基金分类和暴露字段的来源。东财F10季报穿透表示已读取基金季报资产配置；规则估算表示暂未取得季报穿透，使用基金类型、名称和平台披露分类兜底。";
+      return "计算口径：说明该基金分类和暴露字段的来源。主业务口径统一使用基金经济暴露快照；东财F10季报、基金标准分类、名称/指数规则和人工补充规则会合并成可审计的穿透方法与质量状态。";
     }
     if (text.includes("基金穿透报告期")) {
-      return "计算口径：当前资产暴露使用的基金季报报告期。历史快照会优先选择报告期不晚于持仓日期的数据，避免用未来季报回填历史。";
+      return "计算口径：当前基金经济暴露使用的报告期。历史快照会优先选择报告期不晚于持仓日期的数据，避免用未来报告期回填历史。";
     }
     if (text.includes("基金穿透覆盖状态")) {
       return "计算口径：exact_quarterly_asset_and_stock 表示已有季报资产配置和股票持仓行业推导；exact_quarterly_asset_only 表示仅有季报资产配置；空值表示走规则估算兜底。";
     }
     if (text.includes("资产暴露") || text.includes("研报大类资产")) {
-      return "计算口径：优先使用基金季报资产配置。股票占比按基金地域拆到A股、港股、美股、新兴市场或其他发达市场，债券占比拆到债券或海外债券，现金进入货币及现金；缺少季报穿透时才使用基金类型和名称规则估算。图表权重=sum(策略基金权重*基金对应资产暴露比例)。";
+      return "计算口径：页面资产配置统一使用基金经济暴露快照。先保留季报原始资产配置，再按基金标准分类、名称、跟踪指数、ETF联接、FOF、QDII、黄金、固收指数等规则，把基金/其他高占比重映射为可解释资产。图表权重=sum(策略基金权重*基金经济资产暴露比例)。";
     }
     if (text.includes("行业暴露") || text.includes("研报A股行业")) {
-      return "计算口径：优先使用基金季报股票持仓明细，并用东财股票行业字段映射到一级行业；行业结构在已披露股票持仓样本内归一化，再乘以基金A股资产暴露。缺少股票持仓时才使用基金名称/主题规则估算。";
+      return "计算口径：页面行业/主题配置统一使用基金经济暴露快照。权益、海外权益、行业主题和指数权益优先使用季报股票持仓及东财股票行业映射；缺少完整股票行业时用主题、指数或名称规则标注质量状态。黄金/商品、纯债、货币、海外债券不适用股票行业穿透。";
     }
     if (text.includes("行业主题") || text.includes("行业大类") || text.includes("权益行业")) {
-      return "计算口径：按基金资产暴露和行业暴露继续归并。非权益资产归入现金管理、纯债/固收、海外债券、贵金属、能源商品等；A股行业优先由季报股票持仓行业推导，再映射到科技制造、消费医药、金融周期等上层主题。";
+      return "计算口径：按基金经济资产暴露和经济行业暴露继续归并。非权益资产归入现金管理、纯债/固收、海外债券、贵金属、能源商品等；A股行业优先由季报股票持仓行业推导，再映射到科技制造、消费医药、金融周期等上层主题。";
     }
     if (text.includes("权重占比") || text.includes("占比")) {
       return "计算口径：当前筛选范围内，本行对象的权重合计除以同口径全部对象权重合计。用于基金、基金公司、资产大类、行业主题等聚合项时，先在单只策略内按基金权重或拆分暴露求和，再跨策略汇总。";
@@ -437,6 +437,59 @@ window.BasicData = (() => {
     });
     svg.addEventListener("mouseleave", () => { tip.hidden = true; hoverLayer.setAttribute("visibility", "hidden"); });
   }
+  const qualityScopeMap = {
+    overview: ["首页", "负责人总览", "内网静态部署", "全局"],
+    strategies: ["策略列表", "排名样本"],
+    insights: ["数据洞察", "仓位分析", "调仓分析", "基金调仓榜单"],
+    compare: ["策略对比"],
+    ai_topic: ["主题分析", "AI选策略"],
+    topic: ["主题分析", "AI选策略"],
+    target_profit: ["目标盈分析"],
+    ai: ["AI选策略"],
+    strategy_detail: ["策略详情", "策略列表", "排名样本"],
+    fund_detail: ["基金详情", "仓位分析", "主题分析"],
+    quality: []
+  };
+  function qualityPack() {
+    return window.__BASIC_DATA_QUALITY_PACK__ || state.dataQualityPack || {};
+  }
+  function pageQualityIssues(pageKey = "") {
+    const pack = qualityPack();
+    const checks = pack.checks || [];
+    const scopes = qualityScopeMap[pageKey] || [];
+    return checks.filter((row) => {
+      const status = row.状态 || row.status;
+      if (status !== "warn" && status !== "error" && status !== "bad") return false;
+      if (!scopes.length) return true;
+      const impact = String(row.影响页面 || "");
+      return scopes.some((scope) => impact.includes(scope));
+    });
+  }
+  function renderGlobalQualityGate(pageKey = "", targetId = "globalQualityGate") {
+    const el = byId(targetId);
+    if (!el) return;
+    const pack = qualityPack();
+    if (!pack || !(pack.checks || []).length) {
+      el.hidden = true;
+      return;
+    }
+    const issues = pageQualityIssues(pageKey);
+    const status = pack.状态 || pack.status || "unknown";
+    const tone = status === "ok" || status === "ready" || !issues.length ? "ok" : (issues.some((row) => (row.状态 || row.status) !== "warn") ? "bad" : "warn");
+    const topIssues = issues.slice(0, 3);
+    const title = issues.length ? `本页相关质量提示 ${issues.length} 项` : "本页相关质量检查通过";
+    const body = issues.length
+      ? topIssues.map((row) => `<li><strong>${esc(row.项目 || row.name)}</strong><span>${esc(row.当前值 || "")}</span><em>${esc(row.说明 || "")}</em></li>`).join("")
+      : "<li><strong>核心门禁通过</strong><span>ready</span><em>当前页面没有相关 warning；完整口径仍可在数据质量页审计。</em></li>";
+    el.hidden = false;
+    el.innerHTML = `<div class="quality-gate-card is-${tone}">
+      <div class="quality-gate-head">
+        <span class="status-badge status-${tone === "ok" ? "ok" : tone === "bad" ? "bad" : "warn"}">${esc(title)}</span>
+        <a href="./data-quality.html">查看数据质量</a>
+      </div>
+      <ul>${body}</ul>
+    </div>`;
+  }
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-field]");
     if (!button) return;
@@ -451,5 +504,5 @@ window.BasicData = (() => {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && byId("fieldModal")) byId("fieldModal").hidden = true;
   });
-  return { state, byId, esc, fmt, pct, pctSigned, valueHtml, toneClass, statusBadge, label, table, valueList, metricValue, metric, params, loadScript, drawReturnChart, isDerivedField, fieldSourceText, showInfoModal, showHtmlModal };
+  return { state, byId, esc, fmt, pct, pctSigned, valueHtml, toneClass, statusBadge, label, table, valueList, metricValue, metric, params, loadScript, drawReturnChart, isDerivedField, fieldSourceText, showInfoModal, showHtmlModal, pageQualityIssues, renderGlobalQualityGate };
 })();

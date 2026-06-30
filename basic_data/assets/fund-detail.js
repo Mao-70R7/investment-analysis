@@ -128,7 +128,7 @@
       <div class="panel-head">
         <div>
           <h2>基金实体画像</h2>
-          <p class="desc">基于基金分类快照、季报穿透资产/行业暴露、主题标签、指数和基金名称抽取；缺季报时用规则估算兜底。</p>
+          <p class="desc">基于基金经济暴露快照、主题标签、指数和基金名称抽取；原始季报资产配置仅作为审计信息保留。</p>
         </div>
         <span class="pill">${rows.length.toLocaleString("zh-CN")} 个实体</span>
       </div>
@@ -484,6 +484,36 @@
     </div>`;
   }
 
+  function lookthroughInsufficientNotice(enrichment) {
+    const coverage = enrichment?.holdingCoverage || {};
+    const assetReports = enrichment?.assetReports || [];
+    const latestAsset = assetReports[0] || {};
+    const stockReports = enrichment?.stockReports || [];
+    const stockRows = Math.max(
+      num(coverage.股票明细行数) || 0,
+      stockReports.reduce((acc, report) => acc + ((report.rows || []).length || 0), 0)
+    );
+    if (stockRows > 0) return "";
+    const fundPct = num(coverage.最新基金占比_百分比 ?? latestAsset.基金占比_百分比) || 0;
+    const otherPct = num(coverage.最新其他占比_百分比 ?? latestAsset.其他占比_百分比) || 0;
+    const combined = fundPct + otherPct;
+    const profileText = [
+      matched.data[nameField],
+      matched.data.基金类型,
+      matched.data.二级分类,
+      matched.data.标准资产大类,
+      matched.data.标准资产细类,
+      matched.data.资产暴露,
+      matched.data.基金分类依据,
+    ].map(raw).join(" ");
+    const needsLookthrough = /ETF联接|联接|FOF|QDII-FOF|QDII|基金中基金|底层基金|指数/.test(profileText);
+    if (combined < 30 && !(needsLookthrough && combined >= 15)) return "";
+    return `<div class="fund-lookthrough-notice">
+      <strong>穿透口径提示</strong>
+      <p>最新资产配置中“基金/其他”合计 ${B.pct(combined)}（基金 ${B.pct(fundPct)}，其他 ${B.pct(otherPct)}），且当前股票明细为空。ETF联接、FOF、QDII-FOF或持有底层基金/指数的样本，权益暴露可能留在底层基金或指数成分中；这不是“无权益暴露”，而是底层基金/指数穿透不足。</p>
+    </div>`;
+  }
+
   function holdingReportsSection(enrichment) {
     const stockReports = enrichment?.stockReports || [];
     const bondReports = enrichment?.bondReports || [];
@@ -498,6 +528,7 @@
         </div>
       </div>
       ${holdingCoveragePanel(enrichment)}
+      ${lookthroughInsufficientNotice(enrichment)}
       ${fallbackAssetCard}
       ${latestStockBlock}
       ${stockReports[1] ? holdingReportTable("stock", stockReports[1]) : ""}
@@ -506,24 +537,47 @@
     </section>`;
   }
 
-  function classificationSnapshotSection(enrichment) {
+  function exposureStringObject(value) {
+    if (typeof value !== "string") return {};
+    const out = {};
+    value.split(/[、,，;；]+/).forEach((part) => {
+      const item = part.trim();
+      const match = item.match(/^(.+?)(-?\d+(?:\.\d+)?)%$/);
+      if (match) out[match[1].trim()] = Number(match[2]);
+    });
+    return out;
+  }
+
+  function classificationSnapshotSection(fundData, enrichment) {
     const snapshots = enrichment?.classificationSnapshots || [];
-    if (!snapshots.length) return "";
+    if (!snapshots.length && !nonEmpty(fundData.经济资产暴露) && !nonEmpty(fundData.资产暴露)) return "";
     const latest = snapshots[0];
-    const showIndustryExposure = hasMeaningfulExposure(latest.行业暴露);
+    const economicAssetParsed = exposureStringObject(fundData.经济资产暴露 || fundData.资产暴露 || "");
+    const economicIndustryParsed = exposureStringObject(fundData.经济行业暴露 || fundData.行业暴露 || "");
+    const rawAssetParsed = exposureStringObject(fundData.原始资产暴露 || "");
+    const rawIndustryParsed = exposureStringObject(fundData.原始行业暴露 || "");
+    const economicAsset = hasMeaningfulExposure(economicAssetParsed) ? economicAssetParsed : (latest?.资产暴露 || {});
+    const economicIndustry = hasMeaningfulExposure(economicIndustryParsed) ? economicIndustryParsed : (latest?.行业暴露 || {});
+    const rawAsset = hasMeaningfulExposure(rawAssetParsed) ? rawAssetParsed : (latest?.资产暴露 || {});
+    const rawIndustry = hasMeaningfulExposure(rawIndustryParsed) ? rawIndustryParsed : (latest?.行业暴露 || {});
+    const showEconomicIndustry = hasMeaningfulExposure(economicIndustry);
+    const showRawIndustry = hasMeaningfulExposure(rawIndustry);
     return `<section class="panel fund-classification-panel">
       <div class="panel-head">
         <div>
-          <h2>基金穿透分类快照</h2>
-          <p class="desc">分类快照用于策略资产和权益主题暴露计算；资产优先使用季报资产配置，缺失时按基金标准分类估算。</p>
+          <h2>基金经济暴露快照</h2>
+          <p class="desc">业务分析统一使用经济暴露；原始季报资产配置只用于审计追溯，避免把 ETF 联接、FOF、黄金和固收指数的“基金/其他”误当成真实资产方向。</p>
         </div>
-        <span class="pill">${B.esc(latest.报告期 || "未披露报告期")}</span>
+        <span class="pill">${B.esc(fundData.经济暴露报告期 || latest?.报告期 || "未披露报告期")}</span>
       </div>
       <div class="fund-report-grid">
-        <div class="fund-report-card"><h3>资产暴露</h3>${assetObjectBars(latest.资产暴露)}</div>
-        ${showIndustryExposure ? `<div class="fund-report-card"><h3>行业暴露</h3>${assetObjectBars(latest.行业暴露)}</div>` : ""}
+        <div class="fund-report-card"><h3>经济资产暴露（业务口径）</h3>${assetObjectBars(economicAsset)}</div>
+        ${showEconomicIndustry ? `<div class="fund-report-card"><h3>经济行业暴露</h3>${assetObjectBars(economicIndustry)}</div>` : ""}
+        <div class="fund-report-card"><h3>原始季报资产配置（审计）</h3>${assetObjectBars(rawAsset)}</div>
+        ${showRawIndustry ? `<div class="fund-report-card"><h3>原始行业暴露（审计）</h3>${assetObjectBars(rawIndustry)}</div>` : ""}
       </div>
-      ${themeTagsHtml(latest.主题标签)}
+      <div class="source-method"><strong>穿透方法</strong> ${B.esc(fundData.穿透方法 || "未披露")}；<strong>质量状态</strong> ${B.esc(fundData.经济暴露质量状态 || "未披露")}；<strong>置信度</strong> ${B.esc(fundData.经济暴露置信度 || "未披露")}。${fundData.经济暴露证据说明 ? B.esc(fundData.经济暴露证据说明) : ""}</div>
+      ${themeTagsHtml(latest?.主题标签)}
     </section>`;
   }
 
@@ -535,7 +589,8 @@
   }
 
   function assetObjectBars(obj) {
-    const rows = Object.entries(obj || {})
+    const source = typeof obj === "string" ? exposureStringObject(obj) : obj;
+    const rows = Object.entries(source || {})
       .map(([name, value]) => ({ name: raw(name).trim(), value: num(value) }))
       .filter((row) => row.name && row.name !== "未识别" && row.value !== null)
       .sort((a, b) => b.value - a.value);
@@ -560,9 +615,10 @@
         </div>
       </div>
       ${infoSection("基础识别", ["基金代码", "基金名称", "标准基金名称", "基金公司", "基金经理", "基金类型", "基金状态"], sources)}
-      ${infoSection("标准分类", ["天天基金大类", "天天基金二级分类", "二级分类", "标准资产大类", "标准资产细类", "投顾资产分类桶", "主动被动标签", "市场地域标签", "跟踪指数", "跟踪指数_名称推断"], sources)}
+      ${infoSection("标准分类", ["天天基金大类", "天天基金二级分类", "二级分类", "标准资产大类", "标准资产细类", "经济资产大类", "经济资产细类", "投顾资产分类桶", "主动被动标签", "市场地域标签", "跟踪指数", "跟踪指数_名称推断"], sources)}
       ${themeTagsHtml(topicTags)}
-      ${infoSection("穿透和实体口径", ["基金分类来源", "基金分类依据", "基金穿透报告期", "基金穿透覆盖状态", "是否估算分类", "资产暴露", "行业暴露", "行业主题", "行业大类", "权益行业主题", "权益行业大类", "研报大类资产", "研报A股行业"], sources)}
+      ${infoSection("经济暴露口径", ["基金分类来源", "基金分类依据", "基金穿透报告期", "基金穿透覆盖状态", "是否估算分类", "经济资产暴露", "经济行业暴露", "经济主题标签", "经济暴露报告期", "穿透方法", "经济暴露置信度", "经济暴露质量状态"], sources)}
+      ${infoSection("原始季报审计口径", ["原始资产暴露", "原始行业暴露", "资产暴露", "行业暴露", "行业主题", "行业大类", "权益行业主题", "权益行业大类", "研报大类资产", "研报A股行业"], sources)}
       ${infoSection("净值覆盖", ["净值口径", "是否货币基金", "历史起始日期", "历史结束日期", "历史记录数", "最新净值", "最新净值日期", "最新单位净值", "最新累计净值", "最新日收益率_百分比", "最新每万份收益", "最新七日年化收益率_百分比"], sources)}
       ${infoSection("投顾持仓影响", ["广发基金产品", "总权重", "广发策略权重", "非广发策略权重", "持仓策略数", "中位权重", "区间收益率", "增持策略数", "减持策略数"], sources)}
     </section>`;
@@ -617,7 +673,7 @@
             <h1>${B.esc(fundData[nameField] || "未命名基金")}</h1>
             <p class="desc">${B.esc(fundData[codeField] || "未披露代码")}｜${B.esc(merged.基金公司 || "未披露基金公司")}｜${B.esc(merged.基金类型 || "未披露类型")}</p>
             <div class="fund-chip-row">
-              ${["基金类型", "二级分类", "标准资产大类", "标准资产细类", "研报大类资产", "基金穿透报告期"].filter((field) => nonEmpty(merged[field])).map((field) => `<span>${B.label(field)} ${valueHtml(field, merged[field])}</span>`).join("")}
+              ${["基金类型", "二级分类", "经济资产大类", "经济资产细类", "标准资产大类", "标准资产细类", "研报大类资产", "基金穿透报告期"].filter((field) => nonEmpty(merged[field])).map((field) => `<span>${B.label(field)} ${valueHtml(field, merged[field])}</span>`).join("")}
             </div>
           </div>
           <div class="fund-hero-metrics">${heroMetrics.map((field) => `<div class="hero-kpi ${B.toneClass(field, fundData[field])}"><span>${B.label(field)}</span><strong>${valueHtml(field, fundData[field])}</strong></div>`).join("")}</div>
@@ -626,7 +682,7 @@
       </section>
       ${buildProfileSections(fundData, enrichment)}
       ${fundEntitySection(fundData)}
-      ${classificationSnapshotSection(enrichment)}
+      ${classificationSnapshotSection(fundData, enrichment)}
       ${navSection(enrichment)}
       ${assetSection(enrichment)}
       ${holdingReportsSection(enrichment)}
