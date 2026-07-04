@@ -1,0 +1,702 @@
+{
+  "period_label": "2026-06-22 至 2026-06-28",
+  "prev_period_label": "2026-06-15 至 2026-06-21",
+  "generated_at": "2026-06-30 21:39:49",
+  "summary": {
+    "current": {
+      "rows": 460,
+      "events": 21,
+      "strategies": 21,
+      "advisors": 11,
+      "funds": 353,
+      "add": 416.58,
+      "reduce": 316.58,
+      "net": 100.0,
+      "gross": 733.17
+    },
+    "current_ex_build": {
+      "rows": 443,
+      "events": 20,
+      "strategies": 20,
+      "advisors": 10,
+      "funds": 340,
+      "add": 316.58,
+      "reduce": 316.58,
+      "net": 0.0,
+      "gross": 633.17
+    },
+    "previous": {
+      "rows": 606,
+      "events": 25,
+      "strategies": 24,
+      "advisors": 9,
+      "funds": 288,
+      "add": 563.76,
+      "reduce": 563.76,
+      "net": 0.0,
+      "gross": 1127.52
+    },
+    "excluded_build_events": [
+      "ttfund-QXWTWD2-2026-06-23-f31e91afdfa75f03"
+    ]
+  },
+  "asset_signals": [
+    {
+      "name": "固收",
+      "add": 154.0,
+      "reduce": 75.16,
+      "net": 78.84,
+      "gross": 229.16,
+      "prev_net": 7.02,
+      "delta": 71.82,
+      "rows": 168,
+      "funds": 124,
+      "strategies": 20,
+      "advisors": 10,
+      "strategy_total": 20,
+      "advisor_total": 10,
+      "quality_covered": 20,
+      "valid_events": 230.0,
+      "win_rate": 42.17,
+      "loss_rate": 44.35,
+      "avg_excess": -0.17,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低"
+    },
+    {
+      "name": "混合",
+      "add": 83.83,
+      "reduce": 127.06,
+      "net": -43.23,
+      "gross": 210.89,
+      "prev_net": -30.03,
+      "delta": -13.21,
+      "rows": 134,
+      "funds": 100,
+      "strategies": 16,
+      "advisors": 10,
+      "strategy_total": 16,
+      "advisor_total": 10,
+      "quality_covered": 16,
+      "valid_events": 208.0,
+      "win_rate": 42.31,
+      "loss_rate": 46.63,
+      "avg_excess": -0.2,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低"
+    },
+    {
+      "name": "权益",
+      "add": 70.63,
+      "reduce": 99.98,
+      "net": -29.35,
+      "gross": 170.6,
+      "prev_net": 13.99,
+      "delta": -43.34,
+      "rows": 119,
+      "funds": 99,
+      "strategies": 18,
+      "advisors": 10,
+      "strategy_total": 18,
+      "advisor_total": 10,
+      "quality_covered": 18,
+      "valid_events": 220.0,
+      "win_rate": 43.18,
+      "loss_rate": 45.45,
+      "avg_excess": -0.18,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低"
+    }
+  ],
+  "econ_asset_signals": [
+    {
+      "name": "债券",
+      "add": 125.9,
+      "reduce": 29.64,
+      "net": 96.26,
+      "gross": 155.54,
+      "prev_net": 31.93,
+      "delta": 64.33,
+      "rows": 199,
+      "funds": 151,
+      "strategies": 20,
+      "advisors": 10,
+      "strategy_total": 20,
+      "advisor_total": 10,
+      "quality_covered": 20,
+      "valid_events": 230.0,
+      "win_rate": 42.17,
+      "loss_rate": 44.35,
+      "avg_excess": -0.17,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低"
+    },
+    {
+      "name": "A股",
+      "add": 149.49,
+      "reduce": 178.92,
+      "net": -29.43,
+      "gross": 328.41,
+      "prev_net": -11.33,
+      "delta": -18.09,
+      "rows": 255,
+      "funds": 200,
+      "strategies": 18,
+      "advisors": 10,
+      "strategy_total": 18,
+      "advisor_total": 10,
+      "quality_covered": 18,
+      "valid_events": 220.0,
+      "win_rate": 43.18,
+      "loss_rate": 45.45,
+      "avg_excess": -0.18,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低"
+    },
+    {
+      "name": "短债",
+      "add": 8.77,
+      "reduce": 33.49,
+      "net": -24.71,
+      "gross": 42.26,
+      "prev_net": 2.5,
+      "delta": -27.21,
+      "rows": 20,
+      "funds": 15,
+      "strategies": 9,
+      "advisors": 5,
+      "strategy_total": 9,
+      "advisor_total": 5,
+      "quality_covered": 9,
+      "valid_events": 80.0,
+      "win_rate": 41.25,
+      "loss_rate": 46.25,
+      "avg_excess": -0.29,
+      "advisor_valid_events": 2153.0,
+      "advisor_win_rate": 41.57,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低"
+    },
+    {
+      "name": "港股",
+      "add": 0.15,
+      "reduce": 21.29,
+      "net": -21.13,
+      "gross": 21.44,
+      "prev_net": -19.78,
+      "delta": -1.35,
+      "rows": 11,
+      "funds": 11,
+      "strategies": 7,
+      "advisors": 4,
+      "strategy_total": 7,
+      "advisor_total": 4,
+      "quality_covered": 7,
+      "valid_events": 86.0,
+      "win_rate": 45.35,
+      "loss_rate": 41.86,
+      "avg_excess": -0.03,
+      "advisor_valid_events": 1899.0,
+      "advisor_win_rate": 40.49,
+      "advisor_avg_excess": -0.08,
+      "quality_label": "历史质量中性偏低"
+    },
+    {
+      "name": "货币及现金",
+      "add": 21.58,
+      "reduce": 38.58,
+      "net": -17.0,
+      "gross": 60.17,
+      "prev_net": -25.72,
+      "delta": 8.72,
+      "rows": 443,
+      "funds": 340,
+      "strategies": 20,
+      "advisors": 10,
+      "strategy_total": 20,
+      "advisor_total": 10,
+      "quality_covered": 20,
+      "valid_events": 230.0,
+      "win_rate": 42.17,
+      "loss_rate": 44.35,
+      "avg_excess": -0.17,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低"
+    }
+  ],
+  "industry_signals": [
+    {
+      "name": "有色金属",
+      "add": 7.27,
+      "reduce": 13.52,
+      "net": -6.25,
+      "gross": 20.79,
+      "prev_net": 7.75,
+      "delta": -14.0,
+      "rows": 103,
+      "funds": 79,
+      "strategies": 17,
+      "advisors": 10,
+      "strategy_total": 17,
+      "advisor_total": 10,
+      "quality_covered": 17,
+      "valid_events": 192.0,
+      "win_rate": 45.31,
+      "loss_rate": 47.4,
+      "avg_excess": -0.21,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "华商新趋势优选灵活配置混合",
+          -3.03
+        ],
+        [
+          "前海开源多元策略混合C",
+          -1.95
+        ],
+        [
+          "永赢睿信混合C",
+          -1.63
+        ]
+      ],
+      "conclusion": "从前周净流入转为净流出，属于本周最清晰的行业降温信号。"
+    },
+    {
+      "name": "电子",
+      "add": 27.38,
+      "reduce": 32.82,
+      "net": -5.45,
+      "gross": 60.2,
+      "prev_net": 15.91,
+      "delta": -21.36,
+      "rows": 153,
+      "funds": 117,
+      "strategies": 18,
+      "advisors": 10,
+      "strategy_total": 18,
+      "advisor_total": 10,
+      "quality_covered": 18,
+      "valid_events": 220.0,
+      "win_rate": 43.18,
+      "loss_rate": 45.45,
+      "avg_excess": -0.18,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "博时ESG量化选股混合C",
+          -7.07
+        ],
+        [
+          "华夏永康添福混合C",
+          4.12
+        ],
+        [
+          "易方达战略新兴产业股票C",
+          3.06
+        ]
+      ],
+      "conclusion": "从前周净流入转为净流出，属于本周最清晰的行业降温信号。"
+    },
+    {
+      "name": "基础化工",
+      "add": 2.92,
+      "reduce": 7.94,
+      "net": -5.02,
+      "gross": 10.87,
+      "prev_net": 12.46,
+      "delta": -17.48,
+      "rows": 70,
+      "funds": 53,
+      "strategies": 16,
+      "advisors": 10,
+      "strategy_total": 16,
+      "advisor_total": 10,
+      "quality_covered": 16,
+      "valid_events": 182.0,
+      "win_rate": 45.05,
+      "loss_rate": 48.35,
+      "avg_excess": -0.23,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "宝盈新兴产业混合C",
+          -1.66
+        ],
+        [
+          "淳厚信睿混合A",
+          -1.04
+        ],
+        [
+          "华泰柏瑞富利混合C",
+          1.03
+        ]
+      ],
+      "conclusion": "从前周净流入转为净流出，属于本周最清晰的行业降温信号。"
+    },
+    {
+      "name": "国防军工",
+      "add": 2.55,
+      "reduce": 8.1,
+      "net": -5.55,
+      "gross": 10.64,
+      "prev_net": -4.57,
+      "delta": -0.98,
+      "rows": 57,
+      "funds": 34,
+      "strategies": 17,
+      "advisors": 10,
+      "strategy_total": 17,
+      "advisor_total": 10,
+      "quality_covered": 17,
+      "valid_events": 192.0,
+      "win_rate": 45.31,
+      "loss_rate": 47.4,
+      "avg_excess": -0.21,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "华商新趋势优选灵活配置混合",
+          -2.38
+        ],
+        [
+          "博道久航混合C",
+          -1.64
+        ],
+        [
+          "兴业研究精选混合C",
+          -1.33
+        ]
+      ],
+      "conclusion": "延续净流出，说明成长风险偏好仍在压降。"
+    },
+    {
+      "name": "计算机",
+      "add": 0.54,
+      "reduce": 5.6,
+      "net": -5.06,
+      "gross": 6.14,
+      "prev_net": -2.04,
+      "delta": -3.02,
+      "rows": 45,
+      "funds": 35,
+      "strategies": 11,
+      "advisors": 7,
+      "strategy_total": 11,
+      "advisor_total": 7,
+      "quality_covered": 11,
+      "valid_events": 144.0,
+      "win_rate": 45.83,
+      "loss_rate": 46.53,
+      "avg_excess": -0.19,
+      "advisor_valid_events": 2678.0,
+      "advisor_win_rate": 41.49,
+      "advisor_avg_excess": -0.07,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "信澳核心科技混合A",
+          -3.22
+        ],
+        [
+          "富国沪港深业绩驱动混合型C",
+          -0.42
+        ],
+        [
+          "博道成长智航股票C",
+          -0.42
+        ]
+      ],
+      "conclusion": "延续净流出，说明成长风险偏好仍在压降。"
+    },
+    {
+      "name": "医药生物",
+      "add": 3.15,
+      "reduce": 8.59,
+      "net": -5.44,
+      "gross": 11.73,
+      "prev_net": -11.98,
+      "delta": 6.54,
+      "rows": 61,
+      "funds": 51,
+      "strategies": 17,
+      "advisors": 10,
+      "strategy_total": 17,
+      "advisor_total": 10,
+      "quality_covered": 17,
+      "valid_events": 192.0,
+      "win_rate": 45.31,
+      "loss_rate": 47.4,
+      "avg_excess": -0.21,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "东方红医疗升级股票发起C",
+          -1.27
+        ],
+        [
+          "华商新趋势优选灵活配置混合",
+          -1.14
+        ],
+        [
+          "建信医疗健康行业股票C",
+          -1.1
+        ]
+      ],
+      "conclusion": "仍为净流出，压力较前周有所缓和。"
+    },
+    {
+      "name": "通信",
+      "add": 27.33,
+      "reduce": 23.67,
+      "net": 3.65,
+      "gross": 51.0,
+      "prev_net": 38.87,
+      "delta": -35.22,
+      "rows": 116,
+      "funds": 86,
+      "strategies": 17,
+      "advisors": 10,
+      "strategy_total": 17,
+      "advisor_total": 10,
+      "quality_covered": 17,
+      "valid_events": 192.0,
+      "win_rate": 45.31,
+      "loss_rate": 47.4,
+      "avg_excess": -0.21,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "华商均衡成长混合C",
+          -5.11
+        ],
+        [
+          "中欧信息科技混合发起C",
+          4.75
+        ],
+        [
+          "兴业研究精选混合C",
+          -3.09
+        ]
+      ],
+      "conclusion": "仍有净流入，但增配强度较前周大幅收缩。"
+    },
+    {
+      "name": "汽车",
+      "add": 2.91,
+      "reduce": 6.28,
+      "net": -3.37,
+      "gross": 9.19,
+      "prev_net": -17.54,
+      "delta": 14.18,
+      "rows": 63,
+      "funds": 51,
+      "strategies": 16,
+      "advisors": 10,
+      "strategy_total": 16,
+      "advisor_total": 10,
+      "quality_covered": 16,
+      "valid_events": 182.0,
+      "win_rate": 45.05,
+      "loss_rate": 48.35,
+      "avg_excess": -0.23,
+      "advisor_valid_events": 3552.0,
+      "advisor_win_rate": 41.72,
+      "advisor_avg_excess": -0.1,
+      "quality_label": "历史质量中性偏低",
+      "examples": [
+        [
+          "宝盈华证龙头红利50指数发起式C",
+          -0.99
+        ],
+        [
+          "摩根红利优选股票C",
+          0.75
+        ],
+        [
+          "大成高鑫股票C",
+          -0.48
+        ]
+      ],
+      "conclusion": "周环比变化明显，适合进入下周跟踪清单。"
+    }
+  ],
+  "industry_coverage": {
+    "rows": 443,
+    "has_rows": 258,
+    "gross_total": 633.17,
+    "gross_has": 424.75,
+    "weighted_gross": 314.19
+  },
+  "gf_signals": [
+    {
+      "name": "013449 广发景宁债券C",
+      "add": 17.0,
+      "reduce": 0.0,
+      "net": 17.0,
+      "gross": 17.0,
+      "prev_net": 0.0,
+      "delta": 17.0,
+      "rows": 2,
+      "funds": 1,
+      "strategies": 2,
+      "advisors": 2,
+      "strategy_total": 2,
+      "advisor_total": 2,
+      "quality_covered": 1,
+      "valid_events": 7.0,
+      "win_rate": 14.29,
+      "loss_rate": 14.29,
+      "avg_excess": -0.01,
+      "advisor_valid_events": 410.0,
+      "advisor_win_rate": 45.37,
+      "advisor_avg_excess": -0.12,
+      "quality_label": "样本偏少",
+      "fund": "013449 广发景宁债券C",
+      "fund_short": "广发景宁债券C",
+      "examples": [
+        {
+          "date": "2026-06-25",
+          "advisor": "银华天玑投顾",
+          "strategy": "银华活钱加",
+          "change": 9.0
+        },
+        {
+          "date": "2026-06-23",
+          "advisor": "东方财富证券-东方财富证券投顾",
+          "strategy": "东财财富目标盈第3期",
+          "change": 8.0
+        }
+      ],
+      "conclusion": "正向线索明确，银华活钱加与目标盈建仓共同贡献流入。",
+      "tone": "positive"
+    },
+    {
+      "name": "006592 广发景明中短债C",
+      "add": 0.06,
+      "reduce": 8.99,
+      "net": -8.94,
+      "gross": 9.05,
+      "prev_net": 0.0,
+      "delta": -8.94,
+      "rows": 2,
+      "funds": 1,
+      "strategies": 2,
+      "advisors": 2,
+      "strategy_total": 2,
+      "advisor_total": 2,
+      "quality_covered": 2,
+      "valid_events": 12.0,
+      "win_rate": 25.0,
+      "loss_rate": 16.67,
+      "avg_excess": -0.01,
+      "advisor_valid_events": 630.0,
+      "advisor_win_rate": 45.71,
+      "advisor_avg_excess": 0.0,
+      "quality_label": "样本偏少",
+      "fund": "006592 广发景明中短债C",
+      "fund_short": "广发景明中短债C",
+      "examples": [
+        {
+          "date": "2026-06-25",
+          "advisor": "银华天玑投顾",
+          "strategy": "银华活钱加",
+          "change": -8.99
+        },
+        {
+          "date": "2026-06-26",
+          "advisor": "万家基金懂你投",
+          "strategy": "万家非凡稳享全天候",
+          "change": 0.06
+        }
+      ],
+      "conclusion": "主要体现为景明中短债向景宁债券的内部替换。",
+      "tone": "negative"
+    },
+    {
+      "name": "018836 广发成长启航混合C",
+      "add": 0.18,
+      "reduce": 7.27,
+      "net": -7.09,
+      "gross": 7.45,
+      "prev_net": 0.0,
+      "delta": -7.09,
+      "rows": 4,
+      "funds": 1,
+      "strategies": 4,
+      "advisors": 3,
+      "strategy_total": 4,
+      "advisor_total": 3,
+      "quality_covered": 4,
+      "valid_events": 26.0,
+      "win_rate": 46.15,
+      "loss_rate": 46.15,
+      "avg_excess": -0.48,
+      "advisor_valid_events": 738.0,
+      "advisor_win_rate": 39.43,
+      "advisor_avg_excess": -0.05,
+      "quality_label": "历史质量中性偏低",
+      "fund": "018836 广发成长启航混合C",
+      "fund_short": "广发成长启航混合C",
+      "examples": [
+        {
+          "date": "2026-06-24",
+          "advisor": "易方达基金投顾",
+          "strategy": "易方达权益配置",
+          "change": -5.33
+        },
+        {
+          "date": "2026-06-26",
+          "advisor": "华夏投顾",
+          "strategy": "华夏国内培优教育金组合",
+          "change": -0.98
+        },
+        {
+          "date": "2026-06-26",
+          "advisor": "华夏投顾",
+          "strategy": "华夏常青藤教育金组合",
+          "change": -0.96
+        },
+        {
+          "date": "2026-06-26",
+          "advisor": "万家基金懂你投",
+          "strategy": "万家非凡稳享全天候",
+          "change": 0.18
+        }
+      ],
+      "conclusion": "跨 3 家机构减仓，属于广发权益产品本周最需要跟踪的负面线索。",
+      "tone": "negative"
+    }
+  ],
+  "asset_chart_rel": "assets/asset_direction.png",
+  "industry_chart_rel": "assets/industry_signals.png"
+}

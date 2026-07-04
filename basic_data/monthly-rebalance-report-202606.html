@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026年6月基金投顾产品调仓分析</title>
+  <style>
+    :root {
+      --bg:#f6f7f9; --panel:#fff; --ink:#162033; --muted:#667085; --line:#dfe3eb;
+      --accent:#2e4780; --accent-soft:#eaf1fe; --orange:#804126; --green:#386411; --blue:#2e4780;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Arial,sans-serif; }
+    a { color:#1d4ed8; text-decoration:none; }
+    .topbar { position:sticky; top:0; z-index:20; background:rgba(255,255,255,.96); border-bottom:1px solid var(--line); }
+    .topbar-inner { max-width:1440px; margin:0 auto; padding:12px 24px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .brand { display:inline-flex; align-items:center; gap:10px; min-width:220px; color:#182230; }
+    .brand-mark { width:34px; height:34px; display:inline-grid; place-items:center; background:#166c77; color:#fff; border-radius:6px; font-weight:800; }
+    .brand small { display:block; color:var(--muted); font-size:12px; margin-top:1px; }
+    .nav { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .nav-link { padding:7px 10px; border-radius:6px; color:#405063; font-size:14px; border-bottom:0; font-weight:500; }
+    .nav-link:hover,.nav-link.is-active { background:#eef3f8; color:#0f4f58; }
+    main { max-width:1180px; margin:0 auto; padding:34px 26px 60px; }
+    .title-block { border-bottom:3px solid #d8dde7; padding:20px 0 22px; }
+    .eyebrow { color:#2e4780; font-weight:800; margin-bottom:8px; }
+    h1 { font-size:38px; line-height:1.15; margin:0 0 12px; letter-spacing:0; }
+    .meta { color:var(--muted); font-weight:700; display:flex; gap:14px; flex-wrap:wrap; }
+    section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin:18px 0; }
+    section h2 { margin:0 0 10px; font-size:22px; line-height:1.25; }
+    section h3 { margin:20px 0 8px; font-size:17px; }
+    .summary ul { margin:8px 0 0; padding-left:20px; }
+    .summary li { margin:6px 0; }
+    .brief-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:14px 0 12px; }
+    .mini-card { border:1px solid var(--line); border-radius:8px; padding:14px; background:#fbfcfd; min-height:132px; }
+    .mini-title { color:#4b5565; font-weight:900; font-size:13px; }
+    .mini-value { margin:6px 0 9px; font-size:25px; line-height:1.05; font-weight:950; }
+    .mini-note { margin-top:8px; color:var(--muted); font-size:12px; font-weight:700; }
+    .mini-track { height:10px; border-radius:999px; background:#eef2f7; overflow:hidden; }
+    .mini-track i { display:block; height:100%; border-radius:999px; background:#5477c4; }
+    .tone-olive .mini-track i,.tone-olive .spark-row i { background:#71b436; }
+    .tone-orange .mini-track i,.tone-orange .spark-row i { background:#cc6f47; }
+    .spark-bars { display:grid; gap:6px; margin-top:8px; }
+    .spark-row { display:grid; grid-template-columns:34px 1fr 38px; gap:8px; align-items:center; font-size:12px; color:#4b5565; }
+    .spark-row b { display:block; height:8px; border-radius:999px; background:#eef2f7; overflow:hidden; }
+    .spark-row i { display:block; height:100%; border-radius:999px; }
+    .spark-row em { font-style:normal; text-align:right; font-weight:900; color:#344054; }
+    .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-top:14px; }
+    .kpi { border:1px solid var(--line); border-radius:8px; padding:14px; background:#fbfcfd; min-height:112px; }
+    .kpi-value { font-size:27px; font-weight:900; line-height:1.1; }
+    .kpi-label { margin-top:8px; color:#344054; font-weight:800; }
+    .kpi-note { margin-top:6px; color:var(--muted); font-size:12px; }
+    .chart-block { margin:15px 0 18px; }
+    .chart-img { display:block; width:100%; height:auto; border:1px solid #e4e8f0; border-radius:8px; background:#fff; }
+    .fold-block { border:1px solid #e4e8f0; border-radius:8px; margin:10px 0 14px; background:#fbfcfd; overflow:hidden; }
+    .fold-block summary { cursor:pointer; list-style:none; padding:11px 14px; display:flex; justify-content:space-between; gap:12px; align-items:center; color:#344054; font-weight:900; }
+    .fold-block summary::-webkit-details-marker { display:none; }
+    .fold-block summary:before { content:"展开"; color:#2e4780; font-size:12px; font-weight:900; border:1px solid #d8dde7; border-radius:999px; padding:1px 8px; background:white; }
+    .fold-block[open] summary:before { content:"收起"; }
+    .fold-block summary small { color:var(--muted); font-size:12px; font-weight:700; text-align:right; }
+    .fold-block .table-wrap { margin:0; border:0; border-top:1px solid #e4e8f0; border-radius:0; background:white; }
+    .table-wrap { overflow:auto; border:1px solid #e4e8f0; border-radius:8px; margin:12px 0 4px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th { background:#f1f5f9; color:#344054; font-weight:900; padding:9px; text-align:left; white-space:nowrap; }
+    td { padding:9px; border-top:1px solid #e7ebf2; vertical-align:top; }
+    tr.gf-row td { background:#fff8e1; }
+    .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .pos { color:#9a3412; font-weight:900; }
+    .neg { color:#1d4ed8; font-weight:900; }
+    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .note { color:var(--muted); font-weight:700; margin:8px 0 0; }
+    .caption { color:#586174; margin:8px 0 0; font-size:13px; font-weight:700; }
+    .pill { display:inline-flex; align-items:center; border-radius:999px; padding:2px 9px; background:#eef3f8; color:#405063; font-size:12px; font-weight:800; margin-right:6px; }
+    .empty { border:1px dashed var(--line); color:var(--muted); padding:30px; border-radius:8px; text-align:center; }
+    @media (max-width:900px) {
+      main { padding:24px 14px 46px; }
+      .topbar-inner { align-items:flex-start; flex-direction:column; }
+      h1 { font-size:30px; }
+      .kpis,.brief-grid,.two-col { grid-template-columns:1fr; }
+      .fold-block summary { align-items:flex-start; flex-direction:column; }
+      .fold-block summary small { text-align:left; }
+    }
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="./index.html">
+      <span class="brand-mark">BD</span>
+      <span><strong>投顾基础数据</strong><small>当前全量数据展示</small></span>
+    </a>
+    <nav class="nav"><a class="nav-link " href="./index.html">整体数据统计说明</a><a class="nav-link " href="./strategies.html">策略列表</a><a class="nav-link " href="./insights.html">数据洞察</a><a class="nav-link " href="./compare.html">策略对比</a><a class="nav-link " href="./ai-topic-analysis.html">AI主题分析</a><a class="nav-link " href="./topic-analysis.html">主题分析</a><a class="nav-link " href="./target-profit-analysis.html">目标盈分析</a><a class="nav-link " href="./gf-rebalance-monitor.html">调仓监控</a><a class="nav-link is-active" href="./monthly-rebalance-report-202606.html">调仓月报</a><a class="nav-link " href="./qd-fund-report.html">QD专题分析</a><a class="nav-link " href="./advisor-fof-ranking.html">投顾-FOF排名</a><a class="nav-link " href="./ai-strategy.html">Ai选策略</a><a class="nav-link " href="./data-quality.html">数据质量</a></nav>
+  </div>
+</header>
+<main>
+  <header class="title-block">
+    <div class="eyebrow">基金投顾产品月报系列 · 调仓一览</div>
+    <h1>2026年6月基金投顾产品调仓分析</h1>
+    <div class="meta">
+      <span>统计区间：2026-06-01 至 2026-06-30</span>
+      <span>页面生成：2026-07-04 22:53</span>
+      <span>数据刷新：2026年07月03日10:57</span>
+      <span>参考框架：<a href="https://aigc.idigital.com.cn/djyanbao/%E3%80%90%E5%BC%80%E6%BA%90%E8%AF%81%E5%88%B8%E3%80%91%E5%9F%BA%E9%87%91%E6%8A%95%E9%A1%BE%E4%BA%A7%E5%93%81%E6%9C%88%E6%8A%A5%E7%B3%BB%E5%88%97%EF%BC%8816%EF%BC%89%EF%BC%9A%E5%9F%BA%E9%87%91%E6%8A%95%E9%A1%BE%E4%BA%A7%E5%93%813%E6%9C%88%E8%B0%83%E4%BB%93%E4%B8%80%E8%A7%88-2025-04-07.pdf">开源证券基金投顾产品月报</a></span>
+    </div>
+  </header>
+
+  <section class="summary">
+    <h2>本期调仓简报</h2>
+    <div class="brief-grid">
+      <div class="mini-card tone-blue">
+  <div class="mini-title">6月收益中位数</div>
+  <div class="mini-value">+0.14%</div>
+  <div class="mini-track"><i style="width:7.0%"></i></div>
+  <div class="mini-note">全体可比投顾策略</div>
+</div>
+<div class="mini-card tone-olive">
+  <div class="mini-title">正收益策略占比</div>
+  <div class="mini-value">65.84%</div>
+  <div class="mini-track"><i style="width:65.8%"></i></div>
+  <div class="mini-note">收益样本中月度收益为正</div>
+</div>
+<div class="mini-card tone-orange">
+  <div class="mini-title">调仓热度</div>
+  <div class="mini-value">117次</div>
+  <div class="spark-bars"><div class="spark-row">
+  <span>4月</span>
+  <b><i style="width:100.0%"></i></b>
+  <em>160</em>
+</div><div class="spark-row">
+  <span>5月</span>
+  <b><i style="width:73.8%"></i></b>
+  <em>118</em>
+</div><div class="spark-row">
+  <span>6月</span>
+  <b><i style="width:73.1%"></i></b>
+  <em>117</em>
+</div></div>
+  <div class="mini-note">近三个月调仓事件数对比</div>
+</div>
+<div class="mini-card tone-orange">
+  <div class="mini-title">对客调仓策略占比</div>
+  <div class="mini-value">100.00%</div>
+  <div class="mini-track"><i style="width:100.0%"></i></div>
+  <div class="mini-note">本月有调仓策略中的对客样本</div>
+</div>
+    </div>
+    <ul>
+      <li><b>收益：</b>股票型中位数最高（+2.72%），多元配置型相对靠后（-0.48%）。</li>
+<li><b>调仓：</b>本月调仓事件 117 次，涉及策略 105 个；调仓热度与上月基本持平。</li>
+<li><b>方向：</b>债券净增配靠前，A股净减配靠前；行业关注通信，海外关注万家中证工业有色金属主题ETF发起式联接C。</li>
+    </ul>
+    <div class="kpis">
+      <div class="kpi">
+  <div class="kpi-value">682</div>
+  <div class="kpi-label">业绩样本数</div>
+  <div class="kpi-note">纳入常规排名且净值完整</div>
+</div>
+      <div class="kpi">
+  <div class="kpi-value">+0.14%</div>
+  <div class="kpi-label">6月收益中位数</div>
+  <div class="kpi-note">全体可比投顾策略</div>
+</div>
+      <div class="kpi">
+  <div class="kpi-value">117</div>
+  <div class="kpi-label">调仓事件数</div>
+  <div class="kpi-note">剔除测试、信号、停止策略</div>
+</div>
+      <div class="kpi">
+  <div class="kpi-value">105</div>
+  <div class="kpi-label">对客调仓策略</div>
+  <div class="kpi-note">用于业务展示口径观察</div>
+</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>1. 业绩统计：股票和海外风险资产拉开收益差距</h2>
+    <p><b>同类中位数比单个策略排名更能反映本月环境。</b>本节按研报产品类型划分纯债、固收+、股债混合、股票和多元配置，收益采用6月完整月标准费后净值计算。</p>
+    <div class="chart-block"><img class="chart-img" src="./assets/monthly-rebalance-report-202606/type_performance.png" alt="各类投顾产品月收益中位数"></div>
+    <details class="fold-block">
+  <summary><span>展开产品类型收益明细</span><small>含样本数、收益分位数和正收益占比</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>产品类型</th><th>样本数</th><th>对客样本数</th><th>平均收益</th><th>中位收益</th><th>正收益占比</th><th>上四分位</th><th>下四分位</th></tr></thead><tbody><tr class=""><td class="">纯债型</td><td class="num">103</td><td class="num">103</td><td class="num pos">+0.05%</td><td class="num pos">+0.07%</td><td class="num">84.47%</td><td class="num pos">+0.09%</td><td class="num pos">+0.06%</td></tr><tr class=""><td class="">固收+型</td><td class="num">132</td><td class="num">132</td><td class="num neg">-0.21%</td><td class="num pos">+0.06%</td><td class="num">55.30%</td><td class="num pos">+0.44%</td><td class="num neg">-0.46%</td></tr><tr class=""><td class="">股债混合型</td><td class="num">146</td><td class="num">146</td><td class="num pos">+2.69%</td><td class="num pos">+1.94%</td><td class="num">89.04%</td><td class="num pos">+3.77%</td><td class="num pos">+0.47%</td></tr><tr class=""><td class="">股票型</td><td class="num">171</td><td class="num">171</td><td class="num pos">+3.01%</td><td class="num pos">+2.72%</td><td class="num">67.84%</td><td class="num pos">+5.93%</td><td class="num neg">-1.07%</td></tr><tr class=""><td class="">多元配置型</td><td class="num">130</td><td class="num">130</td><td class="num neg">-0.78%</td><td class="num neg">-0.48%</td><td class="num">33.08%</td><td class="num pos">+0.22%</td><td class="num neg">-1.92%</td></tr></tbody></table></div>
+</details>
+    <h3>绩优投顾产品</h3>
+    <p class="note">下表列出6月收益靠前策略；广发相关策略以浅黄色高亮。</p>
+    <details class="fold-block">
+  <summary><span>展开绩优投顾产品列表</span><small>广发相关策略以浅黄色高亮</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>策略名称</th><th>投顾机构</th><th>产品类型</th><th>是否对客</th><th>6月收益</th><th>今年以来</th><th>最大回撤</th></tr></thead><tbody><tr class=""><td class="">中欧带你投AI科技</td><td class="">中欧财富投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+21.84%</td><td class="num pos">+60.72%</td><td class="num">40.67%</td></tr><tr class=""><td class="">中欧带你投硬科技</td><td class="">中欧财富投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+21.84%</td><td class="num pos">+60.73%</td><td class="num">53.37%</td></tr><tr class="gf-row"><td class="">带你投科技</td><td class="">广发基金-广发投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+20.80%</td><td class="num pos">+61.38%</td><td class="num">50.07%</td></tr><tr class=""><td class="">司南科技基金精选</td><td class="">南方基金-司南投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+19.71%</td><td class="num pos">+58.23%</td><td class="num">50.04%</td></tr><tr class=""><td class="">中欧带你投AI科技</td><td class="">中欧财富/中欧钱滚滚</td><td class="">股票型</td><td class="">是</td><td class="num pos">+19.38%</td><td class="num pos">+55.31%</td><td class="num">40.18%</td></tr><tr class=""><td class="">万家非凡新质驱动</td><td class="">万家基金懂你投</td><td class="">股票型</td><td class="">是</td><td class="num pos">+17.96%</td><td class="num pos">+43.04%</td><td class="num">18.03%</td></tr><tr class=""><td class="">富国带你投数字经济</td><td class="">富国基金-富国星投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+17.93%</td><td class="num pos">+34.30%</td><td class="num">41.66%</td></tr><tr class=""><td class="">华泰柏瑞研究精选</td><td class="">华泰柏瑞睿智投</td><td class="">股票型</td><td class="">是</td><td class="num pos">+17.30%</td><td class="num pos">+31.89%</td><td class="num">27.12%</td></tr><tr class=""><td class="">基星高照-精选权益</td><td class="">申万菱信基金-申小顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+17.10%</td><td class="num pos">+40.84%</td><td class="num">30.01%</td></tr><tr class=""><td class="">中证500精选</td><td class="">华宝智选投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+17.06%</td><td class="num pos">+40.01%</td><td class="num">24.17%</td></tr><tr class=""><td class="">中欧带你投中国智造</td><td class="">中欧财富投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+15.42%</td><td class="num pos">+49.30%</td><td class="num">51.70%</td></tr><tr class="gf-row"><td class="">奔跑吧牛基</td><td class="">广发基金投顾</td><td class="">股票型</td><td class="">是</td><td class="num pos">+14.36%</td><td class="num pos">+29.91%</td><td class="num">44.67%</td></tr><tr class="gf-row"><td class="">广发积极养老</td><td class="">广发基金投顾</td><td class="">股债混合型</td><td class="">是</td><td class="num pos">+14.12%</td><td class="num neg">-11.87%</td><td class="num">24.19%</td></tr><tr class=""><td class="">东财扬帆远航</td><td class="">东方财富证券-东方财富证券投顾</td><td class="">股债混合型</td><td class="">是</td><td class="num pos">+14.00%</td><td class="num pos">+24.33%</td><td class="num">37.23%</td></tr><tr class="gf-row"><td class="">奔跑吧牛基</td><td class="">广发基金-广发投顾</td><td class="">股债混合型</td><td class="">是</td><td class="num pos">+13.87%</td><td class="num pos">+28.82%</td><td class="num">46.91%</td></tr></tbody></table></div>
+</details>
+    <div class="chart-block"><img class="chart-img" src="./assets/monthly-rebalance-report-202606/index_return.png" alt="市场指数月度表现参考"></div>
+    <details class="fold-block">
+  <summary><span>展开市场参考指数明细</span><small>用于辅助理解月度市场环境</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>市场参考</th><th>6月收益</th><th>统计至</th></tr></thead><tbody><tr class=""><td class="">沪深300</td><td class="num pos">+1.78%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">中证500</td><td class="num pos">+8.04%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">中证1000</td><td class="num pos">+4.77%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">偏股基金指数</td><td class="num pos">+8.06%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">中证全债</td><td class="num pos">+0.16%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">中证短债</td><td class="num pos">+0.11%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">恒生指数</td><td class="num neg">-9.14%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">纳斯达克100</td><td class="num neg">-2.81%</td><td class="">2026-06-30</td></tr><tr class=""><td class="">上海黄金</td><td class="num neg">-10.75%</td><td class="">2026-06-30</td></tr></tbody></table></div>
+</details>
+  </section>
+
+  <section>
+    <h2>2. 调仓行为概览：6月调仓热度与5月基本持平</h2>
+    <p><b>6月调仓事件数维持在5月附近，说明调仓热度没有明显扩散；仍需结合产品类型和底层基金方向看结构变化。</b>调仓事件数、调仓策略数和对客策略数同时观察，可以区分“全市场动作”和“可被客户看到的动作”。</p>
+    <details class="fold-block">
+  <summary><span>展开近三个月调仓热度明细</span><small>调仓事件数、策略数和平均单次换手</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>月份</th><th>调仓事件数</th><th>调仓策略数</th><th>对客策略数</th><th>平均单次换手</th></tr></thead><tbody><tr class=""><td class="">2026-04</td><td class="num">160</td><td class="num">156</td><td class="num">156</td><td class="num">35.04%</td></tr><tr class=""><td class="">2026-05</td><td class="num">118</td><td class="num">112</td><td class="num">112</td><td class="num">48.16%</td></tr><tr class=""><td class="">2026-06</td><td class="num">117</td><td class="num">105</td><td class="num">105</td><td class="num">36.17%</td></tr></tbody></table></div>
+</details>
+    <div class="chart-block"><img class="chart-img" src="./assets/monthly-rebalance-report-202606/event_type.png" alt="各类投顾产品调仓事件数"></div>
+    <details class="fold-block">
+  <summary><span>展开各类型调仓明细</span><small>按研报产品类型汇总</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>产品类型</th><th>调仓事件数</th><th>调仓策略数</th><th>对客策略数</th><th>平均单次换手</th></tr></thead><tbody><tr class=""><td class="">纯债型</td><td class="num">5</td><td class="num">5</td><td class="num">5</td><td class="num">54.22%</td></tr><tr class=""><td class="">固收+型</td><td class="num">24</td><td class="num">21</td><td class="num">21</td><td class="num">32.49%</td></tr><tr class=""><td class="">股债混合型</td><td class="num">29</td><td class="num">27</td><td class="num">27</td><td class="num">43.04%</td></tr><tr class=""><td class="">股票型</td><td class="num">30</td><td class="num">28</td><td class="num">28</td><td class="num">36.80%</td></tr><tr class=""><td class="">多元配置型</td><td class="num">29</td><td class="num">24</td><td class="num">24</td><td class="num">28.60%</td></tr></tbody></table></div>
+</details>
+    <h3>调仓理由线索</h3>
+    <details class="fold-block">
+  <summary><span>展开调仓理由线索明细</span><small>按关键词出现次数汇总</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>调仓理由线索</th><th>出现次数</th></tr></thead><tbody><tr class=""><td class="">风险控制</td><td class="num">65</td></tr><tr class=""><td class="">科技成长</td><td class="num">47</td></tr><tr class=""><td class="">权益机会</td><td class="num">44</td></tr><tr class=""><td class="">海外配置</td><td class="num">32</td></tr><tr class=""><td class="">债券收益</td><td class="num">17</td></tr><tr class=""><td class="">商品黄金</td><td class="num">12</td></tr><tr class=""><td class="">流动性</td><td class="num">11</td></tr></tbody></table></div>
+</details>
+  </section>
+
+  <section>
+    <h2>2.1 股债配置：本月是资产内部切换，而非统一加仓</h2>
+    <p><b>资产大类看，净增配和净减配同时存在。</b>图中正值代表调仓后配置点位净增加，负值代表净减少；该口径适合观察“调仓方向”，不等同于全市场存量仓位。</p>
+    <div class="chart-block"><img class="chart-img" src="./assets/monthly-rebalance-report-202606/asset_flow.png" alt="资产大类净增配方向"></div>
+    <details class="fold-block">
+  <summary><span>展开资产大类净增减配明细</span><small>正值为净增配，负值为净减配</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>资产大类</th><th>净增配</th><th>加仓点位</th><th>减仓点位</th><th>策略数</th><th>对客策略数</th></tr></thead><tbody><tr class=""><td class="">债券</td><td class="num pos">+115.59%</td><td class="num">452.77%</td><td class="num">337.17%</td><td class="num">103</td><td class="num">103</td></tr><tr class=""><td class="">A股</td><td class="num neg">-106.33%</td><td class="num">953.99%</td><td class="num">1060.33%</td><td class="num">101</td><td class="num">101</td></tr><tr class=""><td class="">短债</td><td class="num pos">+64.46%</td><td class="num">182.77%</td><td class="num">118.31%</td><td class="num">43</td><td class="num">43</td></tr><tr class=""><td class="">港股</td><td class="num neg">-53.03%</td><td class="num">47.05%</td><td class="num">100.08%</td><td class="num">54</td><td class="num">54</td></tr><tr class=""><td class="">信用债</td><td class="num pos">+50.35%</td><td class="num">50.64%</td><td class="num">0.29%</td><td class="num">26</td><td class="num">26</td></tr><tr class=""><td class="">黄金</td><td class="num neg">-34.48%</td><td class="num">13.16%</td><td class="num">47.64%</td><td class="num">53</td><td class="num">53</td></tr><tr class=""><td class="">海外债券</td><td class="num neg">-32.06%</td><td class="num">6.86%</td><td class="num">38.92%</td><td class="num">16</td><td class="num">16</td></tr><tr class=""><td class="">商品</td><td class="num pos">+31.46%</td><td class="num">42.73%</td><td class="num">11.27%</td><td class="num">25</td><td class="num">25</td></tr><tr class=""><td class="">可转债</td><td class="num neg">-19.44%</td><td class="num">0.00%</td><td class="num">19.44%</td><td class="num">5</td><td class="num">5</td></tr><tr class=""><td class="">货币及现金</td><td class="num neg">-17.08%</td><td class="num">273.41%</td><td class="num">290.48%</td><td class="num">105</td><td class="num">105</td></tr><tr class=""><td class="">海外权益</td><td class="num neg">-5.85%</td><td class="num">53.14%</td><td class="num">58.99%</td><td class="num">27</td><td class="num">27</td></tr><tr class=""><td class="">政策性金融债</td><td class="num pos">+5.49%</td><td class="num">16.44%</td><td class="num">10.95%</td><td class="num">8</td><td class="num">8</td></tr><tr class=""><td class="">美股</td><td class="num pos">+2.81%</td><td class="num">19.21%</td><td class="num">16.40%</td><td class="num">15</td><td class="num">15</td></tr><tr class=""><td class="">存托凭证</td><td class="num neg">-2.67%</td><td class="num">3.23%</td><td class="num">5.90%</td><td class="num">25</td><td class="num">25</td></tr><tr class=""><td class="">新兴市场</td><td class="num pos">+0.79%</td><td class="num">0.79%</td><td class="num">0.00%</td><td class="num">6</td><td class="num">6</td></tr></tbody></table></div>
+</details>
+    <p><b>月内节奏上，上半月和下半月的配置方向不同。</b>拆分月初和月末后，可以看出部分资产在月末出现再平衡或反向切换。</p>
+    <div class="chart-block"><img class="chart-img" src="./assets/monthly-rebalance-report-202606/asset_split.png" alt="月初与月末资产切换"></div>
+  </section>
+
+  <section>
+    <h2>2.2 行业与风格配置：科技制造仍是核心观察线索</h2>
+    <p><b>行业信号用于看底层基金配置倾向，而不是直接等同于策略观点。</b>权益基金的行业暴露来自基金穿透后的行业口径，混合基金按权益资产占比折算。</p>
+    <div class="chart-block"><img class="chart-img" src="./assets/monthly-rebalance-report-202606/industry_flow.png" alt="A股行业净增配方向"></div>
+    <details class="fold-block">
+  <summary><span>展开行业净增减配明细</span><small>按基金穿透行业口径汇总</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>行业</th><th>净增配</th><th>加仓点位</th><th>减仓点位</th><th>策略数</th></tr></thead><tbody><tr class=""><td class="">通信</td><td class="num pos">+48.49%</td><td class="num">160.19%</td><td class="num">111.69%</td><td class="num">89</td></tr><tr class=""><td class="">医药生物</td><td class="num neg">-38.26%</td><td class="num">17.67%</td><td class="num">55.93%</td><td class="num">92</td></tr><tr class=""><td class="">电子</td><td class="num pos">+34.08%</td><td class="num">194.57%</td><td class="num">160.49%</td><td class="num">93</td></tr><tr class=""><td class="">汽车</td><td class="num neg">-33.46%</td><td class="num">20.61%</td><td class="num">54.07%</td><td class="num">88</td></tr><tr class=""><td class="">电力设备</td><td class="num neg">-31.41%</td><td class="num">78.40%</td><td class="num">109.81%</td><td class="num">92</td></tr><tr class=""><td class="">交通运输</td><td class="num pos">+22.65%</td><td class="num">39.62%</td><td class="num">16.97%</td><td class="num">84</td></tr><tr class=""><td class="">非银金融</td><td class="num neg">-21.15%</td><td class="num">13.05%</td><td class="num">34.20%</td><td class="num">84</td></tr><tr class=""><td class="">国防军工</td><td class="num neg">-16.10%</td><td class="num">10.70%</td><td class="num">26.80%</td><td class="num">78</td></tr><tr class=""><td class="">建筑材料</td><td class="num pos">+15.13%</td><td class="num">20.02%</td><td class="num">4.88%</td><td class="num">63</td></tr><tr class=""><td class="">计算机</td><td class="num neg">-13.85%</td><td class="num">6.80%</td><td class="num">20.65%</td><td class="num">68</td></tr><tr class=""><td class="">家用电器</td><td class="num neg">-9.46%</td><td class="num">10.78%</td><td class="num">20.23%</td><td class="num">79</td></tr><tr class=""><td class="">房地产</td><td class="num neg">-8.98%</td><td class="num">2.07%</td><td class="num">11.05%</td><td class="num">35</td></tr><tr class=""><td class="">有色金属</td><td class="num neg">-7.36%</td><td class="num">62.76%</td><td class="num">70.12%</td><td class="num">93</td></tr><tr class=""><td class="">社会服务</td><td class="num neg">-6.49%</td><td class="num">0.29%</td><td class="num">6.79%</td><td class="num">23</td></tr><tr class=""><td class="">轻工制造</td><td class="num neg">-6.30%</td><td class="num">5.23%</td><td class="num">11.54%</td><td class="num">47</td></tr><tr class=""><td class="">油气开采Ⅱ</td><td class="num neg">-5.83%</td><td class="num">6.48%</td><td class="num">12.31%</td><td class="num">62</td></tr><tr class=""><td class="">基础化工</td><td class="num neg">-4.59%</td><td class="num">41.88%</td><td class="num">46.47%</td><td class="num">87</td></tr><tr class=""><td class="">食品饮料</td><td class="num pos">+3.98%</td><td class="num">29.79%</td><td class="num">25.81%</td><td class="num">85</td></tr></tbody></table></div>
+</details>
+  </section>
+
+  <section>
+    <h2>2.3 QDII、商品与基金异动：海外与商品方向需要逐只核验额度和可买性</h2>
+    <p><b>海外、QDII和商品基金的调仓信号更容易受申购额度、暂停申购和跨市场交易日影响。</b>本节展示对客及广发展示样本中的净增减配基金，后续落地配置时仍需结合基金限额页核验。</p>
+    <div class="chart-block"><img class="chart-img" src="./assets/monthly-rebalance-report-202606/qdii_flow.png" alt="海外、QDII与商品基金异动"></div>
+    <details class="fold-block">
+  <summary><span>展开海外、QDII与商品基金明细</span><small>按底层基金净增减配排序</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>基金名称</th><th>基金公司</th><th>基金类型</th><th>资产方向</th><th>净增配</th><th>调仓策略数</th></tr></thead><tbody><tr class=""><td class="">万家中证工业有色金属主题ETF发起式联接C</td><td class="">万家基金</td><td class="">股票型基金</td><td class="">商品</td><td class="num pos">+23.00%</td><td class="num">2</td></tr><tr class=""><td class="">天弘中证中美互联网(QDII)A</td><td class="">天弘基金</td><td class="">股票型基金</td><td class="">海外权益</td><td class="num neg">-22.95%</td><td class="num">2</td></tr><tr class=""><td class="">天弘全球新能源汽车股票(QDII-LOF)C</td><td class="">天弘基金</td><td class="">QDII基金</td><td class="">海外权益</td><td class="num pos">+16.00%</td><td class="num">1</td></tr><tr class=""><td class="">易方达全球优质企业混合(QDII)A</td><td class="">易方达基金</td><td class="">混合型基金</td><td class="">海外权益</td><td class="num pos">+16.00%</td><td class="num">1</td></tr><tr class=""><td class="">富国全球债券(QDII)A</td><td class="">富国基金</td><td class="">QDII基金</td><td class="">海外债券</td><td class="num neg">-15.33%</td><td class="num">1</td></tr><tr class=""><td class="">华夏全球科技先锋混合(QDII)A(人民币)</td><td class="">华夏基金</td><td class="">QDII基金</td><td class="">海外权益</td><td class="num pos">+12.83%</td><td class="num">2</td></tr><tr class=""><td class="">长信标普100等权重指数人民币</td><td class="">长信基金</td><td class="">QDII基金</td><td class="">美股</td><td class="num pos">+12.00%</td><td class="num">2</td></tr><tr class="gf-row"><td class="">广发全球稳健配置混合(QDII)人民币A</td><td class="">广发基金</td><td class="">QDII基金</td><td class="">海外债券</td><td class="num pos">+10.33%</td><td class="num">1</td></tr><tr class=""><td class="">华夏有色金属ETF联接C</td><td class="">华夏基金</td><td class="">股票型基金</td><td class="">商品</td><td class="num pos">+10.00%</td><td class="num">1</td></tr><tr class=""><td class="">嘉实恒生消费ETF发起联接(QDII)C</td><td class="">嘉实基金</td><td class="">QDII基金</td><td class="">港股</td><td class="num pos">+10.00%</td><td class="num">1</td></tr><tr class=""><td class="">易方达港股通科技混合A</td><td class="">易方达基金</td><td class="">QDII基金</td><td class="">港股</td><td class="num pos">+10.00%</td><td class="num">1</td></tr><tr class=""><td class="">华夏港股通央企红利ETF联接C</td><td class="">华夏基金</td><td class="">QDII基金</td><td class="">港股</td><td class="num neg">-9.59%</td><td class="num">1</td></tr><tr class=""><td class="">汇添富港股红利ETF联接A</td><td class="">汇添富基金</td><td class="">QDII基金</td><td class="">港股</td><td class="num neg">-9.26%</td><td class="num">1</td></tr><tr class=""><td class="">华夏沪港通恒生ETF联接C</td><td class="">华夏基金</td><td class="">QDII基金</td><td class="">港股</td><td class="num neg">-8.84%</td><td class="num">2</td></tr><tr class=""><td class="">汇添富恒生科技ETF联接发起式(QDII)A</td><td class="">汇添富基金</td><td class="">QDII基金</td><td class="">港股</td><td class="num neg">-7.96%</td><td class="num">1</td></tr><tr class=""><td class="">鹏华国证有色金属行业ETF发起式联接C</td><td class="">鹏华基金</td><td class="">股票型基金</td><td class="">商品</td><td class="num neg">-7.89%</td><td class="num">1</td></tr></tbody></table></div>
+</details>
+    <h3>本月底层基金净增减配榜</h3>
+    <details class="fold-block">
+  <summary><span>展开底层基金净增减配榜</span><small>展示本月底层基金主要异动</small></summary>
+  <div class="table-wrap"><table><thead><tr><th>基金名称</th><th>基金公司</th><th>资产方向</th><th>A股行业</th><th>净增配</th><th>调仓策略数</th></tr></thead><tbody><tr class=""><td class="">淳厚信睿A</td><td class="">淳厚基金</td><td class="">A股</td><td class="">通信</td><td class="num neg">-47.03%</td><td class="num">4</td></tr><tr class="gf-row"><td class="">广发均衡成长混合C</td><td class="">广发基金</td><td class="">A股</td><td class="">通信</td><td class="num neg">-43.42%</td><td class="num">7</td></tr><tr class=""><td class="">大成科技创新混合C</td><td class="">大成基金</td><td class="">A股</td><td class="">通信</td><td class="num pos">+43.00%</td><td class="num">6</td></tr><tr class=""><td class="">易方达机器人ETF联接C</td><td class="">易方达基金</td><td class="">A股</td><td class="">--</td><td class="num neg">-37.54%</td><td class="num">3</td></tr><tr class=""><td class="">西部利得新动向混合C</td><td class="">西部利得基金</td><td class="">A股</td><td class="">通信</td><td class="num pos">+34.00%</td><td class="num">5</td></tr><tr class=""><td class="">嘉合磐泰短债A</td><td class="">嘉合基金</td><td class="">短债</td><td class="">--</td><td class="num neg">-31.38%</td><td class="num">4</td></tr><tr class=""><td class="">易方达红利混合A</td><td class="">易方达基金</td><td class="">A股</td><td class="">银行</td><td class="num pos">+30.00%</td><td class="num">3</td></tr><tr class=""><td class="">易方达核心智造混合</td><td class="">易方达基金</td><td class="">A股</td><td class="">交通运输</td><td class="num pos">+25.32%</td><td class="num">4</td></tr><tr class=""><td class="">富国创新企业灵活配置混合(LOF)C</td><td class="">富国基金</td><td class="">货币及现金</td><td class="">通信</td><td class="num neg">-24.22%</td><td class="num">3</td></tr><tr class=""><td class="">南方消费升级混合C</td><td class="">南方基金</td><td class="">A股</td><td class="">汽车</td><td class="num neg">-24.13%</td><td class="num">3</td></tr><tr class=""><td class="">华夏鼎泓债券C</td><td class="">华夏基金</td><td class="">债券</td><td class="">有色金属</td><td class="num pos">+24.00%</td><td class="num">3</td></tr><tr class=""><td class="">华夏永康添福混合C</td><td class="">华夏基金</td><td class="">债券</td><td class="">电子</td><td class="num pos">+24.00%</td><td class="num">2</td></tr><tr class=""><td class="">万家中证工业有色金属主题ETF发起式联接C</td><td class="">万家基金</td><td class="">商品</td><td class="">--</td><td class="num pos">+23.00%</td><td class="num">2</td></tr><tr class=""><td class="">天弘中证中美互联网(QDII)A</td><td class="">天弘基金</td><td class="">海外权益</td><td class="">非日常生活消费品</td><td class="num neg">-22.95%</td><td class="num">2</td></tr><tr class=""><td class="">财通资管数字经济混合发起式C</td><td class="">财通资管</td><td class="">A股</td><td class="">电子</td><td class="num neg">-22.26%</td><td class="num">2</td></tr><tr class=""><td class="">诺安创业板指数增强(LOF)C</td><td class="">诺安基金</td><td class="">A股</td><td class="">通信</td><td class="num pos">+20.45%</td><td class="num">3</td></tr><tr class=""><td class="">国泰海通创新成长混合发起A</td><td class="">国泰海通资管</td><td class="">A股</td><td class="">电子</td><td class="num pos">+20.00%</td><td class="num">2</td></tr><tr class=""><td class="">海富通电子传媒股票A</td><td class="">海富通基金</td><td class="">A股</td><td class="">通信</td><td class="num pos">+20.00%</td><td class="num">2</td></tr><tr class=""><td class="">中欧价值智选混合C</td><td class="">中欧基金</td><td class="">A股</td><td class="">电力设备</td><td class="num neg">-19.40%</td><td class="num">4</td></tr><tr class=""><td class="">华商新趋势优选混合</td><td class="">华商基金</td><td class="">A股</td><td class="">有色金属</td><td class="num neg">-19.13%</td><td class="num">2</td></tr></tbody></table></div>
+</details>
+  </section>
+
+  <section>
+    <h2>后续关注</h2>
+    <ul>
+      <li><b>对客策略优先：</b>优先跟踪本月有调仓、且当前仍对客展示的策略，避免把已结束或非展示组合误读为货架信号。</li>
+      <li><b>行业信号看持续性：</b>6月行业净增配需要结合7月调仓和基金净值表现复核，确认是单次再平衡还是连续配置方向。</li>
+      <li><b>QDII产品看可买性：</b>海外和商品基金若进入配置备选，应同步核验申购状态、个人/非个人单日限额和最新公告。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>风险提示与口径说明</h2>
+    <ul>
+      <li>业绩统计为历史收益，不代表未来表现；同类比较只用于观察，不构成投资建议。</li>
+      <li>调仓分析基于披露调仓事件和底层基金穿透分类；基金最新季报未披露前，行业和资产暴露可能滞后。</li>
+      <li>“对客”按当前展示状态识别；若渠道后续上下架，样本范围会随数据刷新变化。</li>
+      <li>参考研报仅用于章节框架和阅读顺序，本报告的数字和结论均来自本地全市场投顾策略库。</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

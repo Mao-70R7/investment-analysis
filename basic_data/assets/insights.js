@@ -3,14 +3,25 @@
   const summary = B.state.summary || {};
   const insight = { ...(summary.insightData || {}) };
   const insightLazyMeta = insight.__lazyPack || {};
-  let insightLazyLoadPromise = null;
-  function mergeInsightLazyPack(pack) {
+  const insightLazyPromises = new Map();
+  const loadedInsightSections = new Set();
+  function mergeInsightLazyPack(pack, section = "all") {
     const data = pack?.insightData || pack || {};
     Object.assign(insight, data);
+    if (section) loadedInsightSections.add(section);
+    if (pack?.section) loadedInsightSections.add(pack.section);
     insight.__lazyLoaded = true;
   }
   if (window.__BASIC_INSIGHT_DATA_PACK__) mergeInsightLazyPack(window.__BASIC_INSIGHT_DATA_PACK__);
-  function insightLazyLoaded() {
+  if (window.__BASIC_INSIGHT_HOLDING_PACK__) mergeInsightLazyPack(window.__BASIC_INSIGHT_HOLDING_PACK__, "holding");
+  if (window.__BASIC_INSIGHT_REBALANCE_PACK__) mergeInsightLazyPack(window.__BASIC_INSIGHT_REBALANCE_PACK__, "rebalance");
+  function insightFieldsLoaded(fields) {
+    return (fields || []).every((field) => Object.prototype.hasOwnProperty.call(insight, field));
+  }
+  function insightLazyLoaded(section = "all") {
+    const scopedMeta = section !== "all" ? insightLazyMeta.packs?.[section] : null;
+    const fields = scopedMeta?.fields || (section === "all" ? insightLazyMeta.fields : []);
+    if (fields?.length) return insightFieldsLoaded(fields);
     return Boolean(
       insight.__lazyLoaded ||
       window.__BASIC_INSIGHT_DATA_PACK__ ||
@@ -18,22 +29,179 @@
       Array.isArray(insight.策略资产变化明细)
     );
   }
-  function ensureInsightLazyPack() {
-    if (insightLazyLoaded()) return true;
-    const src = insightLazyMeta.externalScript || "./data/insight_data_pack.js";
+  function insightPackFromGlobal(name) {
+    return name ? window[name] : null;
+  }
+  function ensureInsightLazyPack(section = "all") {
+    if (insightLazyLoaded(section)) return true;
+    const scopedMeta = section !== "all" ? insightLazyMeta.packs?.[section] : null;
+    const src = scopedMeta?.externalScript || insightLazyMeta.externalScript || "./data/insight_data_pack.js";
+    const globalName = scopedMeta?.global || "__BASIC_INSIGHT_DATA_PACK__";
     if (!src || !B.loadScript) return false;
-    if (!insightLazyLoadPromise) {
-      insightLazyLoadPromise = B.loadScript(src)
+    if (!insightLazyPromises.has(section)) {
+      insightLazyPromises.set(section, B.loadScript(src)
         .then(() => {
-          mergeInsightLazyPack(window.__BASIC_INSIGHT_DATA_PACK__);
-          render();
+          mergeInsightLazyPack(insightPackFromGlobal(globalName) || window.__BASIC_INSIGHT_DATA_PACK__, section);
+          scheduleRender();
         })
         .catch((error) => {
           window.__BASIC_INSIGHT_DATA_PACK_ERROR__ = error?.message || String(error);
-          render();
+          scheduleRender();
+        }));
+    }
+    return false;
+  }
+
+  let rebalanceInsightMonthManifestPromise = null;
+  const rebalanceInsightMonthPromises = new Map();
+  const rebalanceInsightRowsCache = new Map();
+  const rebalanceInsightRangeRenderKeys = new Set();
+  let rebalanceInsightLastShardLoadAt = 0;
+  let rebalanceInsightDeferredRenderTimer = null;
+  function rebalanceInsightMonthMeta() {
+    return insightLazyMeta.packs?.rebalance?.monthShards || {};
+  }
+  function loadedRebalanceInsightMonthManifest() {
+    return window.__BASIC_INSIGHT_REBALANCE_MONTH_MANIFEST__ || null;
+  }
+  function rebalanceInsightMonthPacks() {
+    return window.__BASIC_INSIGHT_REBALANCE_MONTH_PACKS__ || {};
+  }
+  let rebalanceBackgroundSuppressUntil = Date.now() + 10000;
+  function markRebalanceInteraction() {
+    rebalanceBackgroundSuppressUntil = Date.now() + 4500;
+    if (rebalanceInsightDeferredRenderTimer) {
+      clearTimeout(rebalanceInsightDeferredRenderTimer);
+      rebalanceInsightDeferredRenderTimer = null;
+    }
+    if (typeof rebalanceFundCategoryDeferredRenderTimer !== "undefined" && rebalanceFundCategoryDeferredRenderTimer) {
+      clearTimeout(rebalanceFundCategoryDeferredRenderTimer);
+      rebalanceFundCategoryDeferredRenderTimer = null;
+    }
+  }
+  function rebalanceBackgroundSuppressed() {
+    return Date.now() < rebalanceBackgroundSuppressUntil;
+  }
+  function isLoadedRebalanceInsightMonthField(monthPack, field) {
+    const value = monthPack?.[field];
+    return Array.isArray(value) || (value && Array.isArray(value.fields) && Array.isArray(value.rows));
+  }
+  function decodeRebalanceInsightMonthField(monthPack, field) {
+    const value = monthPack?.[field];
+    if (Array.isArray(value)) return value;
+    if (!value || !Array.isArray(value.fields) || !Array.isArray(value.rows)) return [];
+    const fields = value.fields || [];
+    const rows = value.rows.map((row) => {
+      const item = {};
+      fields.forEach((name, index) => {
+        item[name] = row[index];
+      });
+      return item;
+    });
+    monthPack[field] = rows;
+    return rows;
+  }
+  function ensureRebalanceInsightMonthManifest() {
+    if (loadedRebalanceInsightMonthManifest()) return true;
+    const meta = rebalanceInsightMonthMeta();
+    const src = meta.manifestScript || "./data/insight_rebalance_month_manifest.js";
+    if (!src || !B.loadScript) return false;
+    if (!rebalanceInsightMonthManifestPromise) {
+      rebalanceInsightMonthManifestPromise = B.loadScript(src)
+        .then(() => {
+          if (!loadedRebalanceInsightMonthManifest()) throw new Error("调仓月份分片索引未返回数据");
+          rebalanceInsightRowsCache.clear();
+          scheduleRender();
+        })
+        .catch((error) => {
+          window.__BASIC_INSIGHT_REBALANCE_MONTH_ERROR__ = error?.message || String(error);
+          scheduleRender();
         });
     }
     return false;
+  }
+  function ensureRebalanceInsightRowsForCurrentRange() {
+    if (Array.isArray(insight.策略资产变化明细) && Array.isArray(insight.调仓基金月度汇总)) return true;
+    if (!loadedRebalanceInsightMonthManifest()) {
+      ensureRebalanceInsightMonthManifest();
+      return false;
+    }
+    const manifest = loadedRebalanceInsightMonthManifest();
+    const monthPacks = rebalanceInsightMonthPacks();
+    const wanted = neededRebalanceFundMonths();
+    const byMonth = new Map((manifest.months || []).map((item) => [item.month, item]));
+    const missing = wanted.filter((month) => !monthPacks[month] && byMonth.has(month));
+    const loadedSome = wanted.some((month) => monthPacks[month]);
+    if (missing.length && loadedSome && (rebalanceBackgroundSuppressed() || Date.now() - rebalanceInsightLastShardLoadAt < 1400)) {
+      if (!rebalanceInsightDeferredRenderTimer) {
+        const delayMs = Math.max(1400, rebalanceBackgroundSuppressUntil - Date.now());
+        rebalanceInsightDeferredRenderTimer = setTimeout(() => {
+          rebalanceInsightDeferredRenderTimer = null;
+          if (rebalanceBackgroundSuppressed()) return;
+          scheduleRender();
+        }, delayMs);
+      }
+      return false;
+    }
+    const monthsToLoad = [...missing].sort((a, b) => b.localeCompare(a)).slice(0, 1);
+    const pending = [];
+    for (const month of monthsToLoad) {
+      if (rebalanceInsightMonthPromises.has(month)) {
+        pending.push(rebalanceInsightMonthPromises.get(month));
+        continue;
+      }
+      const src = byMonth.get(month)?.externalScript;
+      if (!src || !B.loadScript) continue;
+      const promise = B.loadScript(src)
+        .catch((error) => {
+          window.__BASIC_INSIGHT_REBALANCE_MONTH_ERROR__ = error?.message || String(error);
+        });
+      rebalanceInsightMonthPromises.set(month, promise);
+      pending.push(promise);
+    }
+    if (pending.length) {
+      const renderKey = wanted.join("|");
+      if (!rebalanceInsightRangeRenderKeys.has(renderKey)) {
+        rebalanceInsightRangeRenderKeys.add(renderKey);
+        Promise.allSettled(pending).then(() => {
+          rebalanceInsightRowsCache.clear();
+          rebalanceInsightLastShardLoadAt = Date.now();
+          rebalanceInsightRangeRenderKeys.delete(renderKey);
+          scheduleRender();
+        });
+      }
+    }
+    return missing.length === 0;
+  }
+  function rebalanceInsightRows(field) {
+    if (Array.isArray(insight[field])) return insight[field];
+    ensureRebalanceInsightRowsForCurrentRange();
+    const monthPacks = rebalanceInsightMonthPacks();
+    const wanted = neededRebalanceFundMonths();
+    const loadedMonths = wanted.filter((month) => isLoadedRebalanceInsightMonthField(monthPacks[month], field));
+    if (!loadedMonths.length) return [];
+    const cacheKey = `${field}|${loadedMonths.join("|")}`;
+    if (rebalanceInsightRowsCache.has(cacheKey)) return rebalanceInsightRowsCache.get(cacheKey);
+    const rows = [];
+    for (const month of loadedMonths) rows.push(...decodeRebalanceInsightMonthField(monthPacks[month], field));
+    rebalanceInsightRowsCache.set(cacheKey, rows);
+    return rows;
+  }
+  function rebalanceInsightShardLoadNote() {
+    if (Array.isArray(insight.策略资产变化明细) && Array.isArray(insight.调仓基金月度汇总)) return "";
+    const wanted = neededRebalanceFundMonths();
+    if (!wanted.length) return "";
+    const manifest = loadedRebalanceInsightMonthManifest();
+    if (!manifest) {
+      const error = window.__BASIC_INSIGHT_REBALANCE_MONTH_ERROR__;
+      return `<div class="source-method"><strong>性能优化</strong> ${error ? `调仓月份分片索引加载失败：${B.esc(error)}` : "调仓核心明细正在加载月份索引，页面先展示策略级事件和已加载摘要，筛选控件可继续操作。"}</div>`;
+    }
+    const monthPacks = rebalanceInsightMonthPacks();
+    const loadedCount = wanted.filter((month) => monthPacks[month]).length;
+    if (loadedCount < wanted.length) {
+      return `<div class="source-method"><strong>性能优化</strong> 策略级资产变化和基金月度汇总按当前窗口分片加载：已加载 ${countText(loadedCount)} / ${countText(wanted.length)} 个月份。</div>`;
+    }
+    return "";
   }
   function insightLazyLoadingPanel(label) {
     const error = window.__BASIC_INSIGHT_DATA_PACK_ERROR__;
@@ -52,9 +220,9 @@
   const riskOrderMap = new Map(riskOrder.map((risk, index) => [risk, index]));
   const dateRanges = [
     { key: "1w", label: "近1周", metric: "近一周", days: 7, monthCount: 1 },
-    { key: "1m", label: "近1月", metric: "近一月", days: 31 },
-    { key: "3m", label: "近3月", metric: "近三月", days: 92 },
-    { key: "1y", label: "近1年", metric: "近1年", days: 365 },
+    { key: "1m", label: "近1月", metric: "近一月", days: 31, monthCount: 1 },
+    { key: "3m", label: "近3月", metric: "近三月", days: 92, monthCount: 3 },
+    { key: "1y", label: "近1年", metric: "近1年", days: 365, monthCount: 12 },
     { key: "ytd", label: "今年以来", metric: "今年以来", ytd: true },
     { key: "all", label: "成立以来", metric: "累计收益率" }
   ];
@@ -1153,7 +1321,7 @@
   }
 
   function filteredMonthlyFundRows() {
-    return rangeFiltered((insight.调仓基金月度汇总 || []).filter(dimensionMatch), "月份", true);
+    return rangeFiltered(rebalanceInsightRows("调仓基金月度汇总").filter(dimensionMatch), "月份", true);
   }
 
   function rollupMonthlyFunds(rows, onlyGf = false) {
@@ -1417,7 +1585,7 @@
   }
 
   function filteredStrategyAssetChangeRows(applyReportType = true) {
-    const rows = (insight.策略资产变化明细 || [])
+    const rows = rebalanceInsightRows("策略资产变化明细")
       .filter(dimensionMatch)
       .filter((row) => !applyReportType || reportTypeMatch(row));
     return rebalanceRangeRows(rows, "调仓日期");
@@ -1717,11 +1885,11 @@
         .then((pack) => {
           window.__BASIC_HOLDING_SNAPSHOT_PACK__ = pack;
           holdingSnapshotRowsCache = null;
-          render();
+          scheduleRender();
         })
         .catch((error) => {
           window.__BASIC_HOLDING_SNAPSHOT_ERROR__ = error?.message || String(error);
-          render();
+          scheduleRender();
         });
     }
     return false;
@@ -1781,14 +1949,71 @@
   }
 
   let rebalanceFundCategoryRowsCache = null;
+  let rebalanceFundCategoryRowsCacheKey = "";
   let rebalanceFundCategoryPackPromise = null;
+  let rebalanceFundCategoryManifestPromise = null;
+  const rebalanceFundCategoryMonthPromises = new Map();
+  const rebalanceFundCategoryRangeRenderKeys = new Set();
+  let rebalanceFundCategoryLastShardLoadAt = 0;
+  let rebalanceFundCategoryDeferredRenderTimer = null;
   function loadedRebalanceFundCategoryPack() {
     const inlinePack = insight.调仓基金分类明细;
     if (inlinePack && Array.isArray(inlinePack.rows) && inlinePack.dict) return inlinePack;
     return window.__BASIC_REBALANCE_FUND_CATEGORY_PACK__ || null;
   }
 
+  function loadedRebalanceFundCategoryManifest() {
+    return window.__BASIC_REBALANCE_FUND_CATEGORY_MANIFEST__ || null;
+  }
+
+  function ensureRebalanceFundCategoryManifest() {
+    if (loadedRebalanceFundCategoryManifest()) return true;
+    const meta = insight.调仓基金分类明细 || {};
+    const src = meta.manifestScript || "./data/rebalance_fund_category_manifest.js";
+    if (!src || !B.loadScript) return false;
+    if (!rebalanceFundCategoryManifestPromise) {
+      rebalanceFundCategoryManifestPromise = B.loadScript(src)
+        .then(() => {
+          if (!loadedRebalanceFundCategoryManifest()) throw new Error("调仓基金分片索引未返回数据");
+          rebalanceFundCategoryRowsCache = null;
+          scheduleRender();
+        })
+        .catch((error) => {
+          window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__ = error?.message || String(error);
+          scheduleRender();
+        });
+    }
+    return false;
+  }
+
+  function rebalanceFundCategoryMonthPacks() {
+    return window.__BASIC_REBALANCE_FUND_CATEGORY_MONTH_PACKS__ || {};
+  }
+
+  function neededRebalanceFundMonths() {
+    const months = rebalanceMonths();
+    if (!months.length) return [];
+    if (state.rebalanceMode === "month") return [currentRebalanceMonth()].filter(Boolean);
+    const cfg = rangeConfig();
+    if (cfg.key === "all") return months;
+    if (cfg.ytd) {
+      const latestYear = months.at(-1).slice(0, 4);
+      return months.filter((month) => month.slice(0, 4) === latestYear);
+    }
+    if (cfg.monthCount) return months.slice(-cfg.monthCount);
+    const cutoff = cutoffDate();
+    const cutoffMonth = cutoff ? cutoff.slice(0, 7) : "";
+    return cutoffMonth ? months.filter((month) => month >= cutoffMonth) : months;
+  }
+
   function ensureRebalanceFundCategoryPack() {
+    if (loadedRebalanceFundCategoryPack()) return true;
+    if (loadedRebalanceFundCategoryManifest()) return ensureRebalanceFundCategoryRowsForCurrentRange();
+    if (ensureRebalanceFundCategoryManifest()) return ensureRebalanceFundCategoryRowsForCurrentRange();
+    return false;
+  }
+
+  function ensureLegacyRebalanceFundCategoryPack() {
     if (loadedRebalanceFundCategoryPack()) return true;
     const meta = insight.调仓基金分类明细 || {};
     if (!rebalanceFundCategoryPackPromise) {
@@ -1813,36 +2038,77 @@
         .catch(() => loadByFetch())
         .then(() => {
           rebalanceFundCategoryRowsCache = null;
-          render();
+          scheduleRender();
         })
         .catch((error) => {
           window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__ = error?.message || String(error);
-          render();
+          scheduleRender();
         });
     }
     return false;
   }
 
+  function ensureRebalanceFundCategoryRowsForCurrentRange() {
+    const manifest = loadedRebalanceFundCategoryManifest();
+    if (!manifest) return ensureLegacyRebalanceFundCategoryPack();
+    const monthPacks = rebalanceFundCategoryMonthPacks();
+    const wanted = neededRebalanceFundMonths();
+    const byMonth = new Map((manifest.months || []).map((item) => [item.month, item]));
+    const missing = wanted.filter((month) => !Array.isArray(monthPacks[month]) && byMonth.has(month));
+    const loadedSome = wanted.some((month) => Array.isArray(monthPacks[month]));
+    if (missing.length && loadedSome && (rebalanceBackgroundSuppressed() || Date.now() - rebalanceFundCategoryLastShardLoadAt < 1400)) {
+      if (!rebalanceFundCategoryDeferredRenderTimer) {
+        const delayMs = Math.max(1400, rebalanceBackgroundSuppressUntil - Date.now());
+        rebalanceFundCategoryDeferredRenderTimer = setTimeout(() => {
+          rebalanceFundCategoryDeferredRenderTimer = null;
+          if (rebalanceBackgroundSuppressed()) return;
+          scheduleRender();
+        }, delayMs);
+      }
+      return false;
+    }
+    const monthsToLoad = [...missing].sort((a, b) => b.localeCompare(a)).slice(0, 1);
+    const pending = [];
+    for (const month of monthsToLoad) {
+      if (rebalanceFundCategoryMonthPromises.has(month)) {
+        pending.push(rebalanceFundCategoryMonthPromises.get(month));
+        continue;
+      }
+      const src = byMonth.get(month)?.externalScript;
+      if (!src || !B.loadScript) continue;
+      const promise = B.loadScript(src)
+        .catch((error) => {
+          window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__ = error?.message || String(error);
+        });
+      rebalanceFundCategoryMonthPromises.set(month, promise);
+      pending.push(promise);
+    }
+    if (pending.length) {
+      const renderKey = wanted.join("|");
+      if (!rebalanceFundCategoryRangeRenderKeys.has(renderKey)) {
+        rebalanceFundCategoryRangeRenderKeys.add(renderKey);
+        Promise.allSettled(pending).then(() => {
+          rebalanceFundCategoryRowsCache = null;
+          rebalanceFundCategoryLastShardLoadAt = Date.now();
+          rebalanceFundCategoryRangeRenderKeys.delete(renderKey);
+          scheduleRender();
+        });
+      }
+    }
+    return missing.length === 0;
+  }
+
   function rebalanceFundDetailEmptyText() {
-    if (loadedRebalanceFundCategoryPack()) return "当前筛选下无基金级变化";
+    if (loadedRebalanceFundCategoryPack() || loadedRebalanceFundCategoryManifest()) return "当前筛选下无基金级变化";
     if (window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__) return `基金明细包加载失败：${window.__BASIC_REBALANCE_FUND_CATEGORY_ERROR__}`;
     return "基金明细加载中";
   }
 
-  function rebalanceFundCategoryRows() {
-    if (rebalanceFundCategoryRowsCache) return rebalanceFundCategoryRowsCache;
-    const pack = loadedRebalanceFundCategoryPack();
-    if (!pack) {
-      ensureRebalanceFundCategoryPack();
-      return [];
-    }
-    if (Array.isArray(pack)) {
-      rebalanceFundCategoryRowsCache = pack;
-      return rebalanceFundCategoryRowsCache;
-    }
+  function decodeRebalanceFundCategoryRows(pack) {
+    if (Array.isArray(pack)) return pack;
     const dict = pack.dict || {};
     const fields = pack.fields || [];
-    rebalanceFundCategoryRowsCache = uniqueRowsBy((pack.rows || []).map((row) => {
+    return uniqueRowsBy((pack.rows || []).map((row) => {
       const strategy = dict.strategies?.[row[1]] || [];
       const fund = dict.funds?.[row[13]] || [];
       return {
@@ -1889,7 +2155,54 @@
       row.基金类型,
       row.调仓动作
     ].map(raw).join("｜"), (row, existing) => Math.abs(num(row.权重变化) || 0) > Math.abs(num(existing.权重变化) || 0));
+  }
+
+  function rebalanceFundCategoryRows() {
+    const fullPack = loadedRebalanceFundCategoryPack();
+    if (fullPack) {
+      if (rebalanceFundCategoryRowsCache && rebalanceFundCategoryRowsCacheKey === "full") return rebalanceFundCategoryRowsCache;
+      rebalanceFundCategoryRowsCache = decodeRebalanceFundCategoryRows(fullPack);
+      rebalanceFundCategoryRowsCacheKey = "full";
+      return rebalanceFundCategoryRowsCache;
+    }
+    const manifest = loadedRebalanceFundCategoryManifest();
+    if (!manifest) {
+      ensureRebalanceFundCategoryPack();
+      return [];
+    }
+    ensureRebalanceFundCategoryRowsForCurrentRange();
+    const monthPacks = rebalanceFundCategoryMonthPacks();
+    const wanted = neededRebalanceFundMonths();
+    const loadedMonths = wanted.filter((month) => Array.isArray(monthPacks[month]));
+    if (!loadedMonths.length) return [];
+    const cacheKey = loadedMonths.join("|");
+    if (rebalanceFundCategoryRowsCache && rebalanceFundCategoryRowsCacheKey === cacheKey) return rebalanceFundCategoryRowsCache;
+    const rows = [];
+    for (const month of loadedMonths) rows.push(...(monthPacks[month] || []));
+    rebalanceFundCategoryRowsCache = decodeRebalanceFundCategoryRows({
+      version: manifest.version,
+      fields: manifest.fields,
+      dict: manifest.dict,
+      rows
+    });
+    rebalanceFundCategoryRowsCacheKey = cacheKey;
     return rebalanceFundCategoryRowsCache;
+  }
+
+  function rebalanceFundCategoryLoadNote() {
+    if (loadedRebalanceFundCategoryPack()) return "";
+    const manifest = loadedRebalanceFundCategoryManifest();
+    const wanted = neededRebalanceFundMonths();
+    if (!wanted.length) return "";
+    const monthPacks = rebalanceFundCategoryMonthPacks();
+    const loadedCount = wanted.filter((month) => Array.isArray(monthPacks[month])).length;
+    if (!manifest) {
+      return '<div class="source-method"><strong>性能优化</strong> 基金级调仓明细正在加载分片索引，页面先展示策略级调仓结论，筛选控件可继续操作。</div>';
+    }
+    if (loadedCount < wanted.length) {
+      return `<div class="source-method"><strong>性能优化</strong> 基金级调仓明细按当前窗口分片加载：已加载 ${countText(loadedCount)} / ${countText(wanted.length)} 个月份。加载完成后榜单和基金公司机会会自动刷新。</div>`;
+    }
+    return "";
   }
 
   function filteredHoldingSnapshotRows() {
@@ -3112,7 +3425,7 @@
   }
 
   function filteredRebalanceMonthlyFundRows(applyReportType = true) {
-    const rows = (insight.调仓基金月度汇总 || [])
+    const rows = rebalanceInsightRows("调仓基金月度汇总")
       .filter(dimensionMatch)
       .filter((row) => !applyReportType || reportTypeMatch(row));
     return rebalanceRangeRows(rows, "月份", true);
@@ -3545,7 +3858,7 @@
       const topDirection = assetSignalRows.find(isClearDirection);
       const gfExternalCount = gfOpportunityRows.filter((row) => row.机会类型 === "外部增配验证").length;
       const periodText = state.rebalanceMode === "month" ? `${currentRebalanceMonth() || "暂无月份"} 月报` : rangeLabel();
-      const holdingSnapshotRows = filteredHoldingSnapshotRows();
+      const holdingSnapshotRows = loadedHoldingSnapshotPack() ? filteredHoldingSnapshotRows() : [];
       const totalPages = Math.max(1, Math.ceil(events.length / state.rebalancePageSize));
       if (state.rebalancePage > totalPages) state.rebalancePage = totalPages;
       const detailStart = (state.rebalancePage - 1) * state.rebalancePageSize;
@@ -3561,6 +3874,7 @@
           ${kpi("主资产方向", topDirection ? B.esc(topDirection.分类) : "方向分歧", topDirection ? `${topDirection.判断}，中位净变化${weightPoint(topDirection.中位净变化 ?? topDirection.典型变化)}` : "当前同类策略增减方向不集中")}
           ${kpi("广发外部机会", countText(gfExternalCount), "非广发策略增配广发基金")}
         </section>
+        ${rebalanceInsightShardLoadNote()}
         <section class="panel" id="rebalance-overview">
           <div class="panel-head"><div><h2>类型总览矩阵</h2><p class="desc">先按研报产品类型分池，再看每类策略是否真的发生调仓、方向是否集中、效果是否可评价。</p></div></div>
           ${reportTypeOverviewTable(overviewRows)}
@@ -3582,6 +3896,7 @@
           ${assetSignalTable(themeSignalRows, "权益行业主题", themeSignalRows.length)}
           <div class="source-method"><strong>${B.label("权益行业主题")}</strong> 该表仍按策略级净变化统计，不做底层股票穿透；宽基指数和主动权益基金归入宽基/主动权益。</div>
         </section>
+        ${rebalanceFundCategoryLoadNote()}
         ${rebalanceFundRankPanel(fundRows, monthlyFunds, filteredMonthlyFunds)}
         <section class="panel">
           <div class="panel-head"><div><h2>投顾机构差异</h2><p class="desc">同一研报类型内比较机构调仓频率、可评价效果和主加减仓方向；机构维度用于对标投顾管理人，不等同于底层基金公司。</p></div></div>
@@ -3634,7 +3949,7 @@
           </section>
           <section class="panel">
             <div class="panel-head"><div><h2>期初期末A股行业变化</h2><p class="desc">仅统计明确行业主题基金，按全市场期末占比排序。</p></div></div>
-            ${industryPeriodHeatmap(holdingSnapshotRows, "研报A股行业", "研报A股行业")}
+            ${holdingSnapshotRows.length ? industryPeriodHeatmap(holdingSnapshotRows, "研报A股行业", "研报A股行业") : '<div class="empty">仓位快照大包已改为按需加载；切换到仓位分析后可查看完整期初期末行业变化。</div>'}
           </section>
         </details>
         <details class="fold-block" open>
@@ -3671,7 +3986,7 @@
     const logicEffectRows = rebalanceEffectRows(events, "调仓逻辑");
     const institutionRows = institutionBehaviorRows(events, advisorAssetRows);
     const conclusions = rebalanceConclusions(assetSignalRows, logicEffectRows, institutionRows, gfOpportunityRows);
-    const holdingSnapshotRows = filteredHoldingSnapshotRows();
+    const holdingSnapshotRows = loadedHoldingSnapshotPack() ? filteredHoldingSnapshotRows() : [];
     const topAssetAdd = assetSignalRows.find((row) => /增配/.test(row.判断));
     const topAssetReduce = assetSignalRows.find((row) => /减配/.test(row.判断));
     const directionSignal = assetSignalRows.find((row) => /增配|减配/.test(row.判断)) || assetSignalRows[0];
@@ -3689,6 +4004,7 @@
         ${kpi("方向信号", directionSignal ? B.esc(directionSignal.分类) : "方向分歧", directionSignal ? `${directionSignal.判断}，中位净变化${weightPoint(directionSignal.中位净变化 ?? directionSignal.典型变化)}` : "当前策略增减方向不集中")}
         ${kpi("广发外部机会", countText(gfExternalCount), "非广发策略增配广发基金")}
       </section>
+      ${rebalanceInsightShardLoadNote()}
       <section class="panel">
         <div class="panel-head"><div><h2>调仓结论摘要</h2><p class="desc">只保留能回答业务问题的信号：市场方向是否集中、调仓是否有效、机构是否有差异、广发基金是否被外部策略增配。</p></div></div>
         ${rebalanceConclusionList(conclusions)}
@@ -3758,6 +4074,7 @@
       </section>
       <details class="fold-block">
         <summary>基金级交易验证：统一榜单和底层基金公司产品流向</summary>
+        ${rebalanceFundCategoryLoadNote()}
         ${rebalanceFundRankPanel(fundRows, monthlyFunds, filteredMonthlyFunds)}
         <section class="panel">
           <div class="panel-head">
@@ -3776,15 +4093,15 @@
         <summary>仓位验证视角：期初期末资产、主题和行业分布变化</summary>
         <section class="panel">
           <div class="panel-head"><div><h2>期初期末资产/主题主归属变化热力图</h2><p class="desc">每只基金只落一个主归属：非权益按现金、固收、商品、海外归属，权益基金按明确行业主题、宽基指数或主动权益归属；多行业命中统一归入跨行业/多主题权益。</p></div></div>
-          ${industryPeriodHeatmap(holdingSnapshotRows, "行业主题", "资产/主题")}
+          ${holdingSnapshotRows.length ? industryPeriodHeatmap(holdingSnapshotRows, "行业主题", "资产/主题") : '<div class="empty">仓位快照大包已改为按需加载；切换到仓位分析后可查看完整期初期末资产/主题变化。</div>'}
         </section>
         <section class="panel">
           <div class="panel-head"><div><h2>期初期末权益行业主题分布变化热力图</h2><p class="desc">仅统计权益、指数、海外权益和明确主题基金；现金、固收和商品不进入该图。宽基与主动权益因缺少股票持仓行业穿透，统一归为宽基/主动权益。</p></div></div>
-          ${industryPeriodHeatmap(holdingSnapshotRows, "权益行业主题", "权益行业主题")}
+          ${holdingSnapshotRows.length ? industryPeriodHeatmap(holdingSnapshotRows, "权益行业主题", "权益行业主题") : '<div class="empty">仓位快照大包已改为按需加载；切换到仓位分析后可查看完整期初期末权益行业主题变化。</div>'}
         </section>
         <section class="panel">
           <div class="panel-head"><div><h2>期初期末权益行业大类分布变化热力图</h2><p class="desc">在权益行业主题基础上归并为科技制造、消费医药、金融周期/价值、海外权益、宽基/主动权益和跨行业/多主题，便于观察权益方向切换。</p></div></div>
-          ${industryPeriodHeatmap(holdingSnapshotRows, "权益行业大类", "权益行业大类")}
+          ${holdingSnapshotRows.length ? industryPeriodHeatmap(holdingSnapshotRows, "权益行业大类", "权益行业大类") : '<div class="empty">仓位快照大包已改为按需加载；切换到仓位分析后可查看完整期初期末权益行业大类变化。</div>'}
         </section>
       </details>
       <details class="fold-block">
@@ -3839,7 +4156,7 @@
     compareSearchTimer = setTimeout(() => {
       compareSearchTimer = null;
       state.compareQuery = state.compareQueryInput || "";
-      render();
+      scheduleRender();
       requestAnimationFrame(() => {
         const input = B.byId("compareSearch");
         if (!input) return;
@@ -3862,11 +4179,11 @@
         .then(() => {
           if (B.state.details?.[id]) compareDetailStore.set(id, B.state.details[id]);
           compareLoadTasks.delete(id);
-          if (state.tab === "compare") render();
+          if (state.tab === "compare") scheduleRender();
         })
         .catch((error) => {
           compareLoadTasks.set(id, { error: error?.message || String(error) });
-          if (state.tab === "compare") render();
+          if (state.tab === "compare") scheduleRender();
         });
       compareLoadTasks.set(id, task);
     });
@@ -5210,8 +5527,8 @@
 
   function renderContent() {
     if (state.tab === "compare") return compareTab();
-    if (state.tab === "holding" && !ensureInsightLazyPack()) return insightLazyLoadingPanel("仓位分析");
-    if (state.tab === "rebalance" && !ensureInsightLazyPack()) return insightLazyLoadingPanel("调仓分析");
+    if (state.tab === "holding" && !ensureInsightLazyPack("holding")) return insightLazyLoadingPanel("仓位分析");
+    if (state.tab === "rebalance" && !ensureInsightLazyPack("rebalance")) return insightLazyLoadingPanel("调仓分析");
     if (state.tab === "holding") return holdingTab();
     if (state.tab === "rebalance") return rebalanceTab();
     return marketTab();
@@ -5224,15 +5541,31 @@
     if (target) target.scrollIntoView({ block: "start" });
   }
 
+  let renderScheduled = false;
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    const run = () => {
+      renderScheduled = false;
+      render();
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(run);
+    else setTimeout(run, 0);
+  }
+
+  function holdingDisplayCountQuick() {
+    const metaRows = num(insight.持仓日期分类快照?.rows) || 0;
+    const loadedCounts = [
+      Array.isArray(insight.当前持仓策略基金明细) ? insight.当前持仓策略基金明细.length : 0,
+      Array.isArray(insight.当前持仓基金) ? insight.当前持仓基金.length : 0,
+      Array.isArray(insight.当前持仓基金风险明细) ? insight.当前持仓基金风险明细.length : 0
+    ];
+    return Math.max(metaRows, ...loadedCounts);
+  }
+
   function render() {
     const displayCount = strategyRows().length;
-    const holdingStrategyDetailCount = filteredHoldingStrategyRows().length;
-    const holdingDisplayCount = Math.max(
-      holdingStrategyDetailCount,
-      filteredHoldingSnapshotRows().length,
-      latestHoldingSnapshotRows("研报大类资产").length,
-      holdingSnapshotRows().length
-    );
+    const holdingDisplayCount = holdingDisplayCountQuick();
     const rebalanceDisplayCount = rebalanceEvents(false).length;
     signalDetailStore.clear();
     root.innerHTML = `
@@ -5276,17 +5609,18 @@
       state.rebalanceFundSecondaryCategory = "";
       state.rebalanceFundCompany = "";
     };
-    B.byId("insightRange").addEventListener("change", () => { state.range = B.byId("insightRange").value; resetDataView(); render(); });
-    B.byId("insightRisk").addEventListener("change", () => { state.risk = B.byId("insightRisk").value; resetDataView(); render(); });
-    B.byId("insightBusiness").addEventListener("change", () => { state.business = B.byId("insightBusiness").value; resetDataView(); render(); });
-    B.byId("insightRegion").addEventListener("change", () => { state.region = B.byId("insightRegion").value; resetDataView(); render(); });
-    B.byId("insightClientScope").addEventListener("change", () => { state.clientScope = B.byId("insightClientScope").value; resetDataView(); render(); });
-    B.byId("insightGfScope").addEventListener("change", () => { state.gfScope = B.byId("insightGfScope").value; resetDataView(); render(); });
-    B.byId("insightInstitution").addEventListener("change", () => { state.institution = B.byId("insightInstitution").value; resetDataView(); render(); });
+    B.byId("insightRange").addEventListener("change", () => { markRebalanceInteraction(); state.range = B.byId("insightRange").value; resetDataView(); scheduleRender(); });
+    B.byId("insightRisk").addEventListener("change", () => { markRebalanceInteraction(); state.risk = B.byId("insightRisk").value; resetDataView(); scheduleRender(); });
+    B.byId("insightBusiness").addEventListener("change", () => { markRebalanceInteraction(); state.business = B.byId("insightBusiness").value; resetDataView(); scheduleRender(); });
+    B.byId("insightRegion").addEventListener("change", () => { markRebalanceInteraction(); state.region = B.byId("insightRegion").value; resetDataView(); scheduleRender(); });
+    B.byId("insightClientScope").addEventListener("change", () => { markRebalanceInteraction(); state.clientScope = B.byId("insightClientScope").value; resetDataView(); scheduleRender(); });
+    B.byId("insightGfScope").addEventListener("change", () => { markRebalanceInteraction(); state.gfScope = B.byId("insightGfScope").value; resetDataView(); scheduleRender(); });
+    B.byId("insightInstitution").addEventListener("change", () => { markRebalanceInteraction(); state.institution = B.byId("insightInstitution").value; resetDataView(); scheduleRender(); });
     root.querySelectorAll("[data-tab]").forEach((button) => {
       button.addEventListener("click", () => {
+        markRebalanceInteraction();
         state.tab = button.dataset.tab;
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("details[data-business-key]").forEach((details) => {
@@ -5320,11 +5654,11 @@
     const rebalanceMonth = B.byId("rebalanceMonth");
     const rebalanceReportType = B.byId("rebalanceReportType");
     const rebalanceFundRankType = B.byId("rebalanceFundRankType");
-    if (scatterX) scatterX.addEventListener("change", () => { state.scatterX = scatterX.value; render(); });
-    if (scatterViewPct) scatterViewPct.addEventListener("input", () => { state.viewPct = Number(scatterViewPct.value) || 100; render(); });
-    if (scatterGfScope) scatterGfScope.addEventListener("change", () => { state.gfScope = scatterGfScope.value; resetDataView(); render(); });
-    if (scatterInstitution) scatterInstitution.addEventListener("change", () => { state.institution = scatterInstitution.value; resetDataView(); render(); });
-    if (businessProductScope) businessProductScope.addEventListener("change", () => { state.businessProductScope = businessProductScope.value; render(); });
+    if (scatterX) scatterX.addEventListener("change", () => { state.scatterX = scatterX.value; scheduleRender(); });
+    if (scatterViewPct) scatterViewPct.addEventListener("input", () => { state.viewPct = Number(scatterViewPct.value) || 100; scheduleRender(); });
+    if (scatterGfScope) scatterGfScope.addEventListener("change", () => { state.gfScope = scatterGfScope.value; resetDataView(); scheduleRender(); });
+    if (scatterInstitution) scatterInstitution.addEventListener("change", () => { state.institution = scatterInstitution.value; resetDataView(); scheduleRender(); });
+    if (businessProductScope) businessProductScope.addEventListener("change", () => { state.businessProductScope = businessProductScope.value; scheduleRender(); });
     root.querySelectorAll("[data-business-sort]").forEach((button) => {
       button.addEventListener("click", () => {
         const field = button.dataset.businessSort || "区间收益";
@@ -5334,7 +5668,7 @@
           state.businessSortDir = field === "最大回撤" || field === "波动率" ? "asc" : "desc";
         }
         state.businessPages = {};
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("[data-business-page]").forEach((button) => {
@@ -5342,7 +5676,7 @@
         const key = button.dataset.businessPage || "";
         const delta = Number(button.dataset.pageDelta) || 0;
         state.businessPages[key] = Math.max(1, (state.businessPages[key] || 1) + delta);
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll(".fund-row").forEach((row) => {
@@ -5350,40 +5684,42 @@
         if (event.target.closest("a, .info-button")) return;
         const key = row.dataset.fundKey || "";
         state.expandedFundKey = state.expandedFundKey === key ? "" : key;
-        render();
+        scheduleRender();
       });
     });
-    if (holdingFundPrev) holdingFundPrev.addEventListener("click", () => { state.holdingFundPage = Math.max(1, state.holdingFundPage - 1); render(); });
-    if (holdingFundNext) holdingFundNext.addEventListener("click", () => { state.holdingFundPage += 1; render(); });
-    if (holdingFundPageSize) holdingFundPageSize.addEventListener("change", () => { state.holdingFundPageSize = Number(holdingFundPageSize.value) || 20; state.holdingFundPage = 1; render(); });
-    if (holdingFundType) holdingFundType.addEventListener("change", () => { state.holdingFundType = holdingFundType.value || ""; state.holdingFundPage = 1; render(); });
-    if (gfHoldingFundPrev) gfHoldingFundPrev.addEventListener("click", () => { state.gfHoldingFundPage = Math.max(1, state.gfHoldingFundPage - 1); render(); });
-    if (gfHoldingFundNext) gfHoldingFundNext.addEventListener("click", () => { state.gfHoldingFundPage += 1; render(); });
-    if (gfHoldingFundPageSize) gfHoldingFundPageSize.addEventListener("change", () => { state.gfHoldingFundPageSize = Number(gfHoldingFundPageSize.value) || 20; state.gfHoldingFundPage = 1; render(); });
-    if (gfHoldingFundType) gfHoldingFundType.addEventListener("change", () => { state.gfHoldingFundType = gfHoldingFundType.value || ""; state.gfHoldingFundPage = 1; render(); });
-    if (gfOpportunityFundPrev) gfOpportunityFundPrev.addEventListener("click", () => { state.gfOpportunityPage = Math.max(1, state.gfOpportunityPage - 1); render(); });
-    if (gfOpportunityFundNext) gfOpportunityFundNext.addEventListener("click", () => { state.gfOpportunityPage += 1; render(); });
-    if (gfOpportunityFundPageSize) gfOpportunityFundPageSize.addEventListener("change", () => { state.gfOpportunityPageSize = Number(gfOpportunityFundPageSize.value) || 20; state.gfOpportunityPage = 1; render(); });
-    if (gfOpportunityFundType) gfOpportunityFundType.addEventListener("change", () => { state.gfOpportunityFundType = gfOpportunityFundType.value || ""; state.gfOpportunityPage = 1; render(); });
-    if (rebalancePrev) rebalancePrev.addEventListener("click", () => { state.rebalancePage = Math.max(1, state.rebalancePage - 1); render(); });
-    if (rebalanceNext) rebalanceNext.addEventListener("click", () => { state.rebalancePage += 1; render(); });
-    if (rebalancePageSize) rebalancePageSize.addEventListener("change", () => { state.rebalancePageSize = Number(rebalancePageSize.value) || 20; state.rebalancePage = 1; render(); });
-    if (rebalanceMode) rebalanceMode.addEventListener("change", () => { state.rebalanceMode = rebalanceMode.value || "range"; state.rebalancePage = 1; render(); });
-    if (rebalanceMonth) rebalanceMonth.addEventListener("change", () => { state.rebalanceMonth = rebalanceMonth.value || ""; state.rebalancePage = 1; render(); });
-    if (rebalanceReportType) rebalanceReportType.addEventListener("change", () => { state.reportType = rebalanceReportType.value || ""; state.rebalancePage = 1; render(); });
-    if (rebalanceFundRankType) rebalanceFundRankType.addEventListener("change", () => { state.rebalanceFundRankType = rebalanceFundRankType.value || "netIn"; render(); });
+    if (holdingFundPrev) holdingFundPrev.addEventListener("click", () => { state.holdingFundPage = Math.max(1, state.holdingFundPage - 1); scheduleRender(); });
+    if (holdingFundNext) holdingFundNext.addEventListener("click", () => { state.holdingFundPage += 1; scheduleRender(); });
+    if (holdingFundPageSize) holdingFundPageSize.addEventListener("change", () => { state.holdingFundPageSize = Number(holdingFundPageSize.value) || 20; state.holdingFundPage = 1; scheduleRender(); });
+    if (holdingFundType) holdingFundType.addEventListener("change", () => { state.holdingFundType = holdingFundType.value || ""; state.holdingFundPage = 1; scheduleRender(); });
+    if (gfHoldingFundPrev) gfHoldingFundPrev.addEventListener("click", () => { state.gfHoldingFundPage = Math.max(1, state.gfHoldingFundPage - 1); scheduleRender(); });
+    if (gfHoldingFundNext) gfHoldingFundNext.addEventListener("click", () => { state.gfHoldingFundPage += 1; scheduleRender(); });
+    if (gfHoldingFundPageSize) gfHoldingFundPageSize.addEventListener("change", () => { state.gfHoldingFundPageSize = Number(gfHoldingFundPageSize.value) || 20; state.gfHoldingFundPage = 1; scheduleRender(); });
+    if (gfHoldingFundType) gfHoldingFundType.addEventListener("change", () => { state.gfHoldingFundType = gfHoldingFundType.value || ""; state.gfHoldingFundPage = 1; scheduleRender(); });
+    if (gfOpportunityFundPrev) gfOpportunityFundPrev.addEventListener("click", () => { state.gfOpportunityPage = Math.max(1, state.gfOpportunityPage - 1); scheduleRender(); });
+    if (gfOpportunityFundNext) gfOpportunityFundNext.addEventListener("click", () => { state.gfOpportunityPage += 1; scheduleRender(); });
+    if (gfOpportunityFundPageSize) gfOpportunityFundPageSize.addEventListener("change", () => { state.gfOpportunityPageSize = Number(gfOpportunityFundPageSize.value) || 20; state.gfOpportunityPage = 1; scheduleRender(); });
+    if (gfOpportunityFundType) gfOpportunityFundType.addEventListener("change", () => { state.gfOpportunityFundType = gfOpportunityFundType.value || ""; state.gfOpportunityPage = 1; scheduleRender(); });
+    if (rebalancePrev) rebalancePrev.addEventListener("click", () => { markRebalanceInteraction(); state.rebalancePage = Math.max(1, state.rebalancePage - 1); scheduleRender(); });
+    if (rebalanceNext) rebalanceNext.addEventListener("click", () => { markRebalanceInteraction(); state.rebalancePage += 1; scheduleRender(); });
+    if (rebalancePageSize) rebalancePageSize.addEventListener("change", () => { markRebalanceInteraction(); state.rebalancePageSize = Number(rebalancePageSize.value) || 20; state.rebalancePage = 1; scheduleRender(); });
+    if (rebalanceMode) rebalanceMode.addEventListener("change", () => { markRebalanceInteraction(); state.rebalanceMode = rebalanceMode.value || "range"; state.rebalancePage = 1; scheduleRender(); });
+    if (rebalanceMonth) rebalanceMonth.addEventListener("change", () => { markRebalanceInteraction(); state.rebalanceMonth = rebalanceMonth.value || ""; state.rebalancePage = 1; scheduleRender(); });
+    if (rebalanceReportType) rebalanceReportType.addEventListener("change", () => { markRebalanceInteraction(); state.reportType = rebalanceReportType.value || ""; state.rebalancePage = 1; scheduleRender(); });
+    if (rebalanceFundRankType) rebalanceFundRankType.addEventListener("change", () => { markRebalanceInteraction(); state.rebalanceFundRankType = rebalanceFundRankType.value || "netIn"; scheduleRender(); });
     root.querySelectorAll("[data-rebalance-fund-secondary]").forEach((select) => {
       select.addEventListener("change", () => {
+        markRebalanceInteraction();
         state.rebalanceFundSecondaryCategory = select.value || "";
         state.rebalancePage = 1;
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("[data-rebalance-fund-company]").forEach((select) => {
       select.addEventListener("change", () => {
+        markRebalanceInteraction();
         state.rebalanceFundCompany = select.value || "";
         state.rebalancePage = 1;
-        render();
+        scheduleRender();
       });
     });
     const compareSearch = B.byId("compareSearch");
@@ -5404,10 +5740,10 @@
         scheduleCompareSearchCommit(650);
       });
     }
-    if (comparePeerMode) comparePeerMode.addEventListener("change", () => { state.comparePeerMode = comparePeerMode.value || "reportType"; render(); });
-    if (compareScatterX) compareScatterX.addEventListener("change", () => { state.compareScatterX = compareScatterX.value || "最大回撤"; render(); });
-    if (compareBenchmarkSelectEl) compareBenchmarkSelectEl.addEventListener("change", () => { state.compareBenchmarkCode = compareBenchmarkSelectEl.value || ""; render(); });
-    if (compareClear) compareClear.addEventListener("click", () => { state.compareSelectedIds = []; state.compareOverlapDetailKey = ""; render(); });
+    if (comparePeerMode) comparePeerMode.addEventListener("change", () => { state.comparePeerMode = comparePeerMode.value || "reportType"; scheduleRender(); });
+    if (compareScatterX) compareScatterX.addEventListener("change", () => { state.compareScatterX = compareScatterX.value || "最大回撤"; scheduleRender(); });
+    if (compareBenchmarkSelectEl) compareBenchmarkSelectEl.addEventListener("change", () => { state.compareBenchmarkCode = compareBenchmarkSelectEl.value || ""; scheduleRender(); });
+    if (compareClear) compareClear.addEventListener("click", () => { state.compareSelectedIds = []; state.compareOverlapDetailKey = ""; scheduleRender(); });
     root.querySelectorAll("[data-compare-add]").forEach((button) => {
       button.addEventListener("click", () => {
         const id = button.dataset.compareAdd || "";
@@ -5415,7 +5751,7 @@
         state.compareSelectedIds = [...state.compareSelectedIds, id];
         state.compareOverlapDetailKey = "";
         ensureCompareDetails([id]);
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("[data-compare-remove]").forEach((button) => {
@@ -5423,19 +5759,19 @@
         const id = button.dataset.compareRemove || "";
         state.compareSelectedIds = state.compareSelectedIds.filter((item) => item !== id);
         state.compareOverlapDetailKey = "";
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("[data-overlap-detail]").forEach((button) => {
       button.addEventListener("click", () => {
         state.compareOverlapDetailKey = button.dataset.overlapDetail || "";
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("[data-compare-point-id]").forEach((point) => {
       point.addEventListener("click", () => {
         state.compareSelectedPointId = point.dataset.comparePointId || "";
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("[data-signal-detail]").forEach((button) => {
@@ -5452,13 +5788,13 @@
       button.addEventListener("click", () => {
         state.reportType = button.dataset.reportTypeSelect || "";
         state.rebalancePage = 1;
-        render();
+        scheduleRender();
       });
     });
     root.querySelectorAll("[data-point-id]").forEach((point) => {
       point.addEventListener("click", () => {
         state.selectedPointId = point.dataset.pointId || "";
-        render();
+        scheduleRender();
       });
     });
     const hoverTip = B.byId("scatterHoverTip");
@@ -5491,3 +5827,4 @@
   window.addEventListener("hashchange", scrollToHashTarget);
   render();
 })();
+

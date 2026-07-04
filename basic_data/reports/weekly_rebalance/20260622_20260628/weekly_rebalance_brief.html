@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>上周投顾调仓简报</title>
+  <style>
+    :root {
+      --bg: #f4f6fa;
+      --panel: #ffffff;
+      --ink: #1f2430;
+      --muted: #667085;
+      --line: #e5e7ef;
+      --blue: #5477c4;
+      --blue-soft: #eef4ff;
+      --orange: #cc6f47;
+      --orange-soft: #fff0e8;
+      --olive: #71a945;
+      --olive-soft: #eef8e8;
+      --gold-soft: #fff8dc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      line-height: 1.48;
+    }
+    .sheet {
+      width: 960px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px 22px;
+      margin-bottom: 14px;
+    }
+    .topline {
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 0;
+    }
+    .meta {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .lead {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+    .claim {
+      border-left: 4px solid var(--blue);
+      padding-left: 14px;
+      font-size: 17px;
+    }
+    .claim b {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 20px;
+    }
+    .quality {
+      background: var(--gold-soft);
+      border: 1px solid #ecddb2;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 14px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 94px;
+    }
+    .metric.blue { background: var(--blue-soft); }
+    .metric.green { background: var(--olive-soft); }
+    .metric.orange { background: var(--orange-soft); }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .value {
+      font-size: 24px;
+      font-weight: 780;
+      font-variant-numeric: tabular-nums;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .chart {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      margin-top: 10px;
+    }
+    .chart img {
+      display: block;
+      width: 100%;
+    }
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    ul.signal {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 8px;
+    }
+    .signal li {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 12px;
+      align-items: baseline;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .signal li.down { background: var(--orange-soft); border-color: #f3d0bf; }
+    .signal li.up { background: var(--olive-soft); border-color: #d3e9ca; }
+    .signal b {
+      font-size: 15px;
+    }
+    .signal span {
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+    .signal em {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-style: normal;
+      font-size: 12px;
+    }
+    .foot {
+      color: var(--muted);
+      font-size: 11px;
+      text-align: right;
+      padding: 4px 2px 0;
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <section class="card">
+      <div class="topline">全市场投顾周度调仓</div>
+      <h1>上周调仓：固收承接，权益降温</h1>
+      <div class="meta">2026-06-22 至 2026-06-28｜生成 2026-06-30 21:39:49</div>
+    </section>
+
+    <section class="card">
+      <div class="lead">
+        <div class="claim">
+          <b>核心判断</b>
+          上周不是全面进攻，资金主要从权益和混合资产撤出，转向债券承接。行业上，有色金属、电子、基础化工、国防军工、计算机走弱；通信仍为小幅净流入，但从 +38.87pct 降至 +3.65pct。
+        </div>
+        <div class="quality">
+          <b>如何读胜率</b><br />
+          胜率是参与策略的历史调仓后验质量，不是本周动作的即时对错。主要信号历史胜率集中在 42% 至 45%，因此用于排序和跟踪，不直接当作高确定性判断。
+        </div>
+      </div>
+      <div class="metrics">
+        <div class="metric blue"><div class="label">结构性换手</div><div class="value">633.17pct</div><div class="hint">较前周下降 43.8%</div></div>
+        <div class="metric green"><div class="label">固收净流入</div><div class="value">+78.84pct</div><div class="hint">主承接资产</div></div>
+        <div class="metric orange"><div class="label">权益+混合</div><div class="value">-72.58pct</div><div class="hint">风险预算回撤</div></div>
+        <div class="metric"><div class="label">行业可解释换手</div><div class="value">314.19pct</div><div class="hint">258 条调仓可拆行业</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>证据图：资产方向与行业反转</h2>
+      <div class="chart"><img src="assets/asset_direction.png" alt="资产方向" /></div>
+      <div class="chart"><img src="assets/industry_signals.png" alt="行业异动" /></div>
+    </section>
+
+    <section class="card two">
+      <div>
+        <h2>行业显著信号</h2>
+        <ul class="signal">
+          <li class='down'><b>有色金属</b><span>-6.25pct</span><em>前周 +7.75pct</em></li><li class='down'><b>电子</b><span>-5.45pct</span><em>前周 +15.91pct</em></li><li class='down'><b>基础化工</b><span>-5.02pct</span><em>前周 +12.46pct</em></li><li class='down'><b>国防军工</b><span>-5.55pct</span><em>前周 -4.57pct</em></li><li class='down'><b>计算机</b><span>-5.06pct</span><em>前周 -2.04pct</em></li><li class='down'><b>医药生物</b><span>-5.44pct</span><em>前周 -11.98pct</em></li>
+        </ul>
+      </div>
+      <div>
+        <h2>广发产品线索</h2>
+        <ul class="signal">
+          <li><b>广发景宁债券C</b><span>+17.00pct</span><em>正向线索明确，银华活钱加与目标盈建仓共同贡献流入。</em></li><li><b>广发景明中短债C</b><span>-8.94pct</span><em>主要体现为景明中短债向景宁债券的内部替换。</em></li><li><b>广发成长启航混合C</b><span>-7.09pct</span><em>跨 3 家机构减仓，属于广发权益产品本周最需要跟踪的负面线索。</em></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>下周只盯三件事</h2>
+      <ul class="signal">
+        <li><b>固收流入是否连续</b><span>观察</span><em>重点看纯债和中短债之间的替换。</em></li>
+        <li><b>电子、有色、化工是否继续走弱</b><span>观察</span><em>确认是短期再平衡还是行业观点切换。</em></li>
+        <li><b>广发成长启航混合C是否延续减仓</b><span>跟进</span><em>若延续，拆同类替代基金和调仓原因。</em></li>
+      </ul>
+    </section>
+
+    <div class="foot">口径：剔除净建仓事件后的结构性调仓；行业使用基金经济行业暴露加权。</div>
+  </main>
+</body>
+</html>
