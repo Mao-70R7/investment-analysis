@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>投顾数据全量统计与质量检查报告</title>
+  <style>
+    :root { color-scheme: light; --bg:#f7f8fa; --panel:#ffffff; --ink:#1f2933; --muted:#65758b; --line:#d9e0e8; --ok:#0f7b4f; --warn:#9a5b00; --bad:#b42318; --accent:#1f6feb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--ink); }
+    header { padding: 28px 36px 18px; border-bottom: 1px solid var(--line); background: #fff; }
+    h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }
+    h2 { margin: 30px 0 12px; font-size: 20px; letter-spacing: 0; }
+    h3 { margin: 22px 0 10px; font-size: 16px; letter-spacing: 0; }
+    main { max-width: 1440px; margin: 0 auto; padding: 22px 28px 48px; }
+    .muted { color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-height: 104px; }
+    .metric-label { color: var(--muted); font-size: 13px; }
+    .metric-value { margin-top: 8px; font-size: 25px; font-weight: 700; }
+    .metric-note { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; margin-top: 16px; }
+    .two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+    th { text-align: left; background: #eef3f8; color: #253244; font-weight: 650; }
+    tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-block; min-width: 42px; text-align: center; padding: 3px 8px; border-radius: 999px; font-weight: 650; }
+    .badge.ok { background: #e6f4ee; color: var(--ok); }
+    .badge.warn { background: #fff3d6; color: var(--warn); }
+    .badge.bad { background: #fde8e6; color: var(--bad); }
+    .summary-line { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    .summary-line span strong { color: var(--ink); }
+    @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .two-col { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { header { padding: 22px 18px 14px; } main { padding: 16px; } .grid { grid-template-columns: 1fr; } .metric-value { font-size: 22px; } }
+    </style>
+</head>
+<body>
+  <header>
+    <h1>投顾数据全量统计与质量检查报告</h1>
+    <div class="muted">生成时间：2026-07-08T22:32:39+08:00；算法版本：standard_rebalance_asset_dual_nav_v10_all_channels_20260528</div>
+    <div class="summary-line">
+      <span>数据来源文件：<strong>29/29</strong></span>
+      <span>原始快照缺失：<strong>142</strong></span>
+      <span>策略基金净值缺失：<strong>1</strong></span>
+    </div>
+  </header>
+  <main>
+    <div class="grid"><div class="metric"><div class="metric-label">策略总数</div><div class="metric-value">1,275</div><div class="metric-note">全渠道策略主表</div></div><div class="metric"><div class="metric-label">天天策略数</div><div class="metric-value">1,071</div><div class="metric-note">天天基金渠道</div></div><div class="metric"><div class="metric-label">调仓明细</div><div class="metric-value">204,113</div><div class="metric-note">历史调仓基金级明细</div></div><div class="metric"><div class="metric-label">官方日度业绩</div><div class="metric-value">1,005,966</div><div class="metric-note">App/官方披露曲线</div></div><div class="metric"><div class="metric-label">基金净值</div><div class="metric-value">9,268,273</div><div class="metric-note">底层基金日度净值</div></div><div class="metric"><div class="metric-label">纳入回放</div><div class="metric-value">1,142</div><div class="metric-note">统一算法净值回放</div></div><div class="metric"><div class="metric-label">App偏差中位数</div><div class="metric-value">0.2673 pp</div><div class="metric-note">费前展示口径</div></div><div class="metric"><div class="metric-label">检查通过/关注/严重</div><div class="metric-value">5/3/2</div><div class="metric-note">数据质量检查</div></div></div>
+
+    <section class="section">
+      <h2>一、质量检查结论</h2>
+      <p class="muted">检查覆盖原始采集快照、normalized 加工文件、数据来源清单、核心入库表、基金净值依赖、回放产物和官方业绩对比。状态“关注”表示业务上可解释或需要继续跟踪，不等同于阻断入库。</p>
+      <div class="table-wrap"><table><thead><tr><th>检查项</th><th>范围</th><th>状态</th><th>问题数</th><th>检查说明</th><th>处理建议</th></tr></thead><tbody><tr><td>数据来源文件存在性</td><td>数据来源清单</td><td><span class="badge ok">通过</span></td><td>0</td><td>检查入库记录引用的 normalized 文件是否仍在本项目目录内。</td><td>缺失时需要从当前采集批次恢复对应 normalized 文件，或重新运行采集和入库。</td></tr><tr><td>原始快照文件存在性</td><td>advisor_monitor.raw_snapshot</td><td><span class="badge bad">严重</span></td><td>142</td><td>检查保留的原始采集快照索引是否都有可访问的 raw 文件。</td><td>缺失时需要重新同步 raw_manifest，或重新采集对应批次。</td></tr><tr><td>主键与业务键重复</td><td>核心入库表</td><td><span class="badge ok">通过</span></td><td>0</td><td>检查策略、业绩、持仓、调仓事件和调仓明细是否存在重复业务键。</td><td>重复时需要回到装载逻辑排查 ON CONFLICT 主键和去重口径。</td></tr><tr><td>子表孤儿记录</td><td>策略子表</td><td><span class="badge ok">通过</span></td><td>0</td><td>检查业绩、持仓、调仓子表是否能回连到策略主表和调仓事件主表。</td><td>出现孤儿记录时需要清理对应装载批次并重跑入库。</td></tr><tr><td>原始快照ID覆盖</td><td>策略主表和子表</td><td><span class="badge warn">关注</span></td><td>1,589</td><td>检查入库记录是否保留原始快照ID，便于追溯采集响应。</td><td>当前缺口多来自早期非天天渠道或公开页采集；新增采集应强制写入原始快照ID。</td></tr><tr><td>策略基金净值覆盖</td><td>调仓和当前持仓涉及基金</td><td><span class="badge bad">严重</span></td><td>1</td><td>检查策略出现过的基金代码是否都能在基金日度净值库中找到至少一条净值。</td><td>缺失时优先补天天基金净值，互认/QD 基金再补基金公司或境外公开源。</td></tr><tr><td>官方日度业绩核心字段</td><td>策略日度业绩</td><td><span class="badge ok">通过</span></td><td>0</td><td>检查官方日度曲线是否有单位净值和累计收益。</td><td>缺失时需要补采 App 官方曲线或剔除不可画曲线的区段。</td></tr><tr><td>调仓后权重闭合</td><td>策略调仓明细</td><td><span class="badge warn">关注</span></td><td>21</td><td>检查调仓后正权重是否接近100%。目标盈/清盘空仓不计入该项。</td><td>保留为问题策略清单，后续逐策略对比 App 页面或重采调仓明细。</td></tr><tr><td>旧算法产物残留</td><td>回放和偏差分析结果表</td><td><span class="badge ok">通过</span></td><td>0</td><td>检查数据库是否仍保留非当前算法版本的回放/偏差产物。</td><td>发现旧版本时执行清理脚本，仅保留当前算法版本。</td></tr><tr><td>策略净值回放纳入</td><td>策略模拟净值质量</td><td><span class="badge warn">关注</span></td><td>133</td><td>检查策略是否能进入统一净值回放。</td><td>未纳入策略多为未运作、缺历史调仓或调仓权重异常；报告中保留分类并不影响已纳入策略计算。</td></tr></tbody></table></div>
+    </section>
+
+    <section class="section">
+      <h2>二、原始采集与加工文件</h2>
+      <div class="two-col">
+        <div>
+          <h3>原始快照索引</h3>
+          <div class="table-wrap"><table><thead><tr><th>渠道ID</th><th>采集器</th><th>快照数</th><th>最早采集时间</th><th>最晚采集时间</th></tr></thead><tbody><tr><td>ttfund</td><td>strategy_adjustment_history_cache</td><td>6120</td><td>2026-06-10T08:47:19+08:00</td><td>2026-07-08T14:43:39+08:00</td></tr><tr><td>ttfund</td><td>strategy_adjustment_cache</td><td>5616</td><td>2026-06-10T08:47:19+08:00</td><td>2026-07-08T14:43:39+08:00</td></tr><tr><td>ttfund</td><td>strategy_detail_matter_cache</td><td>5258</td><td>2026-05-29T09:28:34+08:00</td><td>2026-07-08T14:43:39+08:00</td></tr><tr><td>ttfund</td><td>strategy_detail_cache</td><td>3046</td><td>2026-05-29T09:28:34+08:00</td><td>2026-07-08T14:43:39+08:00</td></tr><tr><td>ttfund</td><td>ttfund_official_performance_curve</td><td>1094</td><td>2026-05-27T23:01:44+08:00</td><td>2026-06-03T21:05:20+08:00</td></tr><tr><td>gffunds</td><td>alternate_fund_list</td><td>751</td><td>2026-06-09T16:31:41+08:00</td><td>2026-07-08T15:19:29+08:00</td></tr><tr><td>gffunds</td><td>adjustment_detail</td><td>651</td><td>2026-06-18T01:43:23+08:00</td><td>2026-07-08T15:19:29+08:00</td></tr><tr><td>ttfund</td><td>strategy_kyc_cache</td><td>647</td><td>2026-06-10T15:22:11+08:00</td><td>2026-07-08T14:43:39+08:00</td></tr><tr><td>gffunds</td><td>yield_since_inception</td><td>581</td><td>2026-06-09T17:35:09+08:00</td><td>2026-07-08T15:19:29+08:00</td></tr><tr><td>gffunds</td><td>protocol_list</td><td>527</td><td>2026-06-09T17:35:09+08:00</td><td>2026-07-08T15:19:29+08:00</td></tr><tr><td>ttfund</td><td>quote_batch</td><td>404</td><td>2026-05-27T22:47:56+08:00</td><td>2026-07-08T14:43:39+08:00</td></tr><tr><td>zocaifu</td><td>underlying_fund_nav</td><td>277</td><td>2026-06-20T11:34:50+08:00</td><td>2026-06-20T11:34:50+08:00</td></tr></tbody></table></div><p class="muted">仅展示前 12 行，共 26 行。</p>
+        </div>
+        <div>
+          <h3>数据来源文件</h3>
+          <div class="table-wrap"><table><thead><tr><th>渠道ID</th><th>文件类型</th><th>策略引用数</th><th>采集批次数</th><th>文件数</th><th>最早采集时间</th><th>最晚采集时间</th></tr></thead><tbody><tr><td>cmfchina</td><td>strategy_master</td><td>4</td><td>1</td><td>1</td><td>2026-05-24T16:00:13+08:00</td><td>2026-05-24T16:00:13+08:00</td></tr><tr><td>efundcf</td><td>strategy_master</td><td>4</td><td>1</td><td>1</td><td>2026-05-24T16:00:13+08:00</td><td>2026-05-24T16:00:13+08:00</td></tr><tr><td>fullgoal</td><td>strategy_master</td><td>4</td><td>1</td><td>1</td><td>2026-05-24T16:00:13+08:00</td><td>2026-05-24T16:00:13+08:00</td></tr><tr><td>fund99</td><td>strategy_master</td><td>8</td><td>1</td><td>1</td><td>2026-05-24T16:00:13+08:00</td><td>2026-05-24T16:00:13+08:00</td></tr><tr><td>gffunds</td><td>strategy_master</td><td>66</td><td>1</td><td>1</td><td>2026-07-05T00:09:42+08:00</td><td>2026-07-05T00:09:42+08:00</td></tr><tr><td>gffunds</td><td>strategy_performance_daily</td><td>66</td><td>1</td><td>1</td><td>2026-07-05T00:09:42+08:00</td><td>2026-07-05T00:09:42+08:00</td></tr><tr><td>gffunds</td><td>strategy_rebalance_event</td><td>66</td><td>1</td><td>1</td><td>2026-07-05T00:09:42+08:00</td><td>2026-07-05T00:09:42+08:00</td></tr><tr><td>gffunds</td><td>strategy_rebalance_fund_delta</td><td>66</td><td>1</td><td>1</td><td>2026-07-05T00:09:42+08:00</td><td>2026-07-05T00:09:42+08:00</td></tr><tr><td>gfsec_robot</td><td>strategy_master</td><td>49</td><td>1</td><td>1</td><td>2026-07-05T10:00:53+08:00</td><td>2026-07-05T10:00:53+08:00</td></tr><tr><td>gfsec_robot</td><td>strategy_performance_daily</td><td>1</td><td>1</td><td>1</td><td>2026-07-05T10:00:53+08:00</td><td>2026-07-05T10:00:53+08:00</td></tr><tr><td>gfsec_robot</td><td>strategy_performance_interval</td><td>47</td><td>1</td><td>1</td><td>2026-07-05T10:00:53+08:00</td><td>2026-07-05T10:00:53+08:00</td></tr><tr><td>harvestwm</td><td>strategy_master</td><td>4</td><td>1</td><td>1</td><td>2026-05-24T16:01:23+08:00</td><td>2026-05-24T16:01:23+08:00</td></tr><tr><td>huaxia_tougu</td><td>strategy_master</td><td>18</td><td>1</td><td>1</td><td>2026-05-24T15:47:04+08:00</td><td>2026-05-24T15:47:04+08:00</td></tr><tr><td>huaxia_tougu</td><td>strategy_performance_daily</td><td>17</td><td>1</td><td>1</td><td>2026-05-24T15:47:04+08:00</td><td>2026-05-24T15:47:04+08:00</td></tr><tr><td>huaxia_tougu</td><td>strategy_rebalance_event</td><td>18</td><td>1</td><td>1</td><td>2026-05-24T15:47:04+08:00</td><td>2026-05-24T15:47:04+08:00</td></tr><tr><td>huaxia_tougu</td><td>strategy_rebalance_fund_delta</td><td>18</td><td>1</td><td>1</td><td>2026-05-24T15:47:04+08:00</td><td>2026-05-24T15:47:04+08:00</td></tr><tr><td>southern</td><td>strategy_master</td><td>1</td><td>1</td><td>1</td><td>2026-05-24T19:02:39+08:00</td><td>2026-05-24T19:02:39+08:00</td></tr><tr><td>southern</td><td>strategy_performance_daily</td><td>1</td><td>1</td><td>1</td><td>2026-05-24T19:02:39+08:00</td><td>2026-05-24T19:02:39+08:00</td></tr></tbody></table></div><p class="muted">仅展示前 18 行，共 29 行。</p>
+        </div>
+      </div>
+      <h3>项目数据目录体积</h3>
+      <div class="table-wrap"><table><thead><tr><th>目录</th><th>文件数</th><th>大小_MB</th><th>最近修改时间</th></tr></thead><tbody><tr><td>data/normalized/ttfund_fund_nav</td><td>115</td><td>8854.166</td><td>2026-07-08T22:07:59</td></tr><tr><td>data/raw/ttfund</td><td>279417</td><td>6020.846</td><td>2026-07-08T14:55:24</td></tr><tr><td>data/normalized/ttfund</td><td>364</td><td>3574.539</td><td>2026-07-08T14:54:41</td></tr><tr><td>data/normalized/gffunds</td><td>240</td><td>992.333</td><td>2026-07-08T16:10:07</td></tr><tr><td>data/raw/gffunds</td><td>19779</td><td>924.113</td><td>2026-07-08T16:10:05</td></tr><tr><td>data/raw/fund_lookthrough</td><td>45853</td><td>544.351</td><td>2026-07-08T21:40:15</td></tr><tr><td>data/raw/gf_channel_apps</td><td>2</td><td>453.737</td><td>2026-07-05T00:59:39</td></tr><tr><td>data/raw/ttfund_fund_nav</td><td>111352</td><td>280.022</td><td>2026-07-08T22:04:42</td></tr><tr><td>outputs/current_holding_projection_audit</td><td>128</td><td>199.956</td><td>2026-07-08T22:24:48</td></tr><tr><td>data/raw/device_cache</td><td>8033</td><td>175.17</td><td>2026-07-08T14:43:39</td></tr><tr><td>outputs/fof_h1_strategy_ranking</td><td>22</td><td>72.259</td><td>2026-07-03T12:48:19</td></tr><tr><td>data/raw/fof_f10_benchmark</td><td>1277</td><td>70.155</td><td>2026-07-03T11:44:05</td></tr><tr><td>data/normalized/zocaifu</td><td>14</td><td>55.881</td><td>2026-06-20T11:36:00</td></tr><tr><td>outputs/fund_standard_classification</td><td>14</td><td>54.567</td><td>2026-06-11T11:28:41</td></tr><tr><td>outputs/fof_benchmark_ranking</td><td>18</td><td>43.133</td><td>2026-07-03T12:48:35</td></tr><tr><td>data/normalized/southern</td><td>10</td><td>41.509</td><td>2026-05-24T19:02:39</td></tr><tr><td>outputs/ttfund_post_update_quality</td><td>972</td><td>38.542</td><td>2026-07-08T22:32:36</td></tr><tr><td>outputs/current_fund_lookthrough_quality</td><td>130</td><td>35.906</td><td>2026-07-08T21:41:03</td></tr></tbody></table></div><p class="muted">仅展示前 18 行，共 30 行。</p>
+    </section>
+
+    <section class="section">
+      <h2>三、入库与渠道统计</h2>
+      <div class="two-col">
+        <div>
+          <h3>核心表行数</h3>
+          <div class="table-wrap"><table><thead><tr><th>表名</th><th>行数</th></tr></thead><tbody><tr><td>渠道信息</td><td>13</td></tr><tr><td>策略信息</td><td>1275</td></tr><tr><td>策略调仓事件</td><td>10224</td></tr><tr><td>策略调仓明细</td><td>204113</td></tr><tr><td>策略当前持仓</td><td>31178</td></tr><tr><td>策略当前持仓分组</td><td>7159</td></tr><tr><td>策略日度业绩</td><td>1005966</td></tr><tr><td>策略区间业绩</td><td>160750</td></tr><tr><td>策略披露风险指标</td><td>801</td></tr><tr><td>基金信息</td><td>6227</td></tr><tr><td>基金日度净值</td><td>9268273</td></tr><tr><td>基金净值概况</td><td>4953</td></tr><tr><td>基金分红送配</td><td>17751</td></tr><tr><td>基金名称映射</td><td>139</td></tr><tr><td>数据来源清单</td><td>5961</td></tr><tr><td>策略模拟净值</td><td>1307307</td></tr><tr><td>策略模拟净值区间</td><td>10188</td></tr><tr><td>策略模拟净值质量</td><td>1275</td></tr></tbody></table></div><p class="muted">仅展示前 18 行，共 19 行。</p>
+        </div>
+        <div>
+          <h3>渠道覆盖</h3>
+          <div class="table-wrap"><table><thead><tr><th>渠道ID</th><th>渠道名称</th><th>策略数</th><th>状态缺失策略数</th><th>日度业绩行数</th><th>有日度业绩策略数</th><th>最早业绩日</th><th>最晚业绩日</th><th>调仓事件数</th><th>有调仓策略数</th><th>当前持仓行数</th><th>有当前持仓策略数</th></tr></thead><tbody><tr><td>ttfund</td><td>天天基金/投顾</td><td>1071</td><td>494</td><td>888246</td><td>1059</td><td>2017-09-05</td><td>2026-07-07</td><td>8920</td><td>1063</td><td>28780</td><td>879</td></tr><tr><td>gffunds</td><td>广发基金投顾</td><td>66</td><td>0</td><td>41192</td><td>66</td><td>2021-08-18</td><td>2026-07-03</td><td>588</td><td>66</td><td>1137</td><td>66</td></tr><tr><td>gfsec_robot</td><td>广发证券易淘金/贝塔牛理财</td><td>49</td><td>0</td><td>3472</td><td>1</td><td>2017-01-01</td><td>2026-07-04</td><td></td><td></td><td></td><td></td></tr><tr><td>zocaifu</td><td>中欧财富/中欧钱滚滚</td><td>46</td><td>41</td><td>48728</td><td>44</td><td>2017-09-05</td><td>2026-06-18</td><td>467</td><td>42</td><td>880</td><td>43</td></tr><tr><td>huaxia_tougu</td><td>华夏投顾/华夏财富查理智投</td><td>18</td><td>4</td><td>22740</td><td>17</td><td>2019-01-21</td><td>2026-05-22</td><td>244</td><td>18</td><td>364</td><td>18</td></tr><tr><td>fund99</td><td>汇添富基金/现金宝投顾</td><td>8</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>cmfchina</td><td>招商基金/招财乐投顾</td><td>4</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>efundcf</td><td>易方达财富/e钱包</td><td>4</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>fullgoal</td><td>富国基金/富钱包星投顾</td><td>4</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>harvestwm</td><td>嘉实财富</td><td>4</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>southern</td><td>南方基金/司南投顾</td><td>1</td><td>0</td><td>1588</td><td>1</td><td>2019-10-31</td><td>2026-05-21</td><td>5</td><td>1</td><td>17</td><td>1</td></tr></tbody></table></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>四、策略、调仓、持仓和业绩</h2>
+      <div class="two-col">
+        <div>
+          <h3>天天投顾机构 Top20</h3>
+          <div class="table-wrap"><table><thead><tr><th>投顾机构</th><th>天天策略数</th></tr></thead><tbody><tr><td>中欧财富投顾</td><td>137</td></tr><tr><td>华宝智选投顾</td><td>101</td></tr><tr><td>南方基金-司南投顾</td><td>98</td></tr><tr><td>华夏投顾</td><td>90</td></tr><tr><td>国联证券-国联投顾</td><td>58</td></tr><tr><td>银华天玑投顾</td><td>58</td></tr><tr><td>富国基金-富国星投顾</td><td>38</td></tr><tr><td>广发基金-广发投顾</td><td>35</td></tr><tr><td>嘉实财富-嘉实投顾</td><td>33</td></tr><tr><td>建信基金-建信投顾</td><td>32</td></tr><tr><td>工银瑞信容易投</td><td>30</td></tr><tr><td>申万菱信基金-申小顾</td><td>30</td></tr><tr><td>万家基金懂你投</td><td>26</td></tr><tr><td>华泰证券省心投</td><td>24</td></tr><tr><td>兴证全球投顾</td><td>23</td></tr><tr><td>招商基金-招商投顾</td><td>23</td></tr><tr><td>汇添富基金-汇添富投顾</td><td>23</td></tr><tr><td>华安基金-华安投顾</td><td>21</td></tr><tr><td>景顺长城投顾</td><td>20</td></tr><tr><td>国泰基金-国泰民安投顾</td><td>19</td></tr></tbody></table></div>
+        </div>
+        <div>
+          <h3>策略状态分布</h3>
+          <div class="table-wrap"><table><thead><tr><th>策略状态</th><th>策略数</th></tr></thead><tbody><tr><td>未披露</td><td>539</td></tr><tr><td>stopped</td><td>436</td></tr><tr><td>on_sale_window</td><td>140</td></tr><tr><td>public</td><td>66</td></tr><tr><td>normal</td><td>31</td></tr><tr><td>delete</td><td>18</td></tr><tr><td>开放申购 开放赎回</td><td>14</td></tr><tr><td>public_fee_list</td><td>8</td></tr><tr><td>public_strategy_doc</td><td>4</td></tr><tr><td>public_strategy_category</td><td>4</td></tr><tr><td>public_selected_strategy</td><td>4</td></tr><tr><td>public_disclosure_only</td><td>4</td></tr></tbody></table></div><p class="muted">仅展示前 12 行，共 18 行。</p>
+        </div>
+      </div>
+      <h3>调仓事件统计</h3>
+      <div class="table-wrap"><table><thead><tr><th>渠道ID</th><th>调仓事件数</th><th>策略数</th><th>最早调仓日</th><th>最晚调仓日</th></tr></thead><tbody><tr><td>ttfund</td><td>8920</td><td>1063</td><td>2017-09-05</td><td>2026-07-08</td></tr><tr><td>gffunds</td><td>588</td><td>66</td><td>2018-07-02</td><td>2026-06-17</td></tr><tr><td>zocaifu</td><td>467</td><td>42</td><td>2017-11-30</td><td>2026-03-31</td></tr><tr><td>huaxia_tougu</td><td>244</td><td>18</td><td>2019-10-29</td><td>2026-05-19</td></tr><tr><td>southern</td><td>5</td><td>1</td><td>2019-10-31</td><td>2024-12-16</td></tr></tbody></table></div>
+      <h3>当前持仓统计</h3>
+      <div class="table-wrap"><table><thead><tr><th>渠道ID</th><th>当前持仓行数</th><th>策略数</th><th>最早持仓日</th><th>最晚持仓日</th><th>基金权重缺失行数</th></tr></thead><tbody><tr><td>ttfund</td><td>28780</td><td>879</td><td>2023-05-22</td><td>2026-07-07</td><td>85</td></tr><tr><td>gffunds</td><td>1137</td><td>66</td><td>2023-06-16</td><td>2026-06-17</td><td>0</td></tr><tr><td>zocaifu</td><td>880</td><td>43</td><td>2026-03-31</td><td>2026-06-20</td><td>0</td></tr><tr><td>huaxia_tougu</td><td>364</td><td>18</td><td>2025-05-07</td><td>2026-05-19</td><td>0</td></tr><tr><td>southern</td><td>17</td><td>1</td><td>2026-05-21</td><td>2026-05-21</td><td>0</td></tr></tbody></table></div>
+      <h3>官方日度业绩统计</h3>
+      <div class="table-wrap"><table><thead><tr><th>渠道ID</th><th>业绩区段类型</th><th>行数</th><th>策略数</th><th>最早交易日</th><th>最晚交易日</th><th>单位净值缺失行数</th><th>累计收益缺失行数</th></tr></thead><tbody><tr><td>ttfund</td><td>official_app_curve</td><td>870882</td><td>1057</td><td>2017-09-05</td><td>2026-06-02</td><td>0</td><td>0</td></tr><tr><td>zocaifu</td><td>未披露</td><td>48728</td><td>44</td><td>2017-09-05</td><td>2026-06-18</td><td>0</td><td>0</td></tr><tr><td>gffunds</td><td>7</td><td>41192</td><td>66</td><td>2021-08-18</td><td>2026-07-03</td><td>0</td><td>0</td></tr><tr><td>huaxia_tougu</td><td>未披露</td><td>22740</td><td>17</td><td>2019-01-21</td><td>2026-05-22</td><td>0</td><td>0</td></tr><tr><td>ttfund</td><td>public_quote</td><td>16932</td><td>1059</td><td>2026-05-25</td><td>2026-07-07</td><td>0</td><td>0</td></tr><tr><td>gfsec_robot</td><td>official_totalYield</td><td>3472</td><td>1</td><td>2017-01-01</td><td>2026-07-04</td><td>0</td><td>0</td></tr><tr><td>southern</td><td>未披露</td><td>1588</td><td>1</td><td>2019-10-31</td><td>2026-05-21</td><td>0</td><td>0</td></tr><tr><td>ttfund</td><td>detail_cache</td><td>432</td><td>424</td><td>2026-01-08</td><td>2026-06-17</td><td>0</td><td>0</td></tr></tbody></table></div>
+    </section>
+
+    <section class="section">
+      <h2>五、基金依赖、分红和净值</h2>
+      <div class="two-col">
+        <div>
+          <h3>基金概览</h3>
+          <div class="table-wrap"><table><thead><tr><th>基金信息数</th><th>最新净值缺失基金数</th><th>最早最新净值日</th><th>最晚最新净值日</th><th>基金净值行数</th><th>有净值基金数</th><th>最早净值日</th><th>最晚净值日</th><th>净值收益均缺失行数</th><th>分红事件数</th><th>分红基金数</th><th>最早分红日期</th><th>最晚分红日期</th><th>策略使用基金数</th><th>基金信息缺失数</th><th>净值缺失基金数</th></tr></thead><tbody><tr><td>6227</td><td>337</td><td>2018-04-09</td><td>2026-07-08</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td>9268273</td><td>5934</td><td>2001-09-21</td><td>2026-07-08</td><td>0</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>17751</td><td>2134</td><td>2002-06-24</td><td>2026-07-08</td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td>4943</td><td>0</td><td>1</td></tr></tbody></table></div>
+        </div>
+        <div>
+          <h3>基金净值来源</h3>
+          <div class="table-wrap"><table><thead><tr><th>数据来源</th><th>行数</th><th>基金数</th></tr></thead><tbody><tr><td>天天基金_pingzhongdata</td><td>9069987</td><td>4941</td></tr><tr><td>天天基金_lsjz</td><td>192122</td><td>4938</td></tr><tr><td>摩根基金官网_web_search</td><td>3449</td><td>3</td></tr><tr><td>新浪财经_CaihuiFundInfoService.getNav</td><td>1325</td><td>4</td></tr><tr><td>东方财富_rankhandler_FOF快照</td><td>982</td><td>982</td></tr><tr><td>天天基金海外基金页面</td><td>369</td><td>1</td></tr><tr><td>新浪财经_xh5Fund_nav</td><td>39</td><td>1</td></tr></tbody></table></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>六、净值回放和 App 对比</h2>
+      <div class="two-col">
+        <div>
+          <h3>模拟质量</h3>
+          <div class="table-wrap"><table><thead><tr><th>质量记录策略数</th><th>纳入模拟策略数</th><th>未纳入模拟策略数</th><th>模拟最早日期</th><th>模拟最晚日期</th></tr></thead><tbody><tr><td>1275</td><td>1142</td><td>133</td><td>2017-09-05</td><td>2026-07-08</td></tr></tbody></table></div>
+          <h3>质量等级</h3>
+          <div class="table-wrap"><table><thead><tr><th>质量等级</th><th>策略数</th></tr></thead><tbody><tr><td>完整</td><td>716</td></tr><tr><td>完整_已修复</td><td>426</td></tr><tr><td>不可回放</td><td>133</td></tr></tbody></table></div>
+        </div>
+        <div>
+          <h3>官方对比区间规则</h3>
+          <div class="table-wrap"><table><thead><tr><th>官方对比区间规则</th><th>策略数</th></tr></thead><tbody><tr><td>全模拟区间</td><td>955</td></tr><tr><td>目标盈/小目标无当前持仓，仅比较实际运作期</td><td>99</td></tr><tr><td>清盘/止盈策略仅比较实际运作期</td><td>88</td></tr></tbody></table></div>
+          <h3>偏差统计</h3>
+          <div class="table-wrap"><table><thead><tr><th>口径</th><th>样本数</th><th>最小值</th><th>中位数</th><th>P75</th><th>P90</th><th>P95</th><th>最大值</th><th>平均值</th></tr></thead><tbody><tr><td>App展示默认费前口径</td><td>1095</td><td>0.000114</td><td>0.267283</td><td>0.681917</td><td>1.994163</td><td>3.543241</td><td>92.251974</td><td>1.213056</td></tr><tr><td>费后内部资产口径</td><td>1095</td><td>0.000271</td><td>1.090537</td><td>2.286141</td><td>4.393563</td><td>6.204481</td><td>91.638166</td><td>2.214121</td></tr></tbody></table></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

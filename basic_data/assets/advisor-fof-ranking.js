@@ -78,6 +78,7 @@
       row.channel,
       row.manager,
       row.rankingCategory,
+      row.benchmarkEquityBucket,
       row.fofPublicCategory,
       row.fofBenchmarkCategory,
     ].join(" ").toLowerCase();
@@ -127,8 +128,18 @@
 
   function fmtMetric(value, metric) {
     if (value === null || value === undefined) return "未披露";
+    if (metric && metric.format === "text") return B.esc(value || "未披露");
     if (metric && metric.format === "count") return Number(value).toLocaleString("zh-CN");
     return B.pctSigned(value);
+  }
+
+  function fmtMetricText(value, metric) {
+    if (value === null || value === undefined || value === "") return "未披露";
+    if (metric && metric.format === "text") return String(value);
+    if (metric && metric.format === "count") return Number(value).toLocaleString("zh-CN");
+    const number = Number(value);
+    if (!Number.isFinite(number)) return String(value);
+    return `${number > 0 ? "+" : ""}${number.toFixed(2)}%`;
   }
 
   function valueClass(value) {
@@ -230,7 +241,7 @@
   }
 
   function defaultXMetric() {
-    return "risk:benchmarkEquity";
+    return `drawdown:${state.interval}`;
   }
 
   function defaultYMetric() {
@@ -289,6 +300,7 @@
     const xValue = xMetric.value(row);
     const yValue = yMetric.value(row);
     const profileItems = [
+      { key: "bucket:benchmarkEquity", label: "基准权益分档", value: row.benchmarkEquityBucket || row?.riskProfile?.benchmarkEquityBucket, format: "text" },
       { key: "risk:benchmarkEquity", label: "基准权益权重", value: riskProfileValue(row, "benchmarkEquityWeight") },
       { key: "risk:benchmarkBond", label: "基准债券权重", value: riskProfileValue(row, "benchmarkBondWeight") },
     ].filter((item) => item.key !== xMetric.key && item.key !== yMetric.key);
@@ -304,7 +316,7 @@
         <div><span>${B.esc(yMetric.label)}</span><b class="${valueClass(yValue)}">${fmtMetric(yValue, yMetric)}</b></div>
         <div><span>${B.esc(xMetric.label)}</span><b class="${valueClass(xValue)}">${fmtMetric(xValue, xMetric)}</b></div>
         ${profileItems.map((item) => `<div><span>${B.esc(item.label)}</span><b>${fmtMetric(item.value)}</b></div>`).join("")}
-        <div><span>排名分类</span><b>${B.esc(row.rankingCategory || "未分类")}</b></div>
+        <div><span>基准权益分档</span><b>${B.esc(row.benchmarkEquityBucket || row.rankingCategory || "未分档")}</b></div>
         <div><span>基准细分</span><b>${B.esc(row.fofBenchmarkCategory || "未披露")}</b></div>
       </div>
       <p class="desc">业绩基准：${B.esc(row.benchmark || "未披露")}</p>
@@ -360,11 +372,11 @@
             <rect x="${pad.left}" y="${pad.top}" width="${plotW}" height="${plotH}" class="advisor-scatter-bg"></rect>
             ${scatterTicks(xMin, xMax).map((tick) => {
               const x = xScale(tick);
-              return `<line x1="${x}" y1="${pad.top}" x2="${x}" y2="${pad.top + plotH}" class="advisor-scatter-grid"></line><text x="${x}" y="${height - 31}" text-anchor="middle" class="advisor-scatter-axis">${B.esc(fmtMetric(tick, xMetric))}</text>`;
+              return `<line x1="${x}" y1="${pad.top}" x2="${x}" y2="${pad.top + plotH}" class="advisor-scatter-grid"></line><text x="${x}" y="${height - 31}" text-anchor="middle" class="advisor-scatter-axis">${B.esc(fmtMetricText(tick, xMetric))}</text>`;
             }).join("")}
             ${scatterTicks(yMin, yMax).map((tick) => {
               const y = yScale(tick);
-              return `<line x1="${pad.left}" y1="${y}" x2="${pad.left + plotW}" y2="${y}" class="advisor-scatter-grid"></line><text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" class="advisor-scatter-axis">${B.esc(fmtMetric(tick, yMetric))}</text>`;
+              return `<line x1="${pad.left}" y1="${y}" x2="${pad.left + plotW}" y2="${y}" class="advisor-scatter-grid"></line><text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" class="advisor-scatter-axis">${B.esc(fmtMetricText(tick, yMetric))}</text>`;
             }).join("")}
             <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" class="advisor-scatter-axis-line"></line>
             <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" class="advisor-scatter-axis-line"></line>
@@ -374,7 +386,7 @@
               const gfClass = row.isGuangfa ? " is-gf" : "";
               const selectedClass = item.id === state.selectedPointId ? " is-selected" : "";
               const radius = row.isGuangfa ? 6.2 : 4.8;
-              const label = `${row.name}，${xMetric.label}${fmtMetric(item.x, xMetric)}，${yMetric.label}${fmtMetric(item.y, yMetric)}`;
+              const label = `${row.name}，${xMetric.label}${fmtMetricText(item.x, xMetric)}，${yMetric.label}${fmtMetricText(item.y, yMetric)}`;
               return `<circle cx="${xScale(item.x).toFixed(2)}" cy="${yScale(item.y).toFixed(2)}" r="${radius}" class="advisor-scatter-dot ${typeClass}${gfClass}${selectedClass}" data-scatter-id="${B.esc(item.id)}" tabindex="0" role="button" aria-label="${B.esc(label)}"><title>${B.esc(label)}</title></circle>`;
             }).join("")}
             <text x="${pad.left + plotW / 2}" y="${height - 9}" text-anchor="middle" class="advisor-scatter-label">${B.esc(xMetric.label)}</text>
@@ -403,7 +415,7 @@
         <td>${tag(row.entityType, row.entityType === "投顾策略" ? "is-strategy" : "is-fof")} ${row.isGuangfa ? tag("广发", "is-gf") : ""}</td>
         <td class="rank-name-cell">${detailLink(row)}<div class="small">${B.esc(row.code || row.id || "")}</div></td>
         <td>${B.esc(row.institution || "未披露")}<div class="small">${B.esc(row.manager || row.channel || "")}</div></td>
-        <td>${B.esc(row.rankingCategory || "未分类")}<div class="small">${B.esc(row.rankingCategoryBasis || "")}</div></td>
+        <td>${B.esc(row.benchmarkEquityBucket || row.rankingCategory || "未分档")}<div class="small">${B.esc(row.rankingCategoryBasis || "")}</div></td>
         <td>${B.esc(row.fofPublicCategory || "未披露")}</td>
         <td>${B.esc(row.fofBenchmarkCategory || "未披露")}<div class="small">${B.esc(row.parseConfidence || "")}</div></td>
         <td class="${valueClass(selectedValue)}">${pct(selectedValue)}</td>
@@ -426,7 +438,7 @@
             <th>产品类型</th>
             <th>产品名称</th>
             <th>机构/经理</th>
-            <th>排名分类</th>
+            <th>基准权益分档</th>
             <th>公开分类</th>
             <th>基准细分</th>
             <th>${B.esc(state.interval)}</th>
@@ -456,7 +468,7 @@
       </div>
       <div class="advisor-rank-filter-grid">
         <label class="strategy-filter-field"><span>收益区间</span><select id="rankInterval">${intervalOptions}</select><em>切换后全表重排</em></label>
-        <label class="strategy-filter-field"><span>排名分类</span><select id="rankCategory">${optionHtml(categories, state.category, "全部分类")}</select><em>按同一可比分类排名</em></label>
+        <label class="strategy-filter-field"><span>基准权益分档</span><select id="rankCategory">${optionHtml(categories, state.category, "全部分档")}</select><em>按同一基准权益分档混排</em></label>
         <label class="strategy-filter-field"><span>策略对客状态</span><select id="rankCustomer">
           <option value="all"${state.customer === "all" ? " selected" : ""}>全部投顾策略</option>
           <option value="yes"${state.customer === "yes" ? " selected" : ""}>仅对客投顾</option>
@@ -481,7 +493,7 @@
   function renderCategorySummary() {
     const categories = (pack.categoryRows || []).slice(0, 12);
     return `<section class="panel">
-      <div class="panel-head"><div><h2>主要分类样本</h2><p class="desc">用于判断当前可比池是否足够大；排名时可在“排名分类”中进一步收窄。</p></div></div>
+      <div class="panel-head"><div><h2>主要分档样本</h2><p class="desc">用于判断当前可比池是否足够大；排名时可在“基准权益分档”中进一步收窄。</p></div></div>
       <div class="category-chip-list">
         ${categories.map((row) => `<button type="button" class="category-chip-button ${state.category === row.分类 ? "is-active" : ""}" data-category-pick="${B.esc(row.分类)}">
           <strong>${B.esc(row.分类)}</strong>
@@ -499,7 +511,7 @@
       <section class="page-title">
         <div>
           <h1>投顾-FOF排名</h1>
-          <p class="desc">投顾策略与FOF基金统一进入可比分类池，可按收益区间、产品类型和细分分类混合排名。</p>
+          <p class="desc">投顾策略与FOF基金统一进入基准权益分档池，可按收益区间、产品类型和分档混合排名。</p>
         </div>
         <div class="title-pills">
           <span class="pill">数据截至 ${B.esc(pack.meta?.dataUpdatedTo || "")}</span>

@@ -5,7 +5,7 @@
   const allStrategies = summary.strategies || [];
   const isCompleteStrategy = (row) => row?.数据完整性 === "完整" && row?.风险等级 !== "D0 持仓缺失" && row?.研报产品类型 !== "持仓缺失/不入池";
   const rowsBase = allStrategies.filter(isCompleteStrategy);
-  const state = { page: 1, pageSize: 10, rows: [], sortField: "近一月", sortDir: "desc" };
+  const state = { page: 1, pageSize: 10, rows: [], sortField: "近一月", sortDir: "desc", hiddenStrategyScope: "" };
   const returnHeaders = ["近一周", "近一月", "近三月", "近1年", "今年以来", "累计收益率"];
   const riskHeaders = ["最大回撤", "波动率"];
   const weightHeaders = ["权益基金权重", "债券基金权重", "货币基金权重", "QDII权重", "指数基金权重"];
@@ -14,6 +14,7 @@
   const dateHeaderSet = new Set(dateHeaders);
   const riskOrder = ["R0 现金/超低波", "R1 低波", "R2 稳健收益", "R3 均衡稳健", "R4 均衡成长", "R5 权益/进取"];
   const reportTypeOrder = ["纯债型", "固收+型", "股债混合型", "股票型", "多元配置型"];
+  const benchmarkBucketOrder = Array.from({ length: 11 }, (_, index) => `L${index}`);
 
   function unique(field) {
     return [...new Set(rowsBase.map((row) => row[field]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
@@ -30,6 +31,18 @@
 
   function options(values) {
     return values.map((value) => `<option value="${B.esc(value)}">${B.esc(value)}</option>`).join("");
+  }
+
+  function benchmarkBucket(row) {
+    return row?.基准权益分档 || row?.基准权益分类档 || "";
+  }
+
+  function orderedBenchmarkBuckets() {
+    return [...new Set(rowsBase.map((row) => benchmarkBucket(row)).filter(Boolean))].sort((a, b) => {
+      const ai = benchmarkBucketOrder.indexOf(a);
+      const bi = benchmarkBucketOrder.indexOf(b);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi) || a.localeCompare(b, "zh-CN");
+    });
   }
 
   function filterControl(label, html, hint) {
@@ -96,6 +109,7 @@
       row.研报产品类型,
       row.研报股票子类型,
       row.业务分类,
+      benchmarkBucket(row),
       row.市场地域,
       row.主动被动,
       row.披露策略类型,
@@ -167,23 +181,16 @@
     <section class="panel">
       <div class="filters strategy-filter-grid">
         ${filterControl("关键词", '<input id="searchInput" class="control" type="search" placeholder="策略、机构、代码、渠道、分类">', "模糊匹配：策略名称、代码、机构、渠道和分类字段")}
-        ${filterControl("策略归属", `<select id="strategyScopeSelect" class="control">
-          <option value="">全部归属</option>
-          <option value="gf">广发策略</option>
-          <option value="nonGf">非广发策略</option>
-        </select>`, "精确判断：按投顾机构、渠道和广发标记识别")}
         ${filterControl("对客状态", `<select id="clientScopeSelect" class="control">
           <option value="">全部对客状态</option>
           <option value="client">对客展示</option>
           <option value="nonClient">非对客/隐藏</option>
         </select>`, "排除明确非对客、隐藏或不展示状态")}
+        ${filterControl("基准权益分档", `<select id="benchmarkBucketSelect" class="control"><option value="">全部基准权益分档</option>${options(orderedBenchmarkBuckets())}</select>`, "按业绩基准中的权益占比分档，优先用于策略横向分类")}
         ${filterControl("投顾机构", `<select id="institutionSelect" class="control"><option value="">全部投顾机构</option>${options(unique("投顾机构"))}</select>`, "精确匹配投顾机构")}
         ${filterControl("渠道", `<select id="channelSelect" class="control"><option value="">全部渠道</option>${options(unique("渠道"))}</select>`, "精确匹配数据来源渠道")}
         ${filterControl("研报产品类型", `<select id="reportTypeSelect" class="control"><option value="">全部研报产品类型</option>${options(orderedUnique("研报产品类型", reportTypeOrder))}</select>`, "投研可比口径：纯债、固收+、股债、股票、多元配置")}
         ${filterControl("业务分类", `<select id="businessSelect" class="control"><option value="">全部业务分类</option>${options(unique("业务分类"))}</select>`, "运营货架口径，可能比研报产品类型更细")}
-        ${filterControl("风险等级", `<select id="riskSelect" class="control"><option value="">全部风险等级</option>${options(orderedUnique("风险等级", riskOrder))}</select>`, "系统统一风险等级，非渠道原始披露风险")}
-        ${filterControl("市场地域", `<select id="regionSelect" class="control"><option value="">全部市场地域</option>${options(unique("市场地域"))}</select>`, "按国内、海外或跨市场分类")}
-        ${filterControl("主动/被动", `<select id="activePassiveSelect" class="control"><option value="">全部主动/被动</option>${options(unique("主动被动"))}</select>`, "按底层持仓主动、指数或混合实现判断")}
         ${filterControl("排序", `<select id="sortSelect" class="control">
           <option value="name">按策略名称</option>
           <option value="return">按累计收益率</option>
@@ -202,9 +209,9 @@
       <details class="filter-help-details">
         <summary>查看筛选字段说明</summary>
         <div class="filter-help-grid">
+          <span><b>基准权益分档</b> 按业绩基准中的权益权重做分档，优先用于市场横向分类和首层筛选。</span>
           <span><b>研报产品类型</b> 投研可比池，适合同类业绩和风险比较。</span>
           <span><b>业务分类</b> 运营货架口径，适合产品线和销售场景管理。</span>
-          <span><b>风险等级</b> 使用系统统一风险口径，避免渠道披露等级混用。</span>
           <span><b>对客状态</b> 用于区分可对客展示产品和仅保留核验样本。</span>
         </div>
       </details>
@@ -228,27 +235,22 @@
 
   function filterRows() {
     const keyword = B.byId("searchInput").value.trim().toLowerCase();
-    const strategyScope = B.byId("strategyScopeSelect").value;
     const clientScope = B.byId("clientScopeSelect").value;
+    const benchmarkBucketValue = B.byId("benchmarkBucketSelect").value;
     const institution = B.byId("institutionSelect").value;
     const channel = B.byId("channelSelect").value;
     const reportType = B.byId("reportTypeSelect").value;
     const business = B.byId("businessSelect").value;
-    const risk = B.byId("riskSelect").value;
-    const region = B.byId("regionSelect").value;
-    const activePassive = B.byId("activePassiveSelect").value;
     return rowsBase.filter((row) => {
-      if (strategyScope === "gf" && !isGfStrategy(row)) return false;
-      if (strategyScope === "nonGf" && isGfStrategy(row)) return false;
+      if (state.hiddenStrategyScope === "gf" && !isGfStrategy(row)) return false;
+      if (state.hiddenStrategyScope === "nonGf" && isGfStrategy(row)) return false;
       if (clientScope === "client" && !isClientFacing(row)) return false;
       if (clientScope === "nonClient" && isClientFacing(row)) return false;
+      if (benchmarkBucketValue && benchmarkBucket(row) !== benchmarkBucketValue) return false;
       if (institution && row.投顾机构 !== institution) return false;
       if (channel && row.渠道 !== channel) return false;
       if (reportType && row.研报产品类型 !== reportType) return false;
       if (business && row.业务分类 !== business) return false;
-      if (risk && row.风险等级 !== risk) return false;
-      if (region && row.市场地域 !== region) return false;
-      if (activePassive && row.主动被动 !== activePassive) return false;
       if (keyword && !keywordText(row).includes(keyword)) return false;
       return true;
     });
@@ -265,7 +267,8 @@
     const pageRows = rows.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
     const gfCount = rows.filter(isGfStrategy).length;
     const clientCount = rows.filter(isClientFacing).length;
-    B.byId("resultCount").textContent = `当前筛选 ${rows.length.toLocaleString("zh-CN")} 条策略，广发 ${gfCount.toLocaleString("zh-CN")} 条，对客 ${clientCount.toLocaleString("zh-CN")} 条`;
+    const scopeText = state.hiddenStrategyScope === "gf" ? "｜证据范围 广发策略" : (state.hiddenStrategyScope === "nonGf" ? "｜证据范围 非广发策略" : "");
+    B.byId("resultCount").textContent = `当前筛选 ${rows.length.toLocaleString("zh-CN")} 条策略，广发 ${gfCount.toLocaleString("zh-CN")} 条，对客 ${clientCount.toLocaleString("zh-CN")} 条${scopeText}`;
     B.byId("pageInfo").textContent = `${state.page} / ${maxPage}`;
     B.byId("prevPage").disabled = state.page <= 1;
     B.byId("nextPage").disabled = state.page >= maxPage;
@@ -289,15 +292,13 @@
   function applyInitialParams() {
     const params = B.params();
     if (params.get("q")) B.byId("searchInput").value = params.get("q");
-    setControlFromParam("strategyScopeSelect", "strategyScope");
+    state.hiddenStrategyScope = params.get("strategyScope") || state.hiddenStrategyScope;
     setControlFromParam("clientScopeSelect", "clientScope");
+    setControlFromParam("benchmarkBucketSelect", "benchmarkBucket");
     setControlFromParam("institutionSelect", "institution");
     setControlFromParam("channelSelect", "channel");
     setControlFromParam("reportTypeSelect", "reportType");
     setControlFromParam("businessSelect", "business");
-    setControlFromParam("riskSelect", "risk");
-    setControlFromParam("regionSelect", "region");
-    setControlFromParam("activePassiveSelect", "activePassive");
     if (params.get("sort")) {
       B.byId("sortSelect").value = params.get("sort");
       applySortPreset(params.get("sort"));
@@ -310,7 +311,7 @@
   }
 
   applyInitialParams();
-  ["searchInput", "strategyScopeSelect", "clientScopeSelect", "institutionSelect", "channelSelect", "reportTypeSelect", "businessSelect", "riskSelect", "regionSelect", "activePassiveSelect"].forEach((id) => {
+  ["searchInput", "clientScopeSelect", "benchmarkBucketSelect", "institutionSelect", "channelSelect", "reportTypeSelect", "businessSelect"].forEach((id) => {
     B.byId(id).addEventListener("input", resetPageAndRender);
   });
   B.byId("sortSelect").addEventListener("input", () => {
@@ -331,17 +332,15 @@
   });
   B.byId("resetButton").addEventListener("click", () => {
     B.byId("searchInput").value = "";
-    B.byId("strategyScopeSelect").value = "";
     B.byId("clientScopeSelect").value = "";
+    B.byId("benchmarkBucketSelect").value = "";
     B.byId("institutionSelect").value = "";
     B.byId("channelSelect").value = "";
     B.byId("reportTypeSelect").value = "";
     B.byId("businessSelect").value = "";
-    B.byId("riskSelect").value = "";
-    B.byId("regionSelect").value = "";
-    B.byId("activePassiveSelect").value = "";
     B.byId("sortSelect").value = "month";
     B.byId("pageSizeSelect").value = "10";
+    state.hiddenStrategyScope = "";
     applySortPreset("month");
     state.pageSize = 10;
     resetPageAndRender();

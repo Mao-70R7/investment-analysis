@@ -414,8 +414,8 @@
     return ["策略代码", "披露策略类型", "披露风险等级", "建议持有时长", "起投金额", "标签", "策略概念"].map((name) => ({ 字段: name, 值: byName[name] ?? "未披露" }));
   }
   function classificationInfoRows() {
-    const names = ["研报产品类型", "研报股票子类型", "研报分类依据", "风险等级", "权益风险档", "波动风险档", "回撤风险档", "风险触发指标", "风险分类依据", "业务分类", "业务分类依据", "业务组合分类", "业务分类标签", "天天展示状态", "天天当前对客展示", "天天上架生命周期", "天天展示判定依据", "市场地域", "主动被动", "特殊标签", "策略实现标签", "权益基金权重", "债券基金权重", "货币基金权重", "混合基金权重", "QDII权重", "指数基金权重", "主动基金权重", "基准权益权重", "基准债券权重", "基准货币权重", "基准可用状态", "基础数据等级", "分类依据"];
-    return names.map((name) => ({ 字段: name, 值: classificationMap[name] ?? "未披露" }));
+    const names = ["研报产品类型", "研报股票子类型", "研报分类依据", "风险等级", "权益风险档", "波动风险档", "回撤风险档", "风险触发指标", "风险分类依据", "业务分类", "业务分类依据", "业务组合分类", "业务分类标签", "天天展示状态", "天天当前对客展示", "天天上架生命周期", "天天展示判定依据", "市场地域", "主动被动", "特殊标签", "策略实现标签", "权益基金权重", "债券基金权重", "货币基金权重", "混合基金权重", "QDII权重", "指数基金权重", "主动基金权重", "基准权益权重", "基准债券权重", "基准货币权重", "基准权益分档", "基准结构类型", "非权益比较轨道", "正式可比池", "可比池样本资格", "可比池说明", "基准互斥权重合计_百分比", "基准港股权益权重", "基准海外权益权重", "是否多元策略", "多元策略标签", "基准映射置信度", "基准资产已映射权重", "基准资产未映射权重", "基准资产大类-权益", "基准资产大类-债券", "基准资产大类-现金", "基准资产大类-商品", "基准资产大类-另类", "基准资产大类-其他", "基准资产类别-A股", "基准资产类别-港股", "基准资产类别-海外权益", "基准资产类别-债券", "基准资产类别-商品", "基准资产类别-现金", "基准资产类别-其他", "基准可用状态", "基础数据等级", "分类依据"];
+    return names.map((name) => ({ 字段: name, 值: name === "基准权益分档" ? (classificationMap.基准权益分档 || classificationMap.基准权益分类档 || "未披露") : (classificationMap[name] ?? "未披露") }));
   }
   function classChip(labelName, value, main = false) {
     return `<div class="class-chip ${main ? "is-main" : ""}"><span>${B.label(labelName)}</span><strong>${B.valueHtml(labelName, value)}</strong></div>`;
@@ -425,7 +425,7 @@
   }
   function classificationSummary() {
     const holdingWeights = ["权益基金权重", "债券基金权重", "货币基金权重", "QDII权重", "指数基金权重", "主动基金权重"];
-    const benchmarkWeights = ["基准权益权重", "基准债券权重", "基准货币权重"];
+    const benchmarkWeights = ["基准权益权重", "基准债券权重", "基准货币权重", "基准资产大类-商品", "基准资产大类-另类"];
     return `<div class="classification-summary">
       <div class="class-chip-grid">
         ${classChip("研报产品类型", classificationMap.研报产品类型 || detail.summary.研报产品类型, true)}
@@ -434,6 +434,9 @@
         ${classChip("业务分类", classificationMap.业务分类 || detail.summary.业务分类)}
         ${classChip("天天当前对客展示", classificationMap.天天当前对客展示 || detail.summary.天天当前对客展示)}
         ${classChip("天天展示状态", classificationMap.天天展示状态)}
+        ${classChip("基准权益分档", classificationMap.基准权益分档 || classificationMap.基准权益分类档)}
+        ${classChip("非权益比较轨道", classificationMap.非权益比较轨道)}
+        ${classChip("正式可比池", classificationMap.正式可比池)}
         ${classChip("市场地域", classificationMap.市场地域)}
         ${classChip("主动被动", classificationMap.主动被动)}
         ${classChip("特殊标签", classificationMap.特殊标签)}
@@ -446,6 +449,19 @@
       <div class="class-metric-grid">${benchmarkWeights.map((name) => classMetric(name, classificationMap[name])).join("")}${classMetric("基础数据等级", classificationMap.基础数据等级)}</div>
       <div class="class-basis"><strong>${B.label("研报分类依据")}</strong><span>${B.esc(classificationMap.研报分类依据 || "未披露")}</span></div>
       <div class="class-basis"><strong>${B.label("分类依据")}</strong><span>${B.esc(classificationMap.分类依据 || "未披露")}</span></div>
+    </div>`;
+  }
+  function benchmarkAssetStructure() {
+    const metaFields = ["基准权益分档", "非权益比较轨道", "正式可比池", "可比池样本资格", "基准映射置信度"];
+    const majorFields = ["基准资产大类-权益", "基准资产大类-债券", "基准资产大类-现金", "基准资产大类-商品", "基准资产大类-另类", "基准资产大类-其他"];
+    const categoryFields = ["基准资产类别-A股", "基准资产类别-港股", "基准资产类别-海外权益", "基准资产类别-债券", "基准资产类别-商品", "基准资产类别-现金", "基准资产类别-其他"];
+    const coverageFields = ["基准互斥权重合计_百分比", "基准港股权益权重", "基准海外权益权重", "基准资产已映射权重", "基准资产未映射权重"];
+    return `<div class="classification-summary benchmark-asset-summary">
+      <div class="class-chip-grid">${metaFields.map((name) => classChip(name, name === "基准权益分档" ? (classificationMap.基准权益分档 || classificationMap.基准权益分类档) : classificationMap[name])).join("")}</div>
+      <div class="class-section-title">资产大类</div>
+      <div class="class-metric-grid">${majorFields.map((name) => classMetric(name, classificationMap[name])).join("")}${coverageFields.map((name) => classMetric(name, classificationMap[name])).join("")}</div>
+      <div class="class-section-title">资产类别</div>
+      <div class="class-metric-grid">${categoryFields.map((name) => classMetric(name, classificationMap[name])).join("")}</div>
     </div>`;
   }
   function benchmarkInfo() {
@@ -1086,6 +1102,10 @@
         <div class="profile-block classification-block">
           <h3>分类影响指标</h3>
           ${classificationSummary()}
+        </div>
+        <div class="profile-block benchmark-asset-block">
+          <h3>基准资产结构</h3>
+          ${benchmarkAssetStructure()}
         </div>
         <div class="profile-block evaluation-block">
           <h3>评价核心数据</h3>

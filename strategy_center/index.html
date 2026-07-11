@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>策略中心 - 全市场投顾分析平台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #102033;
+      --muted: #64748b;
+      --line: #d9e2ec;
+      --accent: #0e7490;
+      --accent-soft: #e0f2fe;
+      --good: #047857;
+      --warn: #b45309;
+      --bad: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 22px 28px 16px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    main {
+      padding: 20px 28px 32px;
+      max-width: 1680px;
+      margin: 0 auto;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 88px;
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .metric .value {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr);
+      gap: 10px;
+      margin: 16px 0;
+    }
+    input, select {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .table-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: auto;
+      max-height: calc(100vh - 260px);
+    }
+    table {
+      width: 100%;
+      min-width: 1180px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #eef3f8;
+      border-bottom: 1px solid var(--line);
+      color: #334155;
+      text-align: left;
+      padding: 10px 12px;
+      white-space: nowrap;
+    }
+    tbody td {
+      border-bottom: 1px solid #edf2f7;
+      padding: 10px 12px;
+      vertical-align: top;
+    }
+    tbody tr:hover { background: #f8fbfd; }
+    .name {
+      font-weight: 650;
+      max-width: 280px;
+    }
+    .sub {
+      color: var(--muted);
+      margin-top: 4px;
+      font-size: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #075985;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .pct.good { color: var(--good); }
+    .pct.warn { color: var(--warn); }
+    .pct.bad { color: var(--bad); }
+    .empty {
+      padding: 28px;
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 900px) {
+      header, main { padding-left: 14px; padding-right: 14px; }
+      .metrics { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+      .toolbar { grid-template-columns: 1fr; }
+      .table-wrap { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>策略中心</h1>
+    <div class="meta" id="metaLine">加载中</div>
+  </header>
+  <main>
+    <section class="metrics" id="metrics"></section>
+    <section class="toolbar">
+      <input id="searchInput" type="search" placeholder="搜索策略、投顾、基准、标签">
+      <select id="channelFilter"><option value="">全部渠道</option></select>
+      <select id="qualityFilter"><option value="">全部质量</option></select>
+      <select id="navSourceFilter"><option value="">全部净值来源</option></select>
+    </section>
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>策略</th>
+            <th>渠道</th>
+            <th>最新净值日</th>
+            <th>累计收益</th>
+            <th>年化收益</th>
+            <th>最大回撤</th>
+            <th>波动率</th>
+            <th>夏普</th>
+            <th>调仓胜率</th>
+            <th>持仓日期</th>
+            <th>质量</th>
+          </tr>
+        </thead>
+        <tbody id="strategyRows"></tbody>
+      </table>
+      <div class="empty" id="emptyState" hidden>没有符合条件的策略</div>
+    </section>
+  </main>
+  <script src="data/summary.js"></script>
+  <script src="data/quality.js"></script>
+  <script>
+    const store = window.__STRATEGY_CENTER_DATA__ || {};
+    const summary = store.summary || {};
+    const strategies = Array.isArray(summary.strategies) ? summary.strategies : [];
+    const $ = (id) => document.getElementById(id);
+
+    function text(value, fallback = "-") {
+      return value === null || value === undefined || value === "" ? fallback : String(value);
+    }
+    function esc(value, fallback = "-") {
+      return text(value, fallback).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[ch]));
+    }
+    function pct(value) {
+      return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}%` : "-";
+    }
+    function number(value) {
+      return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "-";
+    }
+    function pctClass(value, positiveGood = true) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "";
+      if (positiveGood) return n >= 0 ? "good" : "bad";
+      if (n <= 10) return "good";
+      if (n <= 25) return "warn";
+      return "bad";
+    }
+    function optionList(field) {
+      return [...new Set(strategies.map((item) => item[field]).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "zh-CN"));
+    }
+    function fillOptions(selectId, field) {
+      const select = $(selectId);
+      for (const value of optionList(field)) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      }
+    }
+    function renderMetrics() {
+      const metrics = [
+        ["策略数", number(summary.strategyCount ?? strategies.length)],
+        ["最新净值日", text(summary.latestNavDate)],
+        ["可回放策略", number(summary.simulationIncludedCount)],
+        ["严格完整", number(summary.strictCleanCount)],
+        ["需关注", number(summary.invalidCount)],
+      ];
+      $("metrics").innerHTML = metrics.map(([label, value]) => `<div class="metric"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div></div>`).join("");
+      $("metaLine").textContent = `数据生成：${text(summary.generatedAt)}；最新净值日：${text(summary.latestNavDate)}；数据来源：strategy_center/data/summary.js`;
+    }
+    function row(item) {
+      const tags = Array.isArray(item.tags) && item.tags.length ? `<div class="sub">${item.tags.slice(0, 4).map((tag) => esc(tag)).join(" / ")}</div>` : "";
+      return `<tr>
+        <td class="name">${esc(item.name)}<div class="sub">${esc(item.advisor)} ${tags}</div></td>
+        <td><span class="pill">${esc(item.channelName || item.channelId)}</span></td>
+        <td>${esc(item.navLatestDate)}</td>
+        <td class="pct ${pctClass(item.cumulativeReturnPct)}">${pct(item.cumulativeReturnPct)}</td>
+        <td class="pct ${pctClass(item.annualizedReturnPct)}">${pct(item.annualizedReturnPct)}</td>
+        <td class="pct ${pctClass(item.maxDrawdownPct, false)}">${pct(item.maxDrawdownPct)}</td>
+        <td>${pct(item.volatilityPct)}</td>
+        <td>${Number.isFinite(Number(item.sharpe)) ? Number(item.sharpe).toFixed(2) : "-"}</td>
+        <td>${pct(item.rebalanceWinRatePct)}</td>
+        <td>${esc(item.holdingDate)}</td>
+        <td>${esc(item.qualityGrade)}<div class="sub">${esc(item.navSource)}</div></td>
+      </tr>`;
+    }
+    function filterItems() {
+      const q = $("searchInput").value.trim().toLowerCase();
+      const channel = $("channelFilter").value;
+      const quality = $("qualityFilter").value;
+      const navSource = $("navSourceFilter").value;
+      return strategies.filter((item) => {
+        if (channel && item.channelName !== channel) return false;
+        if (quality && item.qualityGrade !== quality) return false;
+        if (navSource && item.navSource !== navSource) return false;
+        if (!q) return true;
+        const haystack = [
+          item.name,
+          item.advisor,
+          item.benchmark,
+          item.risk,
+          item.channelName,
+          ...(Array.isArray(item.tags) ? item.tags : []),
+        ].filter(Boolean).join(" ").toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+    function renderRows() {
+      const items = filterItems();
+      $("strategyRows").innerHTML = items.slice(0, 500).map(row).join("");
+      $("emptyState").hidden = items.length > 0;
+    }
+    fillOptions("channelFilter", "channelName");
+    fillOptions("qualityFilter", "qualityGrade");
+    fillOptions("navSourceFilter", "navSource");
+    renderMetrics();
+    renderRows();
+    ["searchInput", "channelFilter", "qualityFilter", "navSourceFilter"].forEach((id) => $(id).addEventListener("input", renderRows));
+  </script>
+</body>
+</html>

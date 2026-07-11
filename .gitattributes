@@ -10,3 +10,7 @@ basic_data/data/insight_data_pack.js filter=lfs diff=lfs merge=lfs -text
 basic_data/data/topic_analysis_pack.js filter=lfs diff=lfs merge=lfs -text
 basic_data/data/rebalance_fund_category_pack.js filter=lfs diff=lfs merge=lfs -text
 basic_data/data/rebalance_fund_category_pack.json filter=lfs diff=lfs merge=lfs -text
+basic_data/data/public_fund_performance_snapshot.json filter=lfs diff=lfs merge=lfs -text
+basic_data/data/public_fund_performance_snapshot.js filter=lfs diff=lfs merge=lfs -text
+basic_data/reports/advisor_fof_mixed_performance_20260630/mixed_rank_20260630.xlsx.inspect.ndjson filter=lfs diff=lfs merge=lfs -text
+reports/advisor_public_fund_mixed_performance_20260630/workbook_source.json filter=lfs diff=lfs merge=lfs -text

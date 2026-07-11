@@ -30,11 +30,15 @@
   const codeField = fundFields[0] || "基金代码";
   const nameField = fundFields[1] || "基金名称";
   const fundObjects = funds.map((row, index) => ({ index, row, data: toObject(fundFields, row) }));
-  const matched = fundObjects.find((item) => {
+  const matchedFromPack = fundObjects.find((item) => {
     const code = String(item.data[codeField] || "").trim();
     const name = String(item.data[nameField] || "").trim();
     return (requestedCode && code === requestedCode) || (requestedName && name === requestedName);
   });
+  const fallbackFundData = requestedCode
+    ? { [codeField]: requestedCode, [nameField]: requestedName || requestedCode }
+    : null;
+  const matched = matchedFromPack || (fallbackFundData ? { index: -1, row: null, data: fallbackFundData } : null);
 
   if (!matched) {
     empty("未找到匹配的基金。");
@@ -53,6 +57,16 @@
 
   function nonEmpty(value) {
     return value !== null && value !== undefined && value !== "";
+  }
+
+  function mergeNonEmpty(...sources) {
+    const merged = {};
+    sources.forEach((source) => {
+      Object.entries(source || {}).forEach(([key, value]) => {
+        if (nonEmpty(value)) merged[key] = value;
+      });
+    });
+    return merged;
   }
 
   function isSignedPctField(field) {
@@ -605,7 +619,7 @@
 
   function buildProfileSections(fundData, enrichment) {
     const profile = enrichment?.profile || {};
-    const sources = [fundData, profile.info || {}, profile.navSummary || {}, profile.dictionary || {}];
+    const sources = [fundData, profile.publicSnapshot || {}, profile.fundF10 || {}, profile.fofSnapshot || {}, profile.fofF10 || {}, profile.info || {}, profile.navSummary || {}, profile.dictionary || {}];
     const topicTags = (profile.dictionary || {}).主题标签 || (profile.info || {}).主题标签 || [];
     return `<section class="panel fund-profile-panel">
       <div class="panel-head">
@@ -616,6 +630,7 @@
       </div>
       ${infoSection("基础识别", ["基金代码", "基金名称", "标准基金名称", "基金公司", "基金经理", "基金类型", "基金状态"], sources)}
       ${infoSection("标准分类", ["天天基金大类", "天天基金二级分类", "二级分类", "标准资产大类", "标准资产细类", "经济资产大类", "经济资产细类", "投顾资产分类桶", "主动被动标签", "市场地域标签", "跟踪指数", "跟踪指数_名称推断"], sources)}
+      ${infoSection("基准与业绩口径", ["基准权益分档", "非权益比较轨道", "正式可比池", "可比池样本资格", "可比池说明", "基准结构类型", "业绩比较基准", "基准映射置信度", "基准权益权重_百分比", "基准债券权重_百分比", "基准货币权重_百分比", "基准商品权重_百分比", "基准另类权重_百分比", "基准未知权重_百分比", "基准互斥权重合计_百分比", "基准港股权益权重_百分比", "基准海外权益权重_百分比", "FOF公开分类", "FOF基准细分分类", "F10基金类型", "F10成立日期", "上半年收益率_百分比", "今年以来收益率_百分比", "近1月收益率_百分比", "近3月收益率_百分比", "近6月收益率_百分比", "近1年收益率_百分比", "上半年最大回撤_百分比", "近1年最大回撤_百分比", "上半年年化波动率_百分比", "近1年年化波动率_百分比", "收益数据状态", "风险数据状态"], sources)}
       ${themeTagsHtml(topicTags)}
       ${infoSection("经济暴露口径", ["基金分类来源", "基金分类依据", "基金穿透报告期", "基金穿透覆盖状态", "是否估算分类", "经济资产暴露", "经济行业暴露", "经济主题标签", "经济暴露报告期", "穿透方法", "经济暴露置信度", "经济暴露质量状态"], sources)}
       ${infoSection("原始季报审计口径", ["原始资产暴露", "原始行业暴露", "资产暴露", "行业暴露", "行业主题", "行业大类", "权益行业主题", "权益行业大类", "研报大类资产", "研报A股行业"], sources)}
@@ -664,7 +679,7 @@
     const heroMetrics = pickFields(fundFields, ["总权重", "持仓策略数", "中位权重", "区间收益率", "增持策略数", "减持策略数"]);
     document.title = `${fundData[nameField] || "基金详情"}｜基金详情`;
     const profile = enrichment?.profile || {};
-    const merged = { ...(profile.dictionary || {}), ...(profile.info || {}), ...(profile.navSummary || {}), ...fundData };
+    const merged = mergeNonEmpty(profile.dictionary, profile.info, profile.navSummary, fundData);
     root.innerHTML = `
       <section class="panel hero-panel fund-hero-panel">
         <div class="fund-hero">
@@ -681,7 +696,7 @@
         ${enrichment ? "" : '<div class="hero-support"><div class="empty">尚未找到该基金的增强详情包。请运行 scripts/构建基金详情增强数据.py 或每日更新 BAT。</div></div>'}
       </section>
       ${buildProfileSections(fundData, enrichment)}
-      ${fundEntitySection(fundData)}
+      ${fundEntitySection(merged)}
       ${classificationSnapshotSection(fundData, enrichment)}
       ${navSection(enrichment)}
       ${assetSection(enrichment)}

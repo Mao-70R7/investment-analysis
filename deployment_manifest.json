@@ -1,25 +1,25 @@
 {
-  "generatedAt": "2026-07-04T23:08:11+08:00",
+  "generatedAt": "2026-07-11T14:50:52+08:00",
   "deployDir": "E:\\synctingDataToWork\\全市场投顾分析平台",
-  "pageSet": "basic_data",
+  "pageSet": "all",
   "defaultPage": "basic_data/index.html",
   "status": "ready",
   "missing": [],
   "strategyCenter": {
-    "exists": false,
-    "files": 0,
-    "bytes": 0,
-    "latestNavDate": null,
-    "detailFileCount": 0
+    "exists": true,
+    "files": 1279,
+    "bytes": 523180818,
+    "latestNavDate": "2026-07-08",
+    "detailFileCount": 1275
   },
   "basicData": {
     "exists": true,
-    "files": 5664,
-    "bytes": 2005537079
+    "files": 28534,
+    "bytes": 3632013550
   },
   "fullDataStatisticsReport": {
-    "exists": false,
-    "files": 0,
-    "bytes": 0
+    "exists": true,
+    "files": 1,
+    "bytes": 28519
   }
 }

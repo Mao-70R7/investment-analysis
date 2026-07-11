@@ -235,12 +235,13 @@
   const reportTypeOrder = ["纯债型", "固收+型", "股债混合型", "股票型", "多元配置型", "持仓缺失/不入池"];
   const reportAssetOrder = ["A股", "港股", "美股", "债券", "黄金", "货币及现金", "海外债券", "新兴市场", "其他发达市场", "海外REIT", "其他商品"];
   const reportAssetSet = new Set(reportAssetOrder);
+  const benchmarkBucketOrder = Array.from({ length: 11 }, (_, index) => `L${index}`);
   const highFrequencyHoldingThreshold = 0.5;
   const state = {
     tab: compareStandalone ? "compare" : "market",
+    benchmarkBucket: "",
     risk: "",
     business: "",
-    region: "",
     clientScope: "",
     gfScope: "",
     institution: "",
@@ -286,9 +287,9 @@
   else if (tabs.some(([key]) => key === initTab)) state.tab = initTab;
   if (initTab === "cockpit") state.tab = "market";
   state.range = initParams.get("range") || state.range;
+  state.benchmarkBucket = initParams.get("benchmarkBucket") || initParams.get("benchmarkEquityBucket") || state.benchmarkBucket;
   state.risk = initParams.get("risk") || state.risk;
   state.business = initParams.get("business") || state.business;
-  state.region = initParams.get("region") || state.region;
   state.clientScope = initParams.get("clientScope") || state.clientScope;
   state.gfScope = initParams.get("strategyScope") || initParams.get("gfScope") || state.gfScope;
   state.institution = initParams.get("institution") || state.institution;
@@ -301,6 +302,18 @@
   const rawPointById = new Map(rawPoints.map((row) => [row.统一策略ID, row]));
   const masterStrategyById = new Map(masterStrategies.map((row) => [row.统一策略ID, row]));
   const allStrategyById = new Map((summary.strategies || []).map((row) => [row.统一策略ID, row]));
+  const benchmarkBucketValue = (row = {}) => {
+    const direct = raw(row.基准权益分档) || raw(row.基准权益分类档);
+    if (direct) return direct;
+    const strategyId = raw(row.统一策略ID);
+    if (!strategyId) return "";
+    const base = rawPointById.get(strategyId) || masterStrategyById.get(strategyId) || allStrategyById.get(strategyId) || {};
+    return raw(base.基准权益分档) || raw(base.基准权益分类档);
+  };
+  const benchmarkBucketSortValue = (value) => {
+    const index = benchmarkBucketOrder.indexOf(raw(value));
+    return index === -1 ? 999 : index;
+  };
   const globalBenchmarks = summary.globalBenchmarks || [];
   const compareDetailStore = new Map();
   const compareLoadTasks = new Map();
@@ -311,8 +324,9 @@
   const displayStrategyIds = new Set(rawPoints.map((row) => row.统一策略ID).filter(Boolean));
   const signalDetailStore = new Map();
   const risks = orderedRiskValues(rawPoints);
+  const benchmarkBuckets = [...new Set(rawPoints.map((row) => benchmarkBucketValue(row)).filter(Boolean))]
+    .sort((a, b) => benchmarkBucketSortValue(a) - benchmarkBucketSortValue(b) || a.localeCompare(b, "zh-CN"));
   const businesses = [...new Set(rawPoints.map((row) => row.业务分类).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const regions = [...new Set(rawPoints.map((row) => row.市场地域).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const institutions = [...new Set(rawPoints.map((row) => row.投顾机构).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const reportTypes = [...new Set(rawPoints.map((row) => row.研报产品类型).filter(Boolean))]
     .sort((a, b) => {
@@ -811,9 +825,9 @@
     if (row.风险等级 === "D0 持仓缺失") return false;
     if (!strategyScopeMatch(row)) return false;
     if (!clientScopeMatch(row)) return false;
+    if (state.benchmarkBucket && benchmarkBucketValue(row) !== state.benchmarkBucket) return false;
     if (state.risk && row.风险等级 !== state.risk) return false;
     if (state.business && row.业务分类 !== state.business) return false;
-    if (state.region && row.市场地域 !== state.region) return false;
     return true;
   }
 
@@ -821,9 +835,9 @@
     if (!displayScopeMatch(row)) return false;
     if (!strategyScopeMatch(row)) return false;
     if (!clientScopeMatch(row)) return false;
+    if (state.benchmarkBucket && benchmarkBucketValue(row) !== state.benchmarkBucket) return false;
     if (state.risk && row.风险等级 !== state.risk) return false;
     if (state.business && row.业务分类 !== state.business) return false;
-    if (state.region && row.市场地域 !== state.region) return false;
     return true;
   }
 
@@ -841,8 +855,8 @@
     if (row.风险等级 === "D0 持仓缺失") return false;
     if (!strategyScopeMatch(row)) return false;
     if (!clientScopeMatch(row)) return false;
+    if (state.benchmarkBucket && benchmarkBucketValue(row) !== state.benchmarkBucket) return false;
     if (state.business && row.业务分类 !== state.business) return false;
-    if (state.region && row.市场地域 !== state.region) return false;
     return true;
   }
 
@@ -863,6 +877,10 @@
 
   function majority(rows, field) {
     return [...groupBy(rows, (row) => row[field]).entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0] || "未分类";
+  }
+
+  function majorityBenchmarkBucket(rows) {
+    return [...groupBy(rows, (row) => benchmarkBucketValue(row) || "未分类").entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0] || "未分类";
   }
 
   function collapseTargetSeries(rows) {
@@ -889,6 +907,7 @@
         代表期次: best.策略名称,
         期次数: list.length,
         风险等级: highestRisk(list),
+        基准权益分档: majorityBenchmarkBucket(list),
         市场地域: majority(list, "市场地域"),
         主动被动: majority(list, "主动被动"),
         是否广发: list.some(isGf) ? "是" : "否"
@@ -964,9 +983,9 @@
   }
 
   function selectedPointPanel(row) {
-    if (!row) return `<div class="insight-callout"><strong>点阵选中策略：</strong>点击图中的点查看对应策略、风险等级、业务分类、业绩和风险指标。</div>`;
+    if (!row) return `<div class="insight-callout"><strong>点阵选中策略：</strong>点击图中的点查看对应策略、基准权益分档、业务分类、业绩和风险指标。</div>`;
     const calmar = metricRaw(row, "卡玛比率");
-    return `<div class="insight-callout"><strong>点阵选中策略：</strong>${strategyLink(row)}｜${B.esc(row.投顾机构 || "未披露机构")}｜${B.esc(row.风险等级 || "未分类")}｜${B.esc(row.业务分类 || "未分类")}｜${B.esc(row.市场地域 || "未分类")}<br>
+    return `<div class="insight-callout"><strong>点阵选中策略：</strong>${strategyLink(row)}｜${B.esc(row.投顾机构 || "未披露机构")}｜${B.esc(benchmarkBucketValue(row) || "未分类")}｜${B.esc(row.业务分类 || "未分类")}｜${B.esc(row.风险等级 || "未分类")}<br>
       <strong>${B.esc(rangeLabel())}收益：</strong>${metricHtml(row, "区间收益")}　
       <strong>最大回撤：</strong>${metricHtml(row, "最大回撤")}　
       <strong>波动率：</strong>${metricHtml(row, "波动率")}　
@@ -1051,7 +1070,7 @@
       const layer = excellent ? "绩优层" : (topReturn ? "收益领先层" : (item.y >= yP50 && goodX ? "效率较优层" : (item.y < yP25 ? "承压层" : "中位观察层")));
       const radius = selectedDot ? 7 : (excellent ? 5.6 : (gf ? 5 : Math.min(4.8, 2.7 + Math.max(0, item.dd || 0) / 16)));
       const color = gf ? "#b42318" : "#166c77";
-      const title = `${item.row.策略名称}｜${item.row.投顾机构 || "未披露机构"}｜${item.row.风险等级}｜${item.row.业务分类}｜${layer}｜${metricName(yMetric)} ${metricPlain(yMetric, item.y)}｜${metricName(xMetric)} ${metricPlain(xMetric, item.x)}`;
+      const title = `${item.row.策略名称}｜${item.row.投顾机构 || "未披露机构"}｜${benchmarkBucketValue(item.row) || "未分类"}｜${item.row.业务分类}｜${layer}｜${metricName(yMetric)} ${metricPlain(yMetric, item.y)}｜${metricName(xMetric)} ${metricPlain(xMetric, item.x)}`;
       return `<circle class="scatter-point" data-point-id="${B.esc(item.row.统一策略ID || "")}" data-tooltip="${B.esc(title)}" cx="${xOf(item.x).toFixed(1)}" cy="${yOf(item.y).toFixed(1)}" r="${radius.toFixed(1)}" fill="${color}" fill-opacity="${gf ? ".92" : ".38"}" stroke="${selectedDot ? "#111827" : (excellent ? "#b7791f" : (gf ? "#7a1a14" : "#0f4f58"))}" stroke-width="${selectedDot ? "2.4" : (excellent ? "2" : (gf ? "1.2" : ".5"))}" style="cursor:pointer"><title>${B.esc(title)}</title></circle>`;
     }).join("");
     const excellentCount = data.filter((item) => item.y >= yP75 && (lowerIsBetter(xMetric) ? item.x <= xLine : item.x >= xLine)).length;
@@ -1145,11 +1164,13 @@
     return dates.find((date) => date >= target) || "";
   }
 
-  function riskCountRows(rows) {
-    return orderedRiskValues(rows).map((risk) => {
-      const list = rows.filter((row) => row.风险等级 === risk);
-      return { 风险等级: risk, 市场数量: list.length, 广发数量: list.filter(isGf).length };
-    }).filter((row) => row.市场数量);
+  function benchmarkBucketCountRows(rows) {
+    return [...new Set(rows.map((row) => benchmarkBucketValue(row)).filter(Boolean))]
+      .sort((a, b) => benchmarkBucketSortValue(a) - benchmarkBucketSortValue(b) || a.localeCompare(b, "zh-CN"))
+      .map((bucket) => {
+        const list = rows.filter((row) => benchmarkBucketValue(row) === bucket);
+        return { 基准权益分档: bucket, 市场数量: list.length, 广发数量: list.filter(isGf).length };
+      }).filter((row) => row.市场数量);
   }
 
   function businessStats(rows) {
@@ -2622,6 +2643,7 @@
       return out;
     }).sort((a, b) => {
       if (field === "研报产品类型") return reportTypeRank(a.维度) - reportTypeRank(b.维度) || b.经营优先级 - a.经营优先级;
+      if (field === "基准权益分档") return benchmarkBucketSortValue(a.维度) - benchmarkBucketSortValue(b.维度) || b.经营优先级 - a.经营优先级;
       return b.经营优先级 - a.经营优先级 || b.市场数量 - a.市场数量;
     });
   }
@@ -2666,7 +2688,7 @@
     cards.push({
       title: "全局位置",
       value: signedPct(gfMedian === null || marketMedian === null ? null : gfMedian - marketMedian),
-      body: `当前筛选下广发${countText(gfRows.length)}个、市场${countText(rows.length)}个；广发中位${rangeLabel()}收益与市场差值如右，适合先按类型拆解，不看总平均。`
+      body: `当前筛选下广发${countText(gfRows.length)}个、市场${countText(rows.length)}个；广发中位${rangeLabel()}收益与市场差值如右，适合先按基准权益分档拆解，不看总平均。`
     });
     return cards.slice(0, 4);
   }
@@ -2723,7 +2745,7 @@
 
   function managerActionQueue(reportRows, businessRows) {
     const rows = [
-      ...reportRows.map((row) => managerNextStep(row, "研报产品类型")),
+      ...reportRows.map((row) => managerNextStep(row, "基准权益分档")),
       ...businessRows.map((row) => managerNextStep(row, "业务分类"))
     ].filter((row) => row.经营动作 !== "持续跟踪");
     return rows
@@ -2739,6 +2761,7 @@
       能力复盘: { strategyScope: "gf", clientScope: "client", businessSignal: "能力复盘", pageSize: 50 },
       机会跟踪: { clientScope: "client", sort: "return", pageSize: 50 }
     }[action] || {};
+    if (dimension === "基准权益分档") return { benchmarkBucket: value, ...actionParams };
     if (dimension === "研报产品类型") return { reportType: value, ...actionParams };
     if (dimension === "业务分类") return { business: value, ...actionParams };
     return { ...actionParams };
@@ -2785,7 +2808,7 @@
 
   function insightDetailCount(rows, fallback) {
     if (Array.isArray(rows)) return rows.filter(dimensionMatch).length;
-    if (state.risk || state.business || state.region || state.clientScope || state.gfScope || state.institution) return null;
+    if (state.benchmarkBucket || state.risk || state.business || state.clientScope || state.gfScope || state.institution) return null;
     return fallback ?? null;
   }
 
@@ -2830,7 +2853,7 @@
       clientScope: state.clientScope,
       institution: state.institution,
       business: state.business,
-      region: state.region,
+      benchmarkBucket: state.benchmarkBucket,
       risk: state.risk
     };
     Object.entries({ ...base, ...overrides }).forEach(([key, value]) => {
@@ -2857,10 +2880,10 @@
   function cockpitTab() {
     const rows = strategyRows();
     const gf = rows.filter(isGf);
-    const reportRows = managerGroupStats(rows, "研报产品类型");
+    const bucketRows = managerGroupStats(rows, "基准权益分档");
     const businessRows = managerGroupStats(rows, "业务分类");
-    const cards = managerDecisionCards(reportRows, businessRows, rows);
-    const actionQueue = managerActionQueue(reportRows, businessRows);
+    const cards = managerDecisionCards(bucketRows, businessRows, rows);
+    const actionQueue = managerActionQueue(bucketRows, businessRows);
     const opportunityCount = businessRows.filter((row) => ["产品空白", "货架偏薄", "机会跟踪"].includes(row.经营动作)).length;
     const reviewCount = businessRows.filter((row) => row.经营动作 === "能力复盘").length;
     const packageCount = businessRows.filter((row) => row.经营动作 === "可包装营销").length;
@@ -2876,25 +2899,25 @@
         ${kpi("需复盘场景", countText(reviewCount), `可包装 ${countText(packageCount)} 类`)}
       </section>
       <section class="panel" id="manager-focus">
-        <div class="panel-head"><div><h2>负责人先看</h2><p class="desc">把市场规模、广发覆盖、相对业绩和回撤放到同一个经营判断里，只保留需要做动作的信号。</p></div></div>
+        <div class="panel-head"><div><h2>负责人先看</h2><p class="desc">先按基准权益分档拆池，再把市场规模、广发覆盖、相对业绩和回撤放到同一个经营判断里，只保留需要做动作的信号。</p></div></div>
         ${rebalanceConclusionList(cards)}
-        <div class="source-method"><strong>读法</strong> 这里不看全市场平均值，而是先按研报产品类型和业务场景拆池。广发回撤更低但收益落后时，不直接判为“差”，需要区分是稳健定位、底层基金选择还是缺少进攻型货架。</div>
+        <div class="source-method"><strong>读法</strong> 这里不看全市场平均值，而是先按基准权益分档和业务场景拆池。广发回撤更低但收益落后时，不直接判为“差”，需要区分是稳健定位、底层基金选择还是缺少进攻型货架。</div>
       </section>
       <section class="panel" id="next-actions">
         <div class="panel-head"><div><h2>下一步清单</h2><p class="desc">把经营动作转成可派给产品、投研、销售和营销的任务；只列当前筛选下最需要处理的场景。</p></div></div>
         ${managerActionQueueTable(actionQueue)}
       </section>
       <section class="panel" id="product-map">
-        <div class="panel-head"><div><h2>产品类型经营地图</h2><p class="desc">这是负责人层面的第一张表：每类策略市场有多大、广发货架够不够、收益和回撤是否能支持销售包装。</p></div></div>
-        ${managerTable(reportRows, "研报产品类型")}
+        <div class="panel-head"><div><h2>基准权益分档经营地图</h2><p class="desc">这是负责人层面的第一张表：先看权益暴露分档，再判断市场有多大、广发货架够不够、收益和回撤是否能支持销售包装。</p></div></div>
+        ${managerTable(bucketRows, "基准权益分档")}
       </section>
       <section class="panel" id="business-opportunity">
         <div class="panel-head"><div><h2>业务场景机会</h2><p class="desc">按经营优先级排序，不按数据量堆砌；优先展示产品空白、货架偏薄、能力复盘和可包装营销场景。</p></div></div>
         ${managerTable(businessRows.slice(0, 12), "业务分类")}
       </section>
       <section class="panel">
-        <div class="panel-head"><div><h2>头部竞品与广发代表</h2><p class="desc">每个类型只展示少量代表产品，用于判断销售话术、产品包装和投研复盘要对标谁。</p></div></div>
-        ${managerBenchmarkTable(reportRows, "研报产品类型")}
+        <div class="panel-head"><div><h2>头部竞品与广发代表</h2><p class="desc">每个基准权益分档只展示少量代表产品，用于判断销售话术、产品包装和投研复盘要对标谁。</p></div></div>
+        ${managerBenchmarkTable(bucketRows, "基准权益分档")}
       </section>
       <section class="panel" id="data-risk">
         <div class="panel-head"><div><h2>数据可用性与误读风险</h2><p class="desc">把不能直接用于经营判断的数据单独说明，避免用缺失样本、非对客样本或混合可比池得出结论。</p></div></div>
@@ -2911,9 +2934,9 @@
     const gf = rows.filter(isGf);
     const marketMedian = median(rows.map((row) => row[returnMetric()]));
     const gfMedian = median(gf.map((row) => row[returnMetric()]));
-    const riskRows = riskCountRows(rows);
+    const bucketCountRows = benchmarkBucketCountRows(rows);
     const bStats = businessStats(rows);
-    const reportRows = managerGroupStats(rows, "研报产品类型");
+    const bucketRows = managerGroupStats(rows, "基准权益分档");
     const businessRows = managerGroupStats(rows, "业务分类");
     const selected = selectedPoint(rows);
     return `
@@ -2926,8 +2949,8 @@
         ${kpi("目标盈系列", countText(rows.filter((row) => row.业务分类 === "目标盈系列产品").length), "同系列按一个产品多期")}
       </section>
       <section class="panel" id="market-competition">
-        <div class="panel-head"><div><h2>产品类型概览</h2><p class="desc">以研报产品类型作为第一可比口径，展示市场数量、广发数量、收益和回撤等客观指标，避免把不同风险收益特征的策略混在一起。</p></div></div>
-        ${managerTable(reportRows, "研报产品类型")}
+        <div class="panel-head"><div><h2>基准权益分档概览</h2><p class="desc">以基准权益分档作为第一可比口径，先按权益暴露强弱拆池，再展示市场数量、广发数量、收益和回撤等客观指标。</p></div></div>
+        ${managerTable(bucketRows, "基准权益分档")}
       </section>
       <section class="panel chart-panel">
         <div class="panel-head">
@@ -2945,11 +2968,11 @@
         ${selectedPointPanel(selected)}
       </section>
       <details class="fold-block">
-        <summary>验证区：风险数量、业务覆盖和全部产品明细</summary>
+        <summary>验证区：权益分档数量、业务覆盖和全部产品明细</summary>
         <section class="insight-grid">
           <div class="panel">
-            <div class="panel-head"><div><h2>风险等级产品数量</h2><p class="desc">柱为全市场产品数量，细线为广发产品数量。</p></div></div>
-            ${barList(riskRows, "风险等级", "市场数量", { targetField: "广发数量", formatter: (value, row) => `市场${countText(value)} / 广发${countText(row.广发数量)}`, limit: 12 })}
+            <div class="panel-head"><div><h2>基准权益分档产品数量</h2><p class="desc">柱为全市场产品数量，细线为广发产品数量。</p></div></div>
+            ${barList(bucketCountRows, "基准权益分档", "市场数量", { targetField: "广发数量", formatter: (value, row) => `市场${countText(value)} / 广发${countText(row.广发数量)}`, limit: 12 })}
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>业务分类覆盖</h2><p class="desc">按市场产品数量排序，并显示广发覆盖数量。</p></div></div>
@@ -5584,15 +5607,15 @@
       <section class="panel insight-sticky-controls">
         <div class="insight-filters">
           ${filterField("时间区间", `<select id="insightRange" class="control">${dateRanges.map((item) => `<option value="${item.key}" ${item.key === state.range ? "selected" : ""}>${B.esc(item.label)}</option>`).join("")}</select>`)}
-          ${filterField("风险等级", `<select id="insightRisk" class="control"><option value="">全部风险等级</option>${risks.map((risk) => `<option ${risk === state.risk ? "selected" : ""}>${B.esc(risk)}</option>`).join("")}</select>`)}
+          ${filterField("基准权益分档", `<select id="insightBenchmarkBucket" class="control"><option value="">全部基准权益分档</option>${benchmarkBuckets.map((bucket) => `<option ${bucket === state.benchmarkBucket ? "selected" : ""}>${B.esc(bucket)}</option>`).join("")}</select>`)}
           ${filterField("业务分类", `<select id="insightBusiness" class="control"><option value="">全部业务分类</option>${businesses.map((business) => `<option ${business === state.business ? "selected" : ""}>${B.esc(business)}</option>`).join("")}</select>`)}
-          ${filterField("市场地域", `<select id="insightRegion" class="control"><option value="">全部市场地域</option>${regions.map((region) => `<option ${region === state.region ? "selected" : ""}>${B.esc(region)}</option>`).join("")}</select>`)}
+          ${filterField("风险等级", `<select id="insightRisk" class="control"><option value="">全部风险等级</option>${risks.map((risk) => `<option ${risk === state.risk ? "selected" : ""}>${B.esc(risk)}</option>`).join("")}</select>`)}
           ${filterField("对客范围", clientScopeSelect("insightClientScope", state.clientScope))}
           ${filterField("策略范围", gfScopeSelect("insightGfScope", state.gfScope))}
           ${filterField("投顾机构", institutionSelect("insightInstitution", state.institution))}
         </div>
         ${compareStandalone ? "" : `<div class="insight-tabs">${tabs.map(([key, label]) => `<button type="button" class="insight-tab-button ${key === state.tab ? "is-active" : ""}" data-tab="${key}">${B.esc(label)}</button>`).join("")}</div>`}
-        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于${compareStandalone ? "策略对比候选池、同类推荐、散点图和对比曲线" : "市场总览、仓位分析和调仓分析的所有图表和表格"}；默认展示完整策略，以及已具备最新披露业绩和最新持仓明细的扩展样本；D0 持仓缺失和持仓缺失/不入池策略仍然剔除。对客范围可剔除明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；时间区间同时用于区间收益、仓位时间序列、调仓事件和对比曲线；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
+        <div class="source-method"><strong>${B.label("筛选口径")}</strong> 上方筛选条件同步作用于${compareStandalone ? "策略对比候选池、同类推荐、散点图和对比曲线" : "市场总览、仓位分析和调仓分析的所有图表和表格"}；其中基准权益分档是首层分类口径，其他条件在同分档内继续细分。默认展示完整策略，以及已具备最新披露业绩和最新持仓明细的扩展样本；D0 持仓缺失和持仓缺失/不入池策略仍然剔除。对客范围可剔除明确非对客展示的策略；策略范围可切换全部策略、仅看广发策略、仅看非广发策略；时间区间同时用于区间收益、仓位时间序列、调仓事件和对比曲线；目标盈系列产品在市场总览中按同系列产品多期合并。</div>
       </section>
       <div class="insight-panel-stack">${renderContent()}</div>
     `;
@@ -5610,9 +5633,9 @@
       state.rebalanceFundCompany = "";
     };
     B.byId("insightRange").addEventListener("change", () => { markRebalanceInteraction(); state.range = B.byId("insightRange").value; resetDataView(); scheduleRender(); });
+    B.byId("insightBenchmarkBucket").addEventListener("change", () => { markRebalanceInteraction(); state.benchmarkBucket = B.byId("insightBenchmarkBucket").value; resetDataView(); scheduleRender(); });
     B.byId("insightRisk").addEventListener("change", () => { markRebalanceInteraction(); state.risk = B.byId("insightRisk").value; resetDataView(); scheduleRender(); });
     B.byId("insightBusiness").addEventListener("change", () => { markRebalanceInteraction(); state.business = B.byId("insightBusiness").value; resetDataView(); scheduleRender(); });
-    B.byId("insightRegion").addEventListener("change", () => { markRebalanceInteraction(); state.region = B.byId("insightRegion").value; resetDataView(); scheduleRender(); });
     B.byId("insightClientScope").addEventListener("change", () => { markRebalanceInteraction(); state.clientScope = B.byId("insightClientScope").value; resetDataView(); scheduleRender(); });
     B.byId("insightGfScope").addEventListener("change", () => { markRebalanceInteraction(); state.gfScope = B.byId("insightGfScope").value; resetDataView(); scheduleRender(); });
     B.byId("insightInstitution").addEventListener("change", () => { markRebalanceInteraction(); state.institution = B.byId("insightInstitution").value; resetDataView(); scheduleRender(); });
@@ -5827,4 +5850,3 @@
   window.addEventListener("hashchange", scrollToHashTarget);
   render();
 })();
-
