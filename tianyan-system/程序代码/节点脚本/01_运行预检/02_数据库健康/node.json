@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "preflight_database",
+  "name": "数据库健康检查",
+  "phase": "01_运行预检",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "preflight_environment"
+  ],
+  "criticality": "critical",
+  "timeoutSeconds": 7200,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "张表",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "database_health"
+}

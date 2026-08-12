@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "channels": {
+    "gffunds": {
+      "minimumUsablePerformanceRatio": 0.95,
+      "minimumCoreStrategyCoverageRatio": 0.95,
+      "minimumInventoryRetentionRatio": 0.9,
+      "requireCompleteCatalog": true,
+      "requireCatalogBatchClosure": true,
+      "requiredCoverageChecks": [
+        "strategy_master_ok",
+        "daily_performance_ok",
+        "fund_level_position_ok",
+        "rebalance_event_ok",
+        "rebalance_fund_delta_ok"
+      ],
+      "optionalCoverageChecks": [
+        "recommendation_fund_list_ok"
+      ],
+      "latestAdjustmentDetailRefreshDays": 1
+    },
+    "gfsec_fima": {
+      "minimumPortfolioCoverageRatio": 0.95,
+      "minimumInventoryRetentionRatio": 0.9,
+      "requireCompleteCatalog": true,
+      "requireCatalogBatchClosure": true,
+      "dailyPerformancePageSize": 400,
+      "requiredCoverageChecks": [
+        "strategy_master_ok",
+        "daily_performance_ok",
+        "fund_level_position_ok",
+        "rebalance_event_ok",
+        "rebalance_fund_delta_ok"
+      ]
+    },
+    "gfsec_robot": {
+      "minimumStrategyTotal": 30,
+      "minimumInventoryRetentionRatio": 0.9,
+      "requireCompleteCatalog": true,
+      "requireCatalogBatchClosure": true,
+      "minimumDailyPerformanceRows": 1,
+      "minimumIntervalPerformanceRows": 100,
+      "minimumRecommendationRows": 1
+    },
+    "qieman": {
+      "minimumInventoryRetentionRatio": 0.95,
+      "minimumPerformanceStrategyRatio": 0.99,
+      "minimumCurrentHoldingRatio": 0.99,
+      "minimumExactBenchmarkRatio": 0.95,
+      "requireCatalogDiscoveryClosure": true,
+      "requireCatalogBatchClosure": true,
+      "historyConcurrency": 3,
+      "incrementalOverlapDays": 7,
+      "historySignalPageSize": 25,
+      "historyRegularPageSize": 100,
+      "historyRequestIdleTimeoutSeconds": 120,
+      "historyRequestTotalTimeoutSeconds": 600,
+      "historyRequestAttempts": 4,
+      "minimumLatestNavDateRatio": 0.99
+    }
+  },
+  "backup": {
+    "retainSuccessfulVersions": 1,
+    "minimumFreeGiB": 45
+  },
+  "reports": {
+    "dailyScope": "minimal_publish",
+    "failedSourceRetentionDays": 3,
+    "retainFailedSources": 2
+  },
+  "dailyAudit": {
+    "runStaticChecks": false
+  },
+  "logs": {
+    "successfulRunRetentionDays": 30,
+    "failedOrUnfinishedRunRetentionDays": 90,
+    "launcherRetentionDays": 30
+  }
+}

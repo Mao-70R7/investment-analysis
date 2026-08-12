@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "public_fund_snapshot",
+  "name": "公募基金绩效快照重建",
+  "phase": "04_数据加工",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "strategy_governance"
+  ],
+  "criticality": "critical",
+  "timeoutSeconds": 3600,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "只基金",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "public_fund_snapshot"
+}

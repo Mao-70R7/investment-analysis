@@ -1,0 +1,55 @@
+# Credentials and machine-local configuration
+*.env
+!*.env.example
+本机配置/
+**/authenticated_cache/
+**/*cookie*
+**/*session*.json
+**/*.dpapi
+
+# Databases, collected data and generated outputs
+数据库/
+数据库备份/
+采集数据/
+运行状态/
+结果文件/
+运行环境/
+迁移基线/
+**/data/
+**/raw/
+**/normalized/
+**/outputs/
+**/output/
+**/runs/
+**/logs/
+**/cache/
+**/tmp/
+**/temp/
+**/artifacts/
+**/evaluations/
+**/_analysis/
+**/_tooling/
+
+# Device captures and binary packages
+*.apk
+*.db
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.pcap
+*.pcapng
+*.har
+*.log
+*.err
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Build and interpreter caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+.playwright-cli/
+*sync-conflict*

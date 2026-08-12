@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "index_benchmark",
+  "name": "指数基准与资产映射",
+  "phase": "04_数据加工",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "fund_lookthrough"
+  ],
+  "criticality": "critical",
+  "timeoutSeconds": 10800,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "个指数",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "index_benchmark"
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "qieman_load",
+  "name": "且慢事务入库",
+  "phase": "03_且慢",
+  "entrypoint": "run.ps1",
+  "dependencies": ["qieman_gate"],
+  "allowFailedOptionalDependencies": false,
+  "criticality": "optional",
+  "failureImpact": "channel",
+  "timeoutSeconds": 7200,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": false,
+  "progressUnit": "张表",
+  "validator": {"type": "node_result", "requiredStatus": "passed"},
+  "daily": true,
+  "action": "qieman_load"
+}

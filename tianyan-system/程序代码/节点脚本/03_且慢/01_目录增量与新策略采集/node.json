@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "qieman_collect",
+  "name": "且慢目录增量与新策略采集",
+  "phase": "03_且慢",
+  "entrypoint": "run.ps1",
+  "dependencies": ["preflight_database"],
+  "allowFailedOptionalDependencies": true,
+  "criticality": "optional",
+  "failureImpact": "channel",
+  "timeoutSeconds": 43200,
+  "maxProcessAttempts": 2,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "个策略",
+  "validator": {"type": "node_result", "requiredStatus": "passed"},
+  "daily": true,
+  "action": "qieman_collect"
+}

@@ -1,0 +1,396 @@
+{
+  "schemaVersion": 1,
+  "version": "node_pipeline_v8_20260812_public_fund_snapshot_and_bounded_resume",
+  "nodes": [
+    {
+      "id": "preflight_environment",
+      "directory": "01_运行预检/01_环境与依赖",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "preflight_database",
+      "directory": "01_运行预检/02_数据库健康",
+      "dependencies": [
+        "preflight_environment"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "source_readiness",
+      "directory": "01_运行预检/03_数据源就绪",
+      "dependencies": [
+        "preflight_database"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "device_select",
+      "directory": "01_运行预检/04_设备选择",
+      "dependencies": [
+        "source_readiness"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "ttfund_plan_component",
+      "directory": "02_天天投顾/01_增量计划与新策略",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "ttfund_direct_component",
+      "directory": "02_天天投顾/02_直接接口采集",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "ttfund_holding_component",
+      "directory": "02_天天投顾/03_详情与当前仓位",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "ttfund_rebalance_component",
+      "directory": "02_天天投顾/04_调仓增量",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "ttfund_curve_component",
+      "directory": "02_天天投顾/05_官方业绩曲线",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "ttfund_incremental",
+      "directory": "02_天天投顾/06_失败项重试与批次验收",
+      "dependencies": [
+        "device_select"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gffunds_performance",
+      "directory": "03_广发基金/01_业绩曲线",
+      "dependencies": [
+        "preflight_database"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gffunds_collect",
+      "directory": "03_广发基金/03_仓位与调仓",
+      "dependencies": [
+        "gffunds_performance"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gffunds_gate",
+      "directory": "03_广发基金/04_失败项重试与批次验收",
+      "dependencies": [
+        "gffunds_collect"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gfsec_fima_collect",
+      "directory": "03_广发证券/01_财富管家采集",
+      "dependencies": [
+        "preflight_database"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gfsec_fima_gate",
+      "directory": "03_广发证券/02_批次验收",
+      "dependencies": [
+        "gfsec_fima_collect"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gfsec_fima_load",
+      "directory": "03_广发证券/03_增量入库",
+      "dependencies": [
+        "gfsec_fima_gate"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gf_supplemental_collect",
+      "directory": "03_广发渠道补充/01_银行及贝塔牛采集",
+      "dependencies": [
+        "preflight_database"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gf_supplemental_gate",
+      "directory": "03_广发渠道补充/02_批次验收",
+      "dependencies": [
+        "gf_supplemental_collect"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gf_supplemental_load",
+      "directory": "03_广发渠道补充/03_增量入库",
+      "dependencies": [
+        "gf_supplemental_gate"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "qieman_collect",
+      "directory": "03_且慢/01_目录增量与新策略采集",
+      "dependencies": [
+        "preflight_database"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "qieman_gate",
+      "directory": "03_且慢/02_批次验收",
+      "dependencies": [
+        "qieman_collect"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "qieman_load",
+      "directory": "03_且慢/03_增量入库",
+      "dependencies": [
+        "qieman_gate"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "qieman_history_backfill",
+      "directory": "03_且慢/04_历史仓位主库回填",
+      "dependencies": [
+        "preflight_database"
+      ],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "process_load",
+      "directory": "04_数据加工/01_标准化与增量入库",
+      "dependencies": [
+        "ttfund_incremental",
+        "gffunds_gate",
+        "gfsec_fima_load",
+        "gf_supplemental_load",
+        "qieman_load"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "gffunds_metadata",
+      "directory": "03_广发基金/02_基准费率元数据",
+      "dependencies": [
+        "process_load"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "fund_nav",
+      "directory": "04_数据加工/02_仓位基金净值",
+      "dependencies": [
+        "process_load"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "fund_lookthrough",
+      "directory": "04_数据加工/03_基金穿透与分类",
+      "dependencies": [
+        "fund_nav"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "index_benchmark",
+      "directory": "04_数据加工/04_指数基准与资产映射",
+      "dependencies": [
+        "fund_lookthrough"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "strategy_governance",
+      "directory": "04_数据加工/05_策略治理业绩风险分类",
+      "dependencies": [
+        "index_benchmark"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "public_fund_snapshot",
+      "directory": "04_数据加工/06_公募基金绩效快照重建",
+      "dependencies": [
+        "strategy_governance"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "report_build",
+      "directory": "05_质量与交付/02_页面报表构建",
+      "dependencies": [
+        "public_fund_snapshot"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "data_audit",
+      "directory": "05_质量与交付/01_数据稽核",
+      "dependencies": [
+        "report_build"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "database_backup",
+      "directory": "05_质量与交付/03_成功数据库备份",
+      "dependencies": [
+        "data_audit"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "publish",
+      "directory": "05_质量与交付/04_最小发布集发布",
+      "dependencies": [
+        "data_audit"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "pages_verify",
+      "directory": "05_质量与交付/05_GitHubPages版本验证",
+      "dependencies": [
+        "publish"
+      ],
+      "enabledWhen": {
+        "daily": true
+      }
+    },
+    {
+      "id": "runtime_initialize",
+      "directory": "90_运维工具/01_首次初始化",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "runtime_check",
+      "directory": "90_运维工具/02_环境检查修复",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "migration_package",
+      "directory": "90_运维工具/03_迁移包构建",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "runtime_update",
+      "directory": "90_运维工具/04_程序更新",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "runtime_rollback",
+      "directory": "90_运维工具/05_程序回退",
+      "dependencies": [],
+      "enabledWhen": {
+        "daily": false
+      }
+    }
+  ],
+  "initializeNodes": [
+    "runtime_initialize"
+  ],
+  "checkNodes": [
+    "preflight_environment",
+    "preflight_database",
+    "runtime_check"
+  ]
+}

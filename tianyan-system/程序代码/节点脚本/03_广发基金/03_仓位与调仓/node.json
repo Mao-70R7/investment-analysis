@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "gffunds_collect",
+  "name": "广发仓位与调仓",
+  "phase": "03_广发基金",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "gffunds_performance"
+  ],
+  "allowFailedOptionalDependencies": true,
+  "criticality": "optional",
+  "failureImpact": "channel",
+  "timeoutSeconds": 10800,
+  "maxProcessAttempts": 2,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "只策略",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "gffunds_collect"
+}

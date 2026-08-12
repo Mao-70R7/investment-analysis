@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "gfsec_fima_load",
+  "name": "广发证券财富管家增量入库",
+  "phase": "03_广发证券",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "gfsec_fima_gate"
+  ],
+  "criticality": "optional",
+  "failureImpact": "channel",
+  "timeoutSeconds": 1800,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "张表",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "gfsec_fima_load"
+}

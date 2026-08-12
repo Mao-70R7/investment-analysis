@@ -1,0 +1,110 @@
+{
+  "channel_id": "qieman",
+  "channel_name": "且慢/盈米基金",
+  "access_level": "login",
+  "probe_only": true,
+  "entities": {
+    "strategy_master": {
+      "required_business_key": ["channel_id", "source_strategy_id"],
+      "fields": [
+        "strategy_name",
+        "advisor_name",
+        "strategy_type",
+        "risk_level",
+        "launch_date",
+        "suggested_holding_period",
+        "minimum_amount",
+        "advisory_fee_rate",
+        "benchmark",
+        "tags",
+        "strategy_description",
+        "status",
+        "source_url"
+      ],
+      "evidence_gate": "必须来自策略列表或详情的结构化响应；页面文本只作为入口佐证"
+    },
+    "strategy_performance_daily": {
+      "required_business_key": ["channel_id", "source_strategy_id", "trade_date"],
+      "fields": [
+        "nav",
+        "daily_return",
+        "cumulative_return",
+        "benchmark_return",
+        "index_return",
+        "max_drawdown",
+        "source_snapshot_id"
+      ],
+      "evidence_gate": "同一策略至少两个带日期的结构化点；截图或图像反推不能形成正式曲线"
+    },
+    "strategy_performance_interval": {
+      "required_business_key": ["channel_id", "source_strategy_id", "as_of_date", "interval_code"],
+      "fields": [
+        "interval_label",
+        "interval_start_date",
+        "return_value",
+        "benchmark_return",
+        "source_snapshot_id"
+      ],
+      "evidence_gate": "必须同时有统计日期、明确区间定义和收益值；公开卡片只有历史年化收益文字时不得写入"
+    },
+    "strategy_fund_snapshot": {
+      "required_business_key": ["snapshot_id", "fund_code"],
+      "fields": [
+        "source_strategy_id",
+        "position_date",
+        "disclosure_date",
+        "fund_code",
+        "fund_name",
+        "fund_asset_type",
+        "fund_group_name",
+        "fund_weight",
+        "fund_nav",
+        "fund_nav_date",
+        "is_precise_weight",
+        "is_login_required",
+        "source_url",
+        "raw_record_hash",
+        "confidence_level",
+        "access_level"
+      ],
+      "evidence_gate": "基金代码或可唯一识别名称与组合权重必须来自同一官方快照；只披露大类比例不得写成基金持仓"
+    },
+    "strategy_rebalance_event": {
+      "required_business_key": ["rebalance_event_id"],
+      "fields": [
+        "source_strategy_id",
+        "rebalance_date",
+        "previous_position_date",
+        "new_position_date",
+        "disclosure_date",
+        "event_title",
+        "event_reason",
+        "source_url",
+        "source_snapshot_id",
+        "confidence_level"
+      ],
+      "evidence_gate": "必须有官方调仓日期或公告；连续快照差异只能标记 inferred"
+    },
+    "strategy_rebalance_fund_delta": {
+      "required_business_key": ["rebalance_event_id", "fund_code"],
+      "fields": [
+        "fund_name",
+        "before_weight",
+        "after_weight",
+        "weight_delta",
+        "action_type"
+      ],
+      "evidence_gate": "同一官方调仓事件内基金和调前/调后权重可追溯，缺失权重不得补猜"
+    }
+  },
+  "priority_probe_fields": [
+    "strategy_master.benchmark",
+    "strategy_master.launch_date",
+    "strategy_performance_daily.trade_date",
+    "strategy_performance_daily.cumulative_return",
+    "strategy_performance_daily.benchmark_return",
+    "strategy_fund_snapshot.position_date",
+    "strategy_fund_snapshot.fund_code",
+    "strategy_fund_snapshot.fund_weight"
+  ]
+}

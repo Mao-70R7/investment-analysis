@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime_initialize",
+  "name": "首次初始化",
+  "phase": "90_运维工具",
+  "entrypoint": "run.ps1",
+  "dependencies": [],
+  "criticality": "critical",
+  "timeoutSeconds": 7200,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "项检查",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": false,
+  "action": "runtime_initialize"
+}

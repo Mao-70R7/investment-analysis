@@ -1,0 +1,41 @@
+# Python/cache/runtime directories
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+venv/
+env/
+node_modules/
+
+# Local runtime output
+logs/
+tmp/
+.tmp/
+test-results/
+.playwright-cli/
+outputs/
+output/
+$tmp
+*.log
+
+# Large collected/generated datasets
+/data/
+data/state/*.json
+data/state/southern-profile/
+data/raw/
+data/normalized/
+data/backups/
+data/**/*.sqlite
+data/**/*.sqlite-*
+data/*.sqlite
+data/*.sqlite-*
+basic_data/data/basic_summary.js
+site/basic_data/data/basic_summary.js
+
+# Local machine launchers/config
+advisor_update.local.bat
+config/*.env
+*.lnk
+
+# Relocatable runtime package output
+/迁移产物/

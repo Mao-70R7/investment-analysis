@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "gf_supplemental_load",
+  "name": "广发证券历史接口增量入库",
+  "phase": "03_广发渠道补充",
+  "entrypoint": "run.ps1",
+  "dependencies": ["gf_supplemental_gate"],
+  "allowFailedOptionalDependencies": true,
+  "criticality": "optional",
+  "failureImpact": "channel",
+  "timeoutSeconds": 1800,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "个渠道",
+  "validator": {"type": "node_result", "requiredStatus": "passed"},
+  "daily": true,
+  "action": "gf_supplemental_load"
+}

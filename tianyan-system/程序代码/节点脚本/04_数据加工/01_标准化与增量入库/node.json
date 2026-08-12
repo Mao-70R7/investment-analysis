@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "process_load",
+  "name": "标准化与增量入库",
+  "phase": "04_数据加工",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "ttfund_incremental",
+    "gffunds_gate",
+    "gfsec_fima_load",
+    "gf_supplemental_load",
+    "qieman_load"
+  ],
+  "allowFailedOptionalDependencies": true,
+  "criticality": "critical",
+  "timeoutSeconds": 14400,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "个步骤",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "process_load"
+}

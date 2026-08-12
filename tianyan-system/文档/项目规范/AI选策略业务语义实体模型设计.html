@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI选策略业务语义实体模型设计 v2</title>
+  <meta name="description" content="基于真实投顾业务实体、事实粒度、数据字典和质量血缘的AI选策略通用语义模型设计。">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230c7c78'/%3E%3Cpath d='M16 43 27 18l7 16 5-10 9 19' fill='none' stroke='white' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f4f7f8;
+      --surface: #ffffff;
+      --surface-2: #edf3f3;
+      --surface-3: #e4eded;
+      --ink: #172527;
+      --muted: #607174;
+      --line: #d6e1e2;
+      --navy: #173f49;
+      --teal: #0c7c78;
+      --teal-2: #35a49d;
+      --amber: #bd7617;
+      --red: #b54545;
+      --green: #257352;
+      --blue: #326fa8;
+      --shadow: 0 16px 40px rgba(20, 48, 54, .09);
+      --radius: 18px;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --sans: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --canvas: #0d1719;
+      --surface: #132226;
+      --surface-2: #192c31;
+      --surface-3: #21383e;
+      --ink: #e6f0f1;
+      --muted: #9fb3b7;
+      --line: #294248;
+      --navy: #9ed2d7;
+      --teal: #66c9c0;
+      --teal-2: #47aaa3;
+      --amber: #e4a64d;
+      --red: #ec8585;
+      --green: #6aca9b;
+      --blue: #79afe0;
+      --shadow: 0 18px 48px rgba(0, 0, 0, .25);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 9% 2%, color-mix(in srgb, var(--teal) 9%, transparent), transparent 27rem),
+        var(--canvas);
+      font-family: var(--sans);
+      line-height: 1.68;
+    }
+    a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    button, input { font: inherit; }
+    .skip-link { position: fixed; left: 12px; top: -60px; z-index: 99; padding: 10px 14px; background: var(--surface); color: var(--ink); border-radius: 10px; }
+    .skip-link:focus { top: 12px; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      min-height: 68px;
+      padding: 10px max(24px, calc((100vw - 1240px) / 2));
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+      background: color-mix(in srgb, var(--canvas) 86%, transparent);
+      backdrop-filter: blur(18px);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: max-content; font-weight: 760; color: var(--navy); }
+    .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: white; background: var(--teal); box-shadow: 0 7px 18px color-mix(in srgb, var(--teal) 28%, transparent); }
+    .nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+    .nav a { white-space: nowrap; padding: 7px 10px; border-radius: 9px; color: var(--muted); text-decoration: none; font-size: 14px; }
+    .nav a:hover, .nav a.active { color: var(--ink); background: var(--surface-2); }
+    .top-actions { display: flex; gap: 8px; margin-left: auto; }
+    .icon-btn, .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 38px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--ink);
+      background: var(--surface);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .icon-btn:hover, .button:hover { border-color: var(--teal); transform: translateY(-1px); }
+    .button.primary { color: white; background: var(--teal); border-color: var(--teal); }
+    .wrap { width: min(1240px, calc(100% - 36px)); margin: 0 auto; }
+    main { padding-bottom: 72px; }
+    section { scroll-margin-top: 84px; padding: 76px 0 0; }
+    .hero { padding-top: 72px; }
+    .hero-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(340px, .75fr); gap: 42px; align-items: end; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px; color: var(--teal); font-size: 13px; font-weight: 780; letter-spacing: .08em; text-transform: uppercase; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 5px color-mix(in srgb, var(--teal) 13%, transparent); }
+    h1, h2, h3 { margin: 0; line-height: 1.18; color: var(--navy); }
+    h1 { max-width: 850px; font-size: clamp(38px, 6vw, 72px); letter-spacing: -.045em; }
+    h2 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -.025em; }
+    h3 { font-size: 19px; }
+    .lead { max-width: 800px; margin: 24px 0 0; color: var(--muted); font-size: clamp(17px, 2vw, 20px); }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    .hero-note { padding: 24px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    .hero-note strong { display: block; margin-bottom: 8px; color: var(--teal); font-size: 13px; letter-spacing: .05em; }
+    .hero-note p { margin: 0; color: var(--muted); }
+    .metric-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 42px; }
+    .metric { min-height: 126px; padding: 20px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
+    .metric b { display: block; color: var(--navy); font-size: clamp(24px, 3vw, 34px); line-height: 1; }
+    .metric span { display: block; margin-top: 9px; color: var(--muted); font-size: 13px; }
+    .section-head { display: grid; grid-template-columns: minmax(0, .8fr) minmax(320px, .55fr); gap: 32px; align-items: end; margin-bottom: 28px; }
+    .section-head p { margin: 0; color: var(--muted); }
+    .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    .callout { display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--teal) 34%, var(--line)); border-radius: 14px; background: color-mix(in srgb, var(--teal) 6%, var(--surface)); }
+    .callout .num { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; color: white; background: var(--teal); font-weight: 800; }
+    .callout p { margin: 2px 0 0; color: var(--muted); }
+    .comparison { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch; }
+    .compare-panel { padding: 26px; }
+    .compare-panel.old { border-top: 4px solid var(--amber); }
+    .compare-panel.new { border-top: 4px solid var(--teal); }
+    .compare-panel ul { margin: 18px 0 0; padding-left: 20px; color: var(--muted); }
+    .compare-arrow { align-self: center; color: var(--teal); font-size: 32px; font-weight: 300; }
+    .data-layout { display: grid; grid-template-columns: .8fr 1.2fr; gap: 18px; }
+    .snapshot { padding: 26px; }
+    .snapshot h3 { margin-bottom: 18px; }
+    .stat-list { display: grid; gap: 10px; }
+    .stat-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding-bottom: 9px; border-bottom: 1px dashed var(--line); }
+    .stat-row:last-child { border-bottom: 0; }
+    .stat-row span { color: var(--muted); }
+    .stat-row b { color: var(--navy); font-variant-numeric: tabular-nums; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); background: var(--surface-2); font-size: 12px; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+    td.num-cell { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--navy); }
+    .pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; color: var(--teal); background: color-mix(in srgb, var(--teal) 11%, transparent); }
+    .layer-stack { display: grid; gap: 10px; }
+    .layer {
+      display: grid;
+      grid-template-columns: 68px 220px 1fr;
+      gap: 20px;
+      align-items: center;
+      padding: 19px 22px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+      transition: transform .18s ease, border-color .18s ease;
+    }
+    .layer:hover { transform: translateX(4px); border-color: var(--teal); }
+    .layer-index { color: var(--teal); font-family: var(--mono); font-size: 13px; font-weight: 800; }
+    .layer p { margin: 0; color: var(--muted); }
+    .architecture-note { margin-top: 18px; }
+    .entity-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 26px 0 14px; }
+    .search { width: min(360px, 100%); padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface); outline: none; }
+    .search:focus { border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 13%, transparent); }
+    .entity-network { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .entity-group { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .entity-group > h3 { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .entity-group > h3 span { color: var(--muted); font-size: 12px; }
+    .entity-card { padding: 13px 14px; border-left: 3px solid var(--teal); border-radius: 9px; background: var(--surface-2); margin-top: 9px; }
+    .entity-card b { display: block; color: var(--navy); font-size: 14px; }
+    .entity-card small { display: block; margin-top: 4px; color: var(--muted); line-height: 1.45; }
+    .entity-card[hidden] { display: none; }
+    .relation-strip { margin-top: 16px; padding: 18px 20px; border-radius: 14px; color: var(--muted); background: var(--surface-2); }
+    .relation-strip b { color: var(--navy); }
+    .fact-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-top: 24px; }
+    .fact { min-height: 118px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+    .fact b { display: block; color: var(--navy); font-size: 14px; }
+    .fact small { display: block; margin-top: 7px; color: var(--muted); line-height: 1.45; }
+    .contract-layout { display: grid; grid-template-columns: .8fr 1.2fr; gap: 18px; }
+    .contract-summary { padding: 24px; }
+    .contract-summary ol { margin: 18px 0 0; padding-left: 22px; color: var(--muted); }
+    .contract-groups { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .contract-group { padding: 18px; }
+    .key-cloud { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+    .key { padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--surface-2); font-family: var(--mono); font-size: 11px; }
+    .null-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+    .null-card { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .null-card code { color: var(--teal); font-family: var(--mono); font-size: 12px; }
+    .null-card p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+    .protocol-principle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+    .principle { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .principle b { color: var(--teal); }
+    .principle p { margin: 5px 0 0; color: var(--muted); font-size: 14px; }
+    .pipeline { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+    .pipeline::before { content: ""; position: absolute; left: 6%; right: 6%; top: 29px; height: 2px; background: var(--line); z-index: 0; }
+    details.stage { position: relative; z-index: 1; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: clip; }
+    details.stage[open] { border-color: var(--teal); box-shadow: var(--shadow); }
+    .stage summary { list-style: none; min-height: 112px; padding: 15px; cursor: pointer; }
+    .stage summary::-webkit-details-marker { display: none; }
+    .stage-no { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 12px; border-radius: 50%; color: white; background: var(--teal); font-family: var(--mono); font-size: 12px; font-weight: 800; }
+    .stage.model .stage-no { background: var(--amber); }
+    .stage.compiler .stage-no { background: var(--blue); }
+    .stage.database .stage-no { background: var(--green); }
+    .stage summary b { display: block; color: var(--navy); font-size: 14px; line-height: 1.4; }
+    .stage summary small { color: var(--muted); }
+    .stage-body { padding: 0 15px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    .stage-body p { margin: 12px 0 0; }
+    .stage-body strong { color: var(--ink); }
+    .parallel { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 14px; align-items: center; margin-top: 18px; padding: 22px; }
+    .parallel-box { padding: 17px; border-radius: 12px; background: var(--surface-2); }
+    .parallel-box b { color: var(--navy); }
+    .parallel-box p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    .join-arrow { color: var(--teal); font-size: 24px; }
+    .boundary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .boundary { padding: 24px; }
+    .boundary.model { border-top: 4px solid var(--amber); }
+    .boundary.system { border-top: 4px solid var(--teal); }
+    .boundary ul { margin: 16px 0 0; padding-left: 20px; color: var(--muted); }
+    .code-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; }
+    .code-card { overflow: hidden; }
+    .code-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 15px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .code-head b { color: var(--navy); font-size: 13px; }
+    .copy-btn { padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--surface); cursor: pointer; font-size: 12px; }
+    pre { margin: 0; padding: 18px; overflow: auto; color: var(--ink); background: var(--surface); font: 12px/1.65 var(--mono); tab-size: 2; }
+    .quality-flow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 9px; }
+    .quality-state { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .quality-state b { color: var(--navy); font-size: 13px; }
+    .quality-state p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+    .mapping-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 20px 0 12px; }
+    .mapping-head p { margin: 0; color: var(--muted); }
+    .progress { width: 100%; height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+    .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--teal); }
+    .roadmap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .roadmap-card { position: relative; padding: 22px; }
+    .roadmap-card::before { content: attr(data-step); display: block; margin-bottom: 13px; color: var(--teal); font-family: var(--mono); font-weight: 800; }
+    .roadmap-card p { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+    .decision-list { display: grid; gap: 10px; margin-top: 18px; }
+    .decision { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .decision span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: white; background: var(--teal); font-weight: 800; }
+    .decision p { margin: 2px 0 0; color: var(--muted); }
+    footer { margin-top: 72px; padding: 28px 0 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    .footer-row { display: flex; justify-content: space-between; gap: 24px; }
+    .file-links { display: flex; flex-wrap: wrap; gap: 12px; }
+    @media (max-width: 1080px) {
+      .metric-grid { grid-template-columns: repeat(3, 1fr); }
+      .fact-grid { grid-template-columns: repeat(4, 1fr); }
+      .entity-network { grid-template-columns: repeat(2, 1fr); }
+      .pipeline { grid-template-columns: repeat(2, 1fr); }
+      .pipeline::before { display: none; }
+      .quality-flow { grid-template-columns: repeat(4, 1fr); }
+      .roadmap { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 760px) {
+      .topbar { gap: 12px; padding-inline: 16px; }
+      .nav { display: none; }
+      .top-actions .print-btn { display: none; }
+      .wrap { width: min(100% - 24px, 1240px); }
+      section { padding-top: 58px; }
+      .hero { padding-top: 48px; }
+      .hero-grid, .section-head, .data-layout, .contract-layout, .boundary-grid, .code-grid { grid-template-columns: 1fr; }
+      .hero-note { margin-top: 0; }
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .comparison { grid-template-columns: 1fr; }
+      .compare-arrow { transform: rotate(90deg); justify-self: center; }
+      .layer { grid-template-columns: 48px 1fr; gap: 12px; }
+      .layer p { grid-column: 2; }
+      .entity-network, .contract-groups, .null-grid, .protocol-principle, .pipeline, .quality-flow, .roadmap { grid-template-columns: 1fr; }
+      .fact-grid { grid-template-columns: repeat(2, 1fr); }
+      .parallel { grid-template-columns: 1fr; }
+      .join-arrow { transform: rotate(90deg); justify-self: center; }
+      .footer-row { flex-direction: column; }
+    }
+    @media print {
+      :root { --canvas: white; --surface: white; --surface-2: #f2f4f4; --ink: #111; --muted: #444; --line: #ccc; --shadow: none; }
+      .topbar, .hero-actions, .entity-toolbar, .copy-btn { display: none !important; }
+      body { background: white; }
+      section { padding-top: 34px; break-inside: avoid; }
+      details.stage:not([open]) .stage-body { display: block; }
+      .card, .metric { box-shadow: none; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">AI</span><span>业务语义实体模型 v2</span></div>
+    <nav class="nav" aria-label="文档导航">
+      <a href="#overview">总览</a>
+      <a href="#evidence">真实数据</a>
+      <a href="#architecture">业务框架</a>
+      <a href="#entities">实体模型</a>
+      <a href="#dictionary">字典契约</a>
+      <a href="#protocol">渐进式协议</a>
+      <a href="#mapping">字段映射</a>
+      <a href="#roadmap">实施路径</a>
+    </nav>
+    <div class="top-actions">
+      <button class="icon-btn print-btn" type="button" onclick="window.print()" aria-label="打印设计说明">打印</button>
+      <button class="icon-btn" id="themeToggle" type="button" aria-label="切换深浅色">深色</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="overview">
+      <div class="wrap">
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow"><span class="dot"></span> Proposal · 2026-08-08 · Schema 2.0</div>
+            <h1>让 AI 理解业务事实，<br>而不是猜字段。</h1>
+            <p class="lead">新版从真实投顾业务对象、事实粒度、数据字典、来源血缘和质量状态出发。页面宽表只是最后的执行投影；渐进式解析由元数据动态生成，不再围绕某几个问题维护专用提示词。</p>
+            <div class="hero-actions">
+              <a class="button primary" href="#architecture">查看六层框架</a>
+              <a class="button" href="#protocol">查看渐进式协议</a>
+              <a class="button" href="../../程序代码/config/AI选策略字段语义映射.v2.json">打开 v2 映射 JSON</a>
+            </div>
+          </div>
+          <aside class="hero-note">
+            <strong>本轮设计边界</strong>
+            <p>只产出业务语义模型、机器可读 Schema、当前147字段映射和设计说明。尚未修改 <code>ai-strategy.js</code>、模型调用、页面筛选或发布包。</p>
+          </aside>
+        </div>
+
+        <div class="metric-grid" aria-label="设计规模摘要">
+          <div class="metric"><b>21</b><span>业务实体类型</span></div>
+          <div class="metric"><b>14</b><span>通用事实类型</span></div>
+          <div class="metric"><b>13</b><span>业务主题域</span></div>
+          <div class="metric"><b>77</b><span>标准语义概念</span></div>
+          <div class="metric"><b>147</b><span>当前物理字段绑定</span></div>
+          <div class="metric"><b>10</b><span>渐进式处理阶段</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="redesign">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">为什么重构</div><h2>从“问题视图”改为“业务本体”</h2></div>
+          <p>问题示例可以进入回归测试和别名字典，但不能成为架构主干。否则每出现一种表达，就要增加一条提示词或专用候选路径。</p>
+        </div>
+        <div class="comparison">
+          <article class="card compare-panel old">
+            <h3>上一版：问题驱动</h3>
+            <ul>
+              <li>维护生命周期日期、回撤风险、基准、持仓实体等固定检索视图。</li>
+              <li>领域、概念和物理字段之间缺少事实类型与数据粒度。</li>
+              <li>页面宽表容易被误当成完整业务模型。</li>
+              <li>空值、时间、继承、证据和质量语义不够统一。</li>
+            </ul>
+          </article>
+          <div class="compare-arrow" aria-hidden="true">→</div>
+          <article class="card compare-panel new">
+            <h3>新版：业务本体驱动</h3>
+            <ul>
+              <li>先识别业务对象和事实类型，再按元数据动态召回概念。</li>
+              <li>显式区分观察、快照、头寸、事件、关系、政策、证据和投影。</li>
+              <li>物理字段只在最后执行绑定阶段出现。</li>
+              <li>字典强制包含粒度、时间轴、空值、来源、质量与操作符。</li>
+            </ul>
+          </article>
+        </div>
+        <div class="callout architecture-note">
+          <div class="num">!</div>
+          <div><h3>字段数量不再写死</h3><p>2026-08-08 最新页面包已经从昨天的145字段增长到147字段，新增“业绩基准来源策略ID”和“业绩基准继承口径”。v2 用快照版本和绑定索引吸收字段变化，上层实体与事实模型无需重写。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">真实数据底座</div><h2>页面快照与数据库事实分别记时</h2></div>
+          <p>页面快照固定在 04:00，数据库行数来自 13:19 的只读稽核。两者不能混成一个“当前值”；底层同时存在每策略、每日期、每区间、每快照、每事件和每基金明细等多种粒度。</p>
+        </div>
+        <div class="data-layout">
+          <article class="card snapshot">
+            <h3>页面执行投影</h3>
+            <div class="stat-list">
+              <div class="stat-row"><span>快照生成时间</span><b>2026-08-08 04:00</b></div>
+              <div class="stat-row"><span>数据库稽核时间</span><b>2026-08-08 13:19</b></div>
+              <div class="stat-row"><span>页面策略</span><b>1,305</b></div>
+              <div class="stat-row"><span>物理字段</span><b>147</b></div>
+              <div class="stat-row"><span>运行时虚拟字段</span><b>13</b></div>
+              <div class="stat-row"><span>已有字段说明</span><b>114 / 147</b></div>
+              <div class="stat-row"><span>平均非空率</span><b>87.16%</b></div>
+              <div class="stat-row"><span>字段覆盖率中位数</span><b>99.00%</b></div>
+              <div class="stat-row"><span>全空字段</span><b>0</b></div>
+            </div>
+          </article>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>真实事实表</th><th>粒度</th><th>当前行数</th></tr></thead>
+              <tbody>
+                <tr><td>策略信息</td><td>每策略一行</td><td class="num-cell">1,621</td></tr>
+                <tr><td>策略关系</td><td>每已识别子策略关系一行</td><td class="num-cell">74</td></tr>
+                <tr><td>策略日度业绩</td><td>每策略每交易日一行</td><td class="num-cell">1,083,677</td></tr>
+                <tr><td>策略区间业绩</td><td>每策略每统计区间一行</td><td class="num-cell">268,993</td></tr>
+                <tr><td>策略当前持仓</td><td>每策略每持仓日每基金一行</td><td class="num-cell">107,286</td></tr>
+                <tr><td>策略调仓事件</td><td>每调仓事件一行</td><td class="num-cell">11,184</td></tr>
+                <tr><td>策略调仓明细</td><td>每调仓事件每基金一行</td><td class="num-cell">228,157</td></tr>
+                <tr><td>信号策略事件 / 指令</td><td>每事件 / 每事件每基金</td><td class="num-cell">56 / 912</td></tr>
+                <tr><td>基金信息 / 标准分类字典</td><td>每基金一行</td><td class="num-cell">26,874 / 27,082</td></tr>
+                <tr><td>基金经济暴露快照</td><td>每基金每报告期一行</td><td class="num-cell">3,939</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">业务框架层次</div><h2>六层模型：从业务对象到执行绑定</h2></div>
+          <p>每一层解决一种问题。普通模型主要工作在“业务主题 + 标准概念”，不直接接触全量字段和底层表结构。</p>
+        </div>
+        <div class="layer-stack">
+          <div class="layer"><span class="layer-index">L1</span><h3>业务对象层</h3><p>策略、渠道、投顾机构、基金等稳定身份对象，解决“在问谁”。</p></div>
+          <div class="layer"><span class="layer-index">L2</span><h3>业务事实层</h3><p>关系、观察、快照、头寸、事件、政策、分类、证据，解决“发生了什么、在哪个粒度”。</p></div>
+          <div class="layer"><span class="layer-index">L3</span><h3>业务主题层</h3><p>治理、身份、生命周期、业绩、风险、持仓、调仓、信号、基准、费率和质量，解决“属于哪个业务框架”。</p></div>
+          <div class="layer"><span class="layer-index">L4</span><h3>标准概念层</h3><p>稳定概念ID、业务定义、别名、适用范围和概念关系，解决“用户真正表达了哪个概念”。</p></div>
+          <div class="layer"><span class="layer-index">L5</span><h3>数据字典契约层</h3><p>类型、单位、值域、空值、时间轴、来源、质量和操作符，解决“这个概念如何被精确表达”。</p></div>
+          <div class="layer"><span class="layer-index">L6</span><h3>执行绑定层</h3><p>147个物理字段、13个虚拟字段或底层事实查询计划，解决“当前系统怎样准确执行”。</p></div>
+        </div>
+        <div class="callout architecture-note">
+          <div class="num">Σ</div>
+          <div><h3>宽表是投影，不是本体</h3><p>例如一个页面收益字段来自日度或区间观察，一个持仓权重来自最新快照的基金头寸聚合。v2 保留源粒度和时间语义，避免模型仅凭字段名称把不同事实混为一类。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="entities">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">实体与事实模型</div><h2>21类业务实体覆盖真实数据结构</h2></div>
+          <p>实体不是“有多少张表”的机械翻译，而是按稳定身份、业务粒度和关系语义建立的规范模型。</p>
+        </div>
+        <div class="entity-toolbar">
+          <p style="margin:0;color:var(--muted)">输入名称、来源表或粒度过滤实体：</p>
+          <input class="search" id="entitySearch" type="search" placeholder="例如：策略、快照、基金、事件" aria-label="过滤实体模型">
+        </div>
+        <div class="entity-network" id="entityNetwork">
+          <article class="entity-group">
+            <h3>主业务对象 <span>4类</span></h3>
+            <div class="entity-card" data-search="渠道 渠道信息 每渠道"><b>渠道</b><small>渠道信息 · 每渠道一行</small></div>
+            <div class="entity-card" data-search="投顾机构 策略信息 机构"><b>投顾机构</b><small>策略管理与服务主体</small></div>
+            <div class="entity-card" data-search="策略 策略信息 统一策略ID"><b>策略</b><small>根查询对象 · 统一策略ID</small></div>
+            <div class="entity-card" data-search="基金 基金信息 基金代码"><b>基金</b><small>持仓、调仓和信号的组成对象</small></div>
+          </article>
+          <article class="entity-group">
+            <h3>策略级事实 <span>7类</span></h3>
+            <div class="entity-card" data-search="策略关系 母子 共享业绩"><b>策略关系</b><small>母子、业绩、持仓、调仓复用</small></div>
+            <div class="entity-card" data-search="治理 标签 排名 展示"><b>策略治理画像</b><small>治理标签 · 每策略</small></div>
+            <div class="entity-card" data-search="费率 政策 投顾费"><b>费率政策</b><small>费率文本、标准值和状态</small></div>
+            <div class="entity-card" data-search="基准 定义 继承 来源"><b>基准定义</b><small>文本、来源策略、继承口径</small></div>
+            <div class="entity-card" data-search="基准 暴露 快照 资产"><b>基准暴露快照</b><small>资产、地域、分档和质量</small></div>
+            <div class="entity-card" data-search="业绩 观察 日度 区间"><b>业绩观察</b><small>每策略每日期或区间</small></div>
+            <div class="entity-card" data-search="风险 观察 回撤 波动 夏普"><b>风险观察</b><small>每策略每统计日每区间</small></div>
+          </article>
+          <article class="entity-group">
+            <h3>行为与组合 <span>6类</span></h3>
+            <div class="entity-card" data-search="持仓 快照 日期"><b>持仓快照</b><small>每策略每持仓日</small></div>
+            <div class="entity-card" data-search="持仓 头寸 基金 权重"><b>持仓头寸</b><small>每策略每持仓日每基金</small></div>
+            <div class="entity-card" data-search="调仓 事件"><b>调仓事件</b><small>每个调仓事件</small></div>
+            <div class="entity-card" data-search="调仓 明细 权重变化"><b>调仓头寸变化</b><small>每事件每基金</small></div>
+            <div class="entity-card" data-search="信号 事件"><b>信号事件</b><small>组合级信号和评价</small></div>
+            <div class="entity-card" data-search="信号 指令 基金"><b>信号指令</b><small>基金级方向和强度</small></div>
+          </article>
+          <article class="entity-group">
+            <h3>分类、证据与投影 <span>4类</span></h3>
+            <div class="entity-card" data-search="基金 分类 字典"><b>基金分类</b><small>资产、地域、主动被动和标签</small></div>
+            <div class="entity-card" data-search="基金 经济暴露 快照 行业 主题"><b>基金经济暴露快照</b><small>总资产口径 · 每报告期</small></div>
+            <div class="entity-card" data-search="证据 质量 血缘 置信度"><b>证据与数据质量</b><small>跨实体的来源和质量记录</small></div>
+            <div class="entity-card" data-search="页面 宽表 投影 147"><b>策略筛选投影</b><small>当前147字段 · 每策略一行</small></div>
+          </article>
+        </div>
+        <div class="relation-strip"><b>核心关系：</b>渠道展示策略 · 机构管理策略 · 策略母子关系 · 共享官方业绩 · 继承业绩基准 · 策略产生观察/快照/事件 · 持仓包含基金 · 调仓改变基金头寸 · 信号指向基金 · 基金具有分类与经济暴露。</div>
+
+        <div class="fact-grid" aria-label="通用事实类型">
+          <div class="fact"><b>主数据</b><small>稳定身份和基础属性</small></div>
+          <div class="fact"><b>关系事实</b><small>实体之间可追溯关系</small></div>
+          <div class="fact"><b>属性事实</b><small>相对稳定的描述属性</small></div>
+          <div class="fact"><b>分类事实</b><small>标准分类、规则和置信度</small></div>
+          <div class="fact"><b>政策与口径</b><small>基准、费率和治理口径</small></div>
+          <div class="fact"><b>观察事实</b><small>明确时间或区间的度量</small></div>
+          <div class="fact"><b>快照事实</b><small>某个时点的完整截面</small></div>
+          <div class="fact"><b>头寸事实</b><small>快照中的组成与权重</small></div>
+          <div class="fact"><b>事件事实</b><small>具有身份和时间的业务事件</small></div>
+          <div class="fact"><b>事件明细</b><small>事件中的基金和动作</small></div>
+          <div class="fact"><b>衍生指标</b><small>算法、输入和版本可追溯</small></div>
+          <div class="fact"><b>证据事实</b><small>解释来源和判断</small></div>
+          <div class="fact"><b>质量事实</b><small>覆盖、冲突和可执行状态</small></div>
+          <div class="fact"><b>执行投影</b><small>高效查询绑定，不等于本体</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="dictionary">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">数据字典规范</div><h2>字典必须能约束模型，也能约束执行器</h2></div>
+          <p>当前页面147字段已有114个说明，仍有33个缺说明。v2 不只补“中文描述”，而是建立20项机器可执行元数据契约。</p>
+        </div>
+        <div class="contract-layout">
+          <article class="card contract-summary">
+            <h3>一个合格字典条目必须回答</h3>
+            <ol>
+              <li>它属于哪个业务实体、哪类事实、什么粒度？</li>
+              <li>值是什么类型、单位和值域？空值意味着什么？</li>
+              <li>使用哪条时间轴、允许哪些操作符？</li>
+              <li>如何标准化，在哪些策略或事实范围内适用？</li>
+              <li>来源、继承、算法、证据和质量状态是什么？</li>
+              <li>最终绑定到宽表、虚拟字段还是底层事实查询？</li>
+            </ol>
+          </article>
+          <div class="contract-groups">
+            <article class="card contract-group"><h3>业务与身份</h3><div class="key-cloud"><span class="key">canonicalId</span><span class="key">businessDefinition</span><span class="key">entityTypeId</span><span class="key">factKindId</span><span class="key">grain</span></div></article>
+            <article class="card contract-group"><h3>值、单位与时间</h3><div class="key-cloud"><span class="key">dataType</span><span class="key">unit</span><span class="key">valueDomain</span><span class="key">nullMeaning</span><span class="key">timeAxis</span></div></article>
+            <article class="card contract-group"><h3>语义与执行</h3><div class="key-cloud"><span class="key">semanticAliases</span><span class="key">confusableConcepts</span><span class="key">allowedOperators</span><span class="key">normalizationRules</span><span class="key">executionBinding</span></div></article>
+            <article class="card contract-group"><h3>适用、来源与质量</h3><div class="key-cloud"><span class="key">applicability</span><span class="key">sourceLineage</span><span class="key">qualityProfile</span><span class="key">version</span><span class="key">evidence</span></div></article>
+          </div>
+        </div>
+        <h3 style="margin-top:28px">空值不能只有一种含义</h3>
+        <div class="null-grid">
+          <div class="null-card"><code>not_disclosed</code><p>源渠道没有披露，不等于业务事实为否。</p></div>
+          <div class="null-card"><code>not_collected</code><p>应有但未采集成功，属于数据缺口。</p></div>
+          <div class="null-card"><code>not_applicable</code><p>对当前策略或事实类型不适用。</p></div>
+          <div class="null-card"><code>not_yet_available</code><p>观察窗口、成立时间或事件尚未满足。</p></div>
+          <div class="null-card"><code>parse_failed</code><p>原始值存在，但无法按字典标准化。</p></div>
+          <div class="null-card"><code>intentionally_blank</code><p>治理规则明确要求留空，并有说明。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="protocol">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">通用渐进式结构</div><h2>10个阶段，每次只解决一个问题</h2></div>
+          <p>点击阶段可展开输入、输出和责任边界。黄色为普通模型，蓝色为编译器，绿色为数据库，其余由确定性程序或检索服务完成。</p>
+        </div>
+        <div class="protocol-principle">
+          <div class="principle"><b>小上下文</b><p>首轮只看实体类型和事实类型，不看147字段。</p></div>
+          <div class="principle"><b>候选动态生成</b><p>按实体、事实、粒度、类型和操作符检索Top-K。</p></div>
+          <div class="principle"><b>确定性收口</b><p>日期、单位、枚举、绑定、逻辑和执行都由程序完成。</p></div>
+        </div>
+        <div class="pipeline">
+          <details class="stage"><summary><span class="stage-no">0</span><b>请求封装</b><small>deterministic · request</small></summary><div class="stage-body"><p><strong>输入：</strong>原始查询、锚点时间、用户上下文。</p><p><strong>输出：</strong>规范文本、requestId、anchorTime。只做字符和上下文封装。</p></div></details>
+          <details class="stage model"><summary><span class="stage-no">1</span><b>语义框架</b><small>model · request</small></summary><div class="stage-body"><p><strong>只发送：</strong>业务对象类型、事实类型和逻辑Schema。</p><p><strong>只输出：</strong>子句、逻辑树、目标实体、事实类型、度量、时间、关系和值表面形式。</p></div></details>
+          <details class="stage"><summary><span class="stage-no">2</span><b>概念检索</b><small>retrieval · clause</small></summary><div class="stage-body"><p>按结构化元数据先过滤，再做别名、文本或向量召回。每子句建议最多5个概念候选。</p></div></details>
+          <details class="stage"><summary><span class="stage-no">3</span><b>字典细化</b><small>deterministic · clause</small></summary><div class="stage-body"><p>只展开候选概念及一跳关系，提供定义、粒度、类型、单位、值域、操作符、时间、空值、质量和执行绑定。</p></div></details>
+          <details class="stage model"><summary><span class="stage-no">4</span><b>受约束决议</b><small>model · clause</small></summary><div class="stage-body"><p>模型只能从候选目录中选择概念、关系和操作符骨架；必须结构化说明其他候选为何被排除。</p></div></details>
+          <details class="stage"><summary><span class="stage-no">5</span><b>值标准化</b><small>deterministic · clause</small></summary><div class="stage-body"><p>程序计算日期、比例、单位、枚举和实体标准值；模型不做数学和日历运算。</p></div></details>
+          <details class="stage compiler"><summary><span class="stage-no">6</span><b>执行绑定</b><small>compiler · clause</small></summary><div class="stage-body"><p>在物理字段、虚拟字段和底层事实查询之间选择粒度、时间和质量都一致的绑定。</p></div></details>
+          <details class="stage compiler"><summary><span class="stage-no">7</span><b>全局校验</b><small>compiler · global</small></summary><div class="stage-body"><p>统一AND/OR/NOT、时间锚点、跨粒度连接、重复条件和冲突条件；必要时才提出澄清。</p></div></details>
+          <details class="stage database"><summary><span class="stage-no">8</span><b>查询执行</b><small>database · global</small></summary><div class="stage-body"><p>使用参数化计划执行，记录每个条件前后的策略数、缺失数和命中证据。</p></div></details>
+          <details class="stage"><summary><span class="stage-no">9</span><b>解释审计</b><small>deterministic · global</small></summary><div class="stage-body"><p>从结构化轨迹生成解释，区分无匹配、数据缺失、不适用和低置信度，不让模型自由发挥。</p></div></details>
+        </div>
+
+        <article class="card parallel">
+          <div class="parallel-box"><b>子句并发</b><p>阶段2—6按原子子句独立处理，降低单次问题大小和模型负担。</p></div>
+          <div class="join-arrow" aria-hidden="true">→</div>
+          <div class="parallel-box"><b>全局汇合</b><p>等待全部子句后，统一逻辑、实体、时间、粒度和重复条件。</p></div>
+          <div class="join-arrow" aria-hidden="true">→</div>
+          <div class="parallel-box"><b>一次执行</b><p>生成一个可审计查询计划，避免各子句独立执行导致集合逻辑错误。</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="contract">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">普通模型责任边界</div><h2>模型做判断，程序做计算和约束</h2></div>
+          <p>弱模型的正确用法不是给它更多规则，而是缩小每次选择空间、固定输出结构、取消可以程序化的任务。</p>
+        </div>
+        <div class="boundary-grid">
+          <article class="card boundary model">
+            <h3>普通模型负责</h3>
+            <ul><li>切分原子子句和逻辑关系。</li><li>识别目标业务对象、事实类型和语义角色。</li><li>在Top-K候选概念中做受约束选择。</li><li>输出置信度和被排除候选的结构化原因。</li></ul>
+          </article>
+          <article class="card boundary system">
+            <h3>确定性系统负责</h3>
+            <ul><li>概念召回、字典展开和候选裁剪。</li><li>日期、比例、单位、枚举和实体标准化。</li><li>字段/事实绑定、质量门禁和跨粒度查询编译。</li><li>执行、数量核对、解释轨迹、缓存和版本管理。</li></ul>
+          </article>
+        </div>
+
+        <div class="code-grid">
+          <article class="card code-card">
+            <div class="code-head"><b>阶段1：通用语义框架输出</b><button class="copy-btn" data-copy="frameCode">复制</button></div>
+            <pre id="frameCode"><code>{
+  "logicTree": { "type": "and", "children": ["clause-*" ] },
+  "clauses": [{
+    "id": "clause-*",
+    "sourceText": "原始子句",
+    "targetEntityType": "schema enum",
+    "factKind": "schema enum",
+    "subjectArea": "optional hint",
+    "measureOrAttribute": "surface form",
+    "relation": "comparison / membership / existence",
+    "timeConstraint": "surface form or null",
+    "valueSurface": "surface form or null"
+  }]
+}</code></pre>
+          </article>
+          <article class="card code-card">
+            <div class="code-head"><b>阶段7：全局查询计划</b><button class="copy-btn" data-copy="planCode">复制</button></div>
+            <pre id="planCode"><code>{
+  "targetEntity": "strategy",
+  "snapshotVersion": "current-version",
+  "logic": { "type": "and", "predicates": ["predicate-*" ] },
+  "predicates": [{
+    "conceptId": "catalog concept",
+    "bindingType": "physical | virtual | fact_query",
+    "bindingId": "versioned binding",
+    "operator": "dictionary operator",
+    "typedValue": "normalized value",
+    "grain": "validated grain",
+    "qualityState": "verified | usable_with_limit"
+  }],
+  "clarificationRequired": false
+}</code></pre>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="quality">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">质量与可解释性</div><h2>语义正确不等于数据完整</h2></div>
+          <p>每个概念和绑定都必须带质量状态。低覆盖字段可能是适用范围小，也可能是采集缺口；二者不能由模型自行猜测。</p>
+        </div>
+        <div class="quality-flow">
+          <div class="quality-state"><b>verified</b><p>定义、来源、粒度和值可核验。</p></div>
+          <div class="quality-state"><b>usable_with_limit</b><p>可执行，但必须披露限制。</p></div>
+          <div class="quality-state"><b>sparse</b><p>只在明确适用范围内启用。</p></div>
+          <div class="quality-state"><b>missing</b><p>不生成普通筛选条件。</p></div>
+          <div class="quality-state"><b>conflicting</b><p>按权威顺序消解或阻断。</p></div>
+          <div class="quality-state"><b>not_applicable</b><p>不进入有效分母。</p></div>
+          <div class="quality-state"><b>derived_unverified</b><p>只作候选或证据。</p></div>
+        </div>
+        <div class="callout architecture-note">
+          <div class="num">Q</div>
+          <div><h3>结果解释至少包含五项</h3><p>标准概念与执行绑定、时间与数值标准化、条件适用对象/缺失/命中数量、继承或穿透证据、未选候选及排除原因。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="mapping">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">当前147字段映射</div><h2>按业务主题分布，而不是平铺给模型</h2></div>
+          <p>下表来自 v2 机器可读映射。字段仍全部保留，但模型每次只接收候选概念关联的少量绑定。</p>
+        </div>
+        <div class="mapping-head"><p><span class="pill">147 / 147 已映射</span>　77个概念　13个现有虚拟字段</p><p>字典说明：114 / 147</p></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>业务主题</th><th>字段数</th><th>直接筛选</th><th>高级/条件</th><th>证据/审计</th><th>已有字典</th><th>字典完成度</th></tr></thead>
+            <tbody>
+              <tr><td>治理与展示</td><td class="num-cell">23</td><td class="num-cell">1</td><td class="num-cell">15</td><td class="num-cell">7</td><td class="num-cell">18</td><td><div class="progress"><span style="width:78.3%"></span></div></td></tr>
+              <tr><td>身份与来源</td><td class="num-cell">5</td><td class="num-cell">5</td><td class="num-cell">0</td><td class="num-cell">0</td><td class="num-cell">5</td><td><div class="progress"><span style="width:100%"></span></div></td></tr>
+              <tr><td>生命周期</td><td class="num-cell">3</td><td class="num-cell">3</td><td class="num-cell">0</td><td class="num-cell">0</td><td class="num-cell">3</td><td><div class="progress"><span style="width:100%"></span></div></td></tr>
+              <tr><td>分类标签</td><td class="num-cell">11</td><td class="num-cell">8</td><td class="num-cell">3</td><td class="num-cell">0</td><td class="num-cell">11</td><td><div class="progress"><span style="width:100%"></span></div></td></tr>
+              <tr><td>收益业绩</td><td class="num-cell">18</td><td class="num-cell">10</td><td class="num-cell">6</td><td class="num-cell">2</td><td class="num-cell">16</td><td><div class="progress"><span style="width:88.9%"></span></div></td></tr>
+              <tr><td>风险指标</td><td class="num-cell">11</td><td class="num-cell">5</td><td class="num-cell">3</td><td class="num-cell">3</td><td class="num-cell">5</td><td><div class="progress"><span style="width:45.5%"></span></div></td></tr>
+              <tr><td>持仓与暴露</td><td class="num-cell">10</td><td class="num-cell">9</td><td class="num-cell">0</td><td class="num-cell">1</td><td class="num-cell">10</td><td><div class="progress"><span style="width:100%"></span></div></td></tr>
+              <tr><td>调仓行为</td><td class="num-cell">7</td><td class="num-cell">6</td><td class="num-cell">0</td><td class="num-cell">1</td><td class="num-cell">7</td><td><div class="progress"><span style="width:100%"></span></div></td></tr>
+              <tr><td>信号行为</td><td class="num-cell">15</td><td class="num-cell">0</td><td class="num-cell">15</td><td class="num-cell">0</td><td class="num-cell">3</td><td><div class="progress"><span style="width:20%"></span></div></td></tr>
+              <tr><td>业绩基准</td><td class="num-cell">37</td><td class="num-cell">22</td><td class="num-cell">11</td><td class="num-cell">4</td><td class="num-cell">31</td><td><div class="progress"><span style="width:83.8%"></span></div></td></tr>
+              <tr><td>费率</td><td class="num-cell">2</td><td class="num-cell">1</td><td class="num-cell">1</td><td class="num-cell">0</td><td class="num-cell">2</td><td><div class="progress"><span style="width:100%"></span></div></td></tr>
+              <tr><td>数据质量</td><td class="num-cell">3</td><td class="num-cell">0</td><td class="num-cell">2</td><td class="num-cell">1</td><td class="num-cell">3</td><td><div class="progress"><span style="width:100%"></span></div></td></tr>
+              <tr><td>技术投影</td><td class="num-cell">2</td><td class="num-cell">0</td><td class="num-cell">0</td><td class="num-cell">2</td><td class="num-cell">0</td><td><div class="progress"><span style="width:0%"></span></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout architecture-note">
+          <div class="num">+2</div>
+          <div><h3>当前字段变化已纳入 v2</h3><p>“业绩基准来源策略ID”和“业绩基准继承口径”已加入映射；原来全空的母策略与官方业绩来源字段目前已有74条真实关系，已从禁用调整为低覆盖、按适用范围启用。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="wrap">
+        <div class="section-head">
+          <div><div class="eyebrow">实施路径</div><h2>先补元数据，再替换模型调用</h2></div>
+          <p>不建议直接把 v2 JSON 塞进现有提示词。应先建立目录加载、检索、字典细化和查询编译能力，再灰度接入模型。</p>
+        </div>
+        <div class="roadmap">
+          <article class="card roadmap-card" data-step="01"><h3>确认模型</h3><p>确认21类实体、14类事实、时间轴、空值语义和六层边界。</p></article>
+          <article class="card roadmap-card" data-step="02"><h3>补齐字典</h3><p>补33个缺说明字段，并扩展为20项机器可执行元数据。</p></article>
+          <article class="card roadmap-card" data-step="03"><h3>构建索引</h3><p>生成概念、关系、值域、质量和执行绑定的版本化检索索引。</p></article>
+          <article class="card roadmap-card" data-step="04"><h3>实现协议</h3><p>依次实现语义框架、候选检索、字典细化和受约束决议。</p></article>
+          <article class="card roadmap-card" data-step="05"><h3>实现编译器</h3><p>确定性标准化、质量门禁、跨粒度连接和全局逻辑计划。</p></article>
+          <article class="card roadmap-card" data-step="06"><h3>建立回归集</h3><p>按业务主题、事实类型、粒度、否定、时间和组合逻辑覆盖测试。</p></article>
+          <article class="card roadmap-card" data-step="07"><h3>影子运行</h3><p>新旧解析并行，比较概念、条件、结果集合、耗时和澄清率。</p></article>
+          <article class="card roadmap-card" data-step="08"><h3>灰度切换</h3><p>按置信度和主题逐步放量，保留旧解析器回退与完整审计轨迹。</p></article>
+        </div>
+
+        <h3 style="margin-top:30px">建议本次确认的五项决策</h3>
+        <div class="decision-list">
+          <div class="decision"><span>1</span><div><h3>宽表定位</h3><p>确认147字段是执行投影，而不是业务本体；底层事实查询可以成为补充绑定。</p></div></div>
+          <div class="decision"><span>2</span><div><h3>实体与事实粒度</h3><p>确认21类实体和14类事实类型是否符合真实业务边界。</p></div></div>
+          <div class="decision"><span>3</span><div><h3>字典强制项</h3><p>确认20项字典元数据和6种空值语义作为后续接入门槛。</p></div></div>
+          <div class="decision"><span>4</span><div><h3>模型责任</h3><p>确认普通模型只做语义框架和候选决议，不承担计算、字段发明和查询执行。</p></div></div>
+          <div class="decision"><span>5</span><div><h3>渐进与并发</h3><p>确认子句阶段2—6并发、阶段7全局汇合的处理结构。</p></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-row">
+      <div>AI选策略业务语义实体模型设计 v2 · Proposal · 数据快照 2026-08-08 04:00</div>
+      <div class="file-links">
+        <a href="../../程序代码/config/AI选策略业务语义实体模型Schema.json">Schema</a>
+        <a href="../../程序代码/config/AI选策略字段语义映射.v2.json">147字段映射</a>
+        <a href="./AI选策略语义数据图谱Schema与字段映射.md">旧版提案</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const themeButton = document.getElementById('themeToggle');
+      const savedTheme = localStorage.getItem('semantic-model-theme');
+      if (savedTheme === 'dark') root.dataset.theme = 'dark';
+      const syncThemeLabel = () => { themeButton.textContent = root.dataset.theme === 'dark' ? '浅色' : '深色'; };
+      syncThemeLabel();
+      themeButton.addEventListener('click', () => {
+        root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('semantic-model-theme', root.dataset.theme);
+        syncThemeLabel();
+      });
+
+      const search = document.getElementById('entitySearch');
+      const cards = [...document.querySelectorAll('.entity-card')];
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        cards.forEach(card => { card.hidden = q && !card.dataset.search.toLowerCase().includes(q) && !card.textContent.toLowerCase().includes(q); });
+      });
+
+      document.querySelectorAll('[data-copy]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const node = document.getElementById(button.dataset.copy);
+          try {
+            await navigator.clipboard.writeText(node.innerText);
+            const old = button.textContent;
+            button.textContent = '已复制';
+            setTimeout(() => button.textContent = old, 1200);
+          } catch {
+            button.textContent = '请手动复制';
+          }
+        });
+      });
+
+      const navLinks = [...document.querySelectorAll('.nav a')];
+      const sections = navLinks.map(link => document.querySelector(link.getAttribute('href'))).filter(Boolean);
+      if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(entries => {
+          const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+          if (!visible) return;
+          navLinks.forEach(link => link.classList.toggle('active', link.getAttribute('href') === `#${visible.target.id}`));
+        }, { rootMargin: '-18% 0px -65% 0px', threshold: [0, .2, .6] });
+        sections.forEach(section => observer.observe(section));
+      }
+    })();
+  </script>
+</body>
+</html>

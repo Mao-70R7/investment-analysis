@@ -1,0 +1,30 @@
+{
+  "channel_id": "southern",
+  "channel_name": "南方基金/司南投顾",
+  "provider_type": "fund_company",
+  "official_site_url": "https://www.nffund.com/new/snzt/index.html",
+  "login_required_level": "required",
+  "collectors": {
+    "public_index": {
+      "access_level": "public",
+      "url": "https://www.nffund.com/new/snzt/index.html",
+      "expected_fields": [
+        "landing_page",
+        "login_url",
+        "image_assets"
+      ]
+    },
+    "auth_strategy": {
+      "access_level": "login",
+      "login_url": "https://trade.southernfund.com/new/account/login/init?from=web&url=%2Fiainvest%2Finit%3FmenuId%3D80000",
+      "expected_fields": [
+        "strategy_master",
+        "strategy_performance_daily",
+        "strategy_fund_snapshot",
+        "strategy_rebalance_event"
+      ],
+      "status": "pending_login_validation"
+    }
+  }
+}
+

@@ -1,0 +1,124 @@
+{
+  "generated_at": "2026-05-29T14:11:54+08:00",
+  "target_project": "D:\\SyncthingShareToMpc\\全市场投顾监控",
+  "purpose": "server runnable package after data repair; includes normalized/raw/output/site data required for future incremental updates",
+  "included": [
+    "scripts",
+    "src",
+    "schemas",
+    "config",
+    "docs",
+    "official_apps",
+    "data/analysis_zh_current.sqlite",
+    "data/advisor_monitor.sqlite",
+    "data/normalized",
+    "data/raw",
+    "data/backups",
+    "site",
+    "outputs",
+    "README_?????????.md",
+    "run_daily_incremental.ps1",
+    "check_environment.ps1",
+    "REPAIR_REPORT_20260529.md",
+    "REPAIR_REPORT_20260529.json"
+  ],
+  "not_required_for_runtime": [
+    "node_modules",
+    ".obsidian"
+  ],
+  "latest_repair_output": "D:\\SyncthingShareToMpc\\全市场投顾监控\\outputs\\repair_post_update_quality\\2026-05-29\\20260529T134637+0800",
+  "database": {
+    "analysis_quick_check": "ok",
+    "ttfund_strategy_count": 1070,
+    "ttfund_daily": {
+      "rows": 872237,
+      "strategies": 1058,
+      "latest_trade_date": "2026-05-28"
+    },
+    "ttfund_standard_nav": {
+      "rows": 1151972,
+      "strategies": 1045,
+      "latest_trade_date": "2026-05-27"
+    },
+    "fund_nav": {
+      "rows": 9034072,
+      "funds": 4870,
+      "latest_trade_date": "2026-05-27"
+    },
+    "advisor_monitor_quick_check": "ok"
+  },
+  "stats": {
+    "scripts": {
+      "files": 89,
+      "bytes": 2511854
+    },
+    "src": {
+      "files": 29,
+      "bytes": 744161
+    },
+    "schemas": {
+      "files": 2,
+      "bytes": 25271
+    },
+    "config": {
+      "files": 3,
+      "bytes": 6969
+    },
+    "docs": {
+      "files": 6,
+      "bytes": 36346
+    },
+    "official_apps": {
+      "files": 12,
+      "bytes": 21088
+    },
+    "data/analysis_zh_current.sqlite": {
+      "files": 1,
+      "bytes": 5253451776
+    },
+    "data/advisor_monitor.sqlite": {
+      "files": 1,
+      "bytes": 1130496
+    },
+    "data/normalized": {
+      "files": 265,
+      "bytes": 9704066729
+    },
+    "data/raw": {
+      "files": 5686,
+      "bytes": 149159412
+    },
+    "data/backups": {
+      "files": 3,
+      "bytes": 10508029952
+    },
+    "site": {
+      "files": 2422,
+      "bytes": 578272987
+    },
+    "outputs": {
+      "files": 320,
+      "bytes": 81005347
+    },
+    "README_?????????.md": {
+      "files": 0,
+      "bytes": 0
+    },
+    "run_daily_incremental.ps1": {
+      "files": 1,
+      "bytes": 2404
+    },
+    "check_environment.ps1": {
+      "files": 1,
+      "bytes": 2473
+    },
+    "REPAIR_REPORT_20260529.md": {
+      "files": 1,
+      "bytes": 794
+    },
+    "REPAIR_REPORT_20260529.json": {
+      "files": 1,
+      "bytes": 2051
+    }
+  }
+}

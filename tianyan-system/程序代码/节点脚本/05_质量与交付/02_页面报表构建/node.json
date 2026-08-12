@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "report_build",
+  "name": "最小发布源报表构建",
+  "phase": "05_质量与交付",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "public_fund_snapshot"
+  ],
+  "criticality": "critical",
+  "timeoutSeconds": 14400,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "个报表步骤",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "report_build"
+}
