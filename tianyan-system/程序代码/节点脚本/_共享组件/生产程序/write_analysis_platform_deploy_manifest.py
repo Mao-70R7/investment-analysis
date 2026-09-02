@@ -135,7 +135,6 @@ def main() -> None:
             "basic_data_data_quality_pack": deploy_dir / "basic_data" / "data" / "data_quality_pack.js",
             "basic_data_standard_entity_dictionary": deploy_dir / "basic_data" / "data" / "standard_entity_dictionary.js",
             "basic_data_strategy_details": deploy_dir / "basic_data" / "data" / "details",
-            "basic_data_fund_details_manifest": deploy_dir / "basic_data" / "data" / "fund_details" / "_manifest.js",
             "basic_data_common_js": deploy_dir / "basic_data" / "assets" / "basic-common.js",
             "basic_data_css": deploy_dir / "basic_data" / "assets" / "basic.css",
             "basic_data_strategies_js": deploy_dir / "basic_data" / "assets" / "strategies.js",

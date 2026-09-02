@@ -14,6 +14,8 @@ COMMON_ASSET = CODE_ROOT / "basic_data" / "assets" / "basic-common.js"
 STRATEGY_ASSET = CODE_ROOT / "basic_data" / "assets" / "strategies.js"
 AI_STRATEGY_ASSET = CODE_ROOT / "basic_data" / "assets" / "ai-strategy.js"
 RANKING_ASSET = CODE_ROOT / "basic_data" / "assets" / "mixed-performance-scatter.js"
+RANKING_PACK_BUILDER = CODE_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "build_advisor_fof_ranking_pack.py"
+MIXED_SOURCE_BUILDER = CODE_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "export_advisor_fof_mixed_performance_source.py"
 THEME_ASSET = CODE_ROOT / "basic_data" / "assets" / "basic.css"
 MANIFEST_BUILDER = CODE_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "write_analysis_platform_deploy_manifest.py"
 
@@ -54,10 +56,27 @@ class InstitutionListPageTests(unittest.TestCase):
 
     def test_institution_page_reconciles_channel_manager_and_strategy_totals(self) -> None:
         source = INSTITUTION_ASSET.read_text(encoding="utf-8")
-        self.assertIn('summarize("渠道")', source)
-        self.assertIn('summarize("投顾机构")', source)
-        self.assertIn('channelTotals.total !== strategies.length', source)
-        self.assertIn('销售渠道、投顾管理人和策略清单未对账', source)
+        self.assertIn('summarize("渠道", salesChannelStrategies)', source)
+        self.assertIn('summarize("投顾机构", strategies)', source)
+        self.assertIn('channelTotals.total !== salesChannelStrategies.length', source)
+        self.assertIn('销售渠道口径、投顾管理人和策略清单未对账', source)
+
+    def test_institution_default_filters_keep_history_optional(self) -> None:
+        common = COMMON_ASSET.read_text(encoding="utf-8")
+        self.assertIn("const INSTITUTION_OVERVIEW_DEFAULT_FILTERS", common)
+        self.assertIn("benchmark: true", common)
+        self.assertIn("performance: true", common)
+        self.assertIn("history: false", common)
+        self.assertIn("active: true", common)
+        self.assertIn("query.has(config.param)", common)
+
+    def test_southern_sales_channel_is_ignored_without_removing_manager_history(self) -> None:
+        source = INSTITUTION_ASSET.read_text(encoding="utf-8")
+        self.assertIn("isIgnoredSalesChannel", source)
+        self.assertIn("salesChannelStrategies = strategies.filter", source)
+        self.assertIn('state.dimension === "channel" ? salesChannelStrategies : strategies', source)
+        self.assertIn("暂停更新的南方基金不进入销售渠道数量", source)
+        self.assertIn("切换到投顾管理人后", source)
 
     def test_strategy_detail_displays_explicit_sales_and_manager_labels(self) -> None:
         source = DETAIL_ASSET.read_text(encoding="utf-8")
@@ -76,9 +95,43 @@ class InstitutionListPageTests(unittest.TestCase):
         self.assertIn('data-point-date=', source)
         self.assertIn('managerChannelSummary', source)
         self.assertIn('riskWeight: bucket', source)
+        self.assertIn('channel: scope.channel', source)
+        self.assertIn('institution: scope.institution', source)
         self.assertIn('withGlobalStrategyFilters', common)
         self.assertIn('initialParams.get("riskWeight")', ranking)
+        self.assertIn('initialParams.get("channel")', ranking)
+        self.assertIn('initialParams.get("institution")', ranking)
+        self.assertIn('id="mixedChannel"', ranking)
+        self.assertIn('id="mixedInstitution"', ranking)
+        self.assertIn('data-global-filter=', ranking)
+        self.assertIn('syncFilterUrl()', ranking)
         self.assertIn('matchesGlobalPackFilters', ranking)
+
+    def test_undisclosed_manager_uses_channel_fallback_and_qieman_uses_yingmi_name(self) -> None:
+        exporter = EXPORTER.read_text(encoding="utf-8")
+        source = INSTITUTION_ASSET.read_text(encoding="utf-8")
+        self.assertIn('canonical_advisor_institution(', exporter)
+        self.assertIn('channel_id,', exporter)
+        self.assertIn('channel_name,', exporter)
+        self.assertIn('以销售渠道的业务名称兜底', source)
+        self.assertIn('统一显示为“盈米基金”', source)
+        self.assertIn('"southern"', exporter)
+
+    def test_ranking_pack_carries_institution_overview_filter_facts(self) -> None:
+        ranking_builder = RANKING_PACK_BUILDER.read_text(encoding="utf-8")
+        mixed_source = MIXED_SOURCE_BUILDER.read_text(encoding="utf-8")
+        for english, chinese in (
+            ("hasBenchmark", "有基准"),
+            ("hasPerformance", "有业绩走势"),
+            ("hasHistoryPosition", "有历史仓位"),
+            ("clientActive", "对客未终止"),
+        ):
+            self.assertIn(f'"{english}"', ranking_builder)
+            if english == "hasBenchmark":
+                self.assertIn('has_benchmark = yes_no(row.get("hasBenchmark"))', mixed_source)
+                self.assertIn('"有基准": has_benchmark', mixed_source)
+            else:
+                self.assertIn(f'"{chinese}": yes_no(row.get("{english}"))', mixed_source)
 
     def test_institution_filters_only_cross_pages_through_explicit_links(self) -> None:
         source = INSTITUTION_ASSET.read_text(encoding="utf-8")
@@ -114,7 +167,9 @@ class InstitutionListPageTests(unittest.TestCase):
         self.assertIn('choices=("minimal_publish",)', manifest)
         self.assertIn('"basic_data_institutions"', manifest)
         minimal_block = manifest[manifest.index('if args.page_set == "minimal_publish"'):]
-        self.assertNotIn('"basic_data_monthly_rebalance_report"', minimal_block.split('strategy_manifest', 1)[0])
+        minimal_required = minimal_block.split('strategy_manifest', 1)[0]
+        self.assertNotIn('"basic_data_monthly_rebalance_report"', minimal_required)
+        self.assertNotIn('"basic_data_fund_details_manifest"', minimal_required)
         self.assertIn('--brand:#4F7888', theme)
         self.assertIn('--entity:#B86B3E', theme)
         self.assertIn('--kpi:#264F63', theme)

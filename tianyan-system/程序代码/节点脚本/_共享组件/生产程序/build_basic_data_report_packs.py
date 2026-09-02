@@ -17,7 +17,7 @@ FUND_ECONOMIC_EXPOSURE_SCRIPT_PATH = PROJECT_ROOT / "节点脚本" / "_共享组
 QUALITY_GATE_SCRIPT_PATH = PROJECT_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "构建基础数据质量包.py"
 FIELD_DICTIONARY_SCRIPT_PATH = PROJECT_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "构建字段字典与指标口径.py"
 DATA_AUDIT_SCRIPT_PATH = PROJECT_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "标准化数据稽核.py"
-DB_PATH = PROJECT_ROOT / "data" / "analysis_zh_current.sqlite"
+DEFAULT_DB_PATH = Path(os.environ.get("ADVISOR_DATABASE_ROOT") or PROJECT_ROOT / "data") / "analysis_zh_current.sqlite"
 ADVISOR_FOF_RANKING_SCRIPT_PATH = PROJECT_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "build_advisor_fof_ranking_pack.py"
 FOF_H1_SOURCE_SCRIPT_PATH = PROJECT_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "generate_fof_h1_strategy_rank_data.py"
 FOF_BENCHMARK_ENRICH_SCRIPT_PATH = PROJECT_ROOT / "节点脚本" / "_共享组件" / "生产程序" / "enrich_fof_benchmark_classification_and_rerank.py"
@@ -48,8 +48,13 @@ def project_arg(path: Path) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build basic_data insight packs after basic_summary/details export.")
     parser.add_argument("--report-root", type=Path, default=DEFAULT_REPORT_ROOT)
+    parser.add_argument("--db-path", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--node-exe", default=os.environ.get("ADVISOR_NODE_EXE") or os.environ.get("NODE_EXE") or "node")
-    parser.add_argument("--skip-fund-enrichment", action="store_true", help="Skip per-fund NAV/report holding packs.")
+    parser.add_argument(
+        "--skip-fund-enrichment",
+        action="store_true",
+        help="Skip per-fund NAV/report holding files and the fund economic-exposure detail pack.",
+    )
     parser.add_argument("--skip-gf-rebalance-monitor", action="store_true", help="Skip Guangfa fund rebalance monitor page.")
     parser.add_argument("--skip-qd-fund-report", action="store_true", help="Skip QD fund allocation report pages.")
     parser.add_argument("--skip-field-dictionary", action="store_true", help="Skip field dictionary data pack.")
@@ -61,6 +66,14 @@ def parse_args() -> argparse.Namespace:
         help="Build only packs required by the minimal publish package; skip standalone Guangfa and QD report pages.",
     )
     return parser.parse_args()
+
+
+def should_build_fund_detail_artifacts(args: argparse.Namespace) -> bool:
+    """Per-fund detail artifacts are outside the minimal publish contract."""
+    return not (
+        bool(getattr(args, "minimal_publish_only", False))
+        or bool(getattr(args, "skip_fund_enrichment", False))
+    )
 
 
 def latest_fof_benchmark_source() -> Path | None:
@@ -138,7 +151,7 @@ def fof_benchmark_source_is_fresh(
     return True
 
 
-def ensure_fof_benchmark_source(report_root: Path) -> Path:
+def ensure_fof_benchmark_source(report_root: Path, db_path: Path) -> Path:
     existing = latest_fof_benchmark_source()
     summary_path = report_root / "basic_data" / "data" / "basic_summary.js"
     h1_source = FOF_H1_OUTPUT_ROOT / "latest_fof_h1_strategy_ranking_data.json"
@@ -173,7 +186,7 @@ def ensure_fof_benchmark_source(report_root: Path) -> Path:
             "utf8",
             project_arg(FOF_H1_SOURCE_SCRIPT_PATH),
             "--db-path",
-            project_arg(DB_PATH),
+            project_arg(db_path),
             "--summary-js",
             project_arg(summary_path),
             "--output-root",
@@ -203,7 +216,7 @@ def ensure_fof_benchmark_source(report_root: Path) -> Path:
             "--output-root",
             project_arg(FOF_BENCHMARK_OUTPUT_ROOT),
             "--db-path",
-            project_arg(DB_PATH),
+            project_arg(db_path),
             "--skip-db",
         ],
         cwd=PROJECT_ROOT,
@@ -224,9 +237,13 @@ def main() -> None:
     args = parse_args()
     # The old full package is retired. Every invocation now follows the minimal page contract.
     args.minimal_publish_only = True
+    build_fund_detail_artifacts = should_build_fund_detail_artifacts(args)
     skip_gf_rebalance_monitor = True
     skip_qd_fund_report = True
     report_root = args.report_root.resolve()
+    db_path = args.db_path.resolve()
+    if not db_path.is_file():
+        raise SystemExit(f"missing analysis database: {db_path}")
     summary_path = report_root / "basic_data" / "data" / "basic_summary.js"
     details_dir = report_root / "basic_data" / "data" / "details"
     if not SCRIPT_PATH.exists():
@@ -255,7 +272,7 @@ def main() -> None:
         raise SystemExit(f"missing Guangfa rebalance monitor builder: {GF_REBALANCE_MONITOR_SCRIPT_PATH}")
     if not skip_qd_fund_report and not QD_FUND_REPORT_SCRIPT_PATH.exists():
         raise SystemExit(f"missing QD fund report builder: {QD_FUND_REPORT_SCRIPT_PATH}")
-    fof_benchmark_source = ensure_fof_benchmark_source(report_root)
+    fof_benchmark_source = ensure_fof_benchmark_source(report_root, db_path)
     completed = subprocess.run(
         [
             sys.executable,
@@ -263,7 +280,7 @@ def main() -> None:
             "utf8",
             project_arg(FUND_ECONOMIC_EXPOSURE_SCRIPT_PATH),
             "--db-path",
-            project_arg(DB_PATH),
+            project_arg(db_path),
             "--site-dir",
             project_arg(report_root / "basic_data"),
             "--skip-fund-detail",
@@ -287,7 +304,7 @@ def main() -> None:
     from export_basic_data_pages import write_shell_files, write_target_profit_analysis_pack, write_topic_analysis_pack
 
     write_shell_files(report_root / "basic_data")
-    write_topic_analysis_pack(report_root / "basic_data", DB_PATH)
+    write_topic_analysis_pack(report_root / "basic_data", db_path)
     completed = subprocess.run(
         [
             sys.executable,
@@ -295,7 +312,7 @@ def main() -> None:
             "utf8",
             project_arg(ADVISOR_FOF_RANKING_SCRIPT_PATH),
             "--db-path",
-            project_arg(DB_PATH),
+            project_arg(db_path),
             "--site-dir",
             project_arg(report_root / "basic_data"),
             "--source-json",
@@ -320,7 +337,7 @@ def main() -> None:
             "--summary-core",
             project_arg(report_root / "basic_data" / "data" / "basic_summary_core.js"),
             "--db",
-            project_arg(DB_PATH),
+            project_arg(db_path),
             "--out-dir",
             project_arg(mixed_source_dir),
         ],
@@ -360,7 +377,7 @@ def main() -> None:
                 "utf8",
                 project_arg(GF_REBALANCE_MONITOR_SCRIPT_PATH),
                 "--db-path",
-                project_arg(DB_PATH),
+                project_arg(db_path),
                 "--site-dir",
                 project_arg(report_root / "basic_data"),
             ],
@@ -379,7 +396,7 @@ def main() -> None:
                 "utf8",
                 project_arg(QD_FUND_REPORT_SCRIPT_PATH),
                 "--db-path",
-                project_arg(DB_PATH),
+                project_arg(db_path),
                 "--site-dir",
                 project_arg(report_root / "basic_data"),
             ],
@@ -390,7 +407,7 @@ def main() -> None:
         )
         if completed.returncode:
             raise SystemExit(completed.returncode)
-    if not args.skip_fund_enrichment:
+    if build_fund_detail_artifacts:
         completed = subprocess.run(
             [
                 sys.executable,
@@ -409,24 +426,47 @@ def main() -> None:
         )
         if completed.returncode:
             raise SystemExit(completed.returncode)
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-X",
-            "utf8",
-            project_arg(FUND_ECONOMIC_EXPOSURE_SCRIPT_PATH),
-            "--db-path",
-            project_arg(DB_PATH),
-            "--site-dir",
-            project_arg(report_root / "basic_data"),
-        ],
-        cwd=PROJECT_ROOT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if completed.returncode:
-        raise SystemExit(completed.returncode)
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "utf8",
+                project_arg(FUND_ECONOMIC_EXPOSURE_SCRIPT_PATH),
+                "--db-path",
+                project_arg(db_path),
+                "--site-dir",
+                project_arg(report_root / "basic_data"),
+            ],
+            cwd=PROJECT_ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if completed.returncode:
+            raise SystemExit(completed.returncode)
+    else:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "utf8",
+                project_arg(FUND_ECONOMIC_EXPOSURE_SCRIPT_PATH),
+                "--db-path",
+                project_arg(db_path),
+                "--site-dir",
+                project_arg(report_root / "basic_data"),
+            ],
+            cwd=PROJECT_ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if completed.returncode:
+            raise SystemExit(completed.returncode)
+        print(
+            "[INFO] Minimal publish mode: skipped per-fund detail files and finalized the shared fund detail pack.",
+            flush=True,
+        )
     if not args.skip_field_dictionary:
         completed = subprocess.run(
             [
@@ -435,7 +475,7 @@ def main() -> None:
                 "utf8",
                 project_arg(FIELD_DICTIONARY_SCRIPT_PATH),
                 "--db",
-                project_arg(DB_PATH),
+                project_arg(db_path),
                 "--site-data-dir",
                 project_arg(report_root / "basic_data" / "data"),
             ],
@@ -452,6 +492,8 @@ def main() -> None:
             "-X",
             "utf8",
             project_arg(QUALITY_GATE_SCRIPT_PATH),
+            "--db-path",
+            project_arg(db_path),
             "--site-dir",
             project_arg(report_root / "basic_data"),
             "--fail-on-error",
@@ -475,7 +517,7 @@ def main() -> None:
                 "utf8",
                 project_arg(DATA_AUDIT_SCRIPT_PATH),
                 "--db-path",
-                project_arg(DB_PATH),
+                project_arg(db_path),
                 "--site-dir",
                 project_arg(report_root / "basic_data"),
                 "--fail-on-error",

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "southern_load",
+  "name": "南方基金事务入库",
+  "phase": "03_南方基金",
+  "entrypoint": "run.ps1",
+  "dependencies": ["southern_gate"],
+  "allowFailedOptionalDependencies": false,
+  "criticality": "optional",
+  "failureImpact": "warning",
+  "timeoutSeconds": 7200,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": false,
+  "progressUnit": "张表",
+  "validator": {"type": "node_result", "requiredStatus": "passed"},
+  "daily": false,
+  "action": "southern_load"
+}

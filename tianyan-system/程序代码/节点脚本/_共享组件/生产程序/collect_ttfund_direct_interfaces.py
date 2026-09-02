@@ -483,6 +483,12 @@ def write_strategy_outputs(
                 history_delta_count += len(group.get("changeList") or [])
 
     hold = detail.get("holdWareHouseInfo") if isinstance(detail, dict) else None
+    extend_info = detail.get("tgExtendInfo") if isinstance(detail, dict) else None
+    benchmark_text = (
+        str((extend_info or {}).get("basicCalFormulaRemark") or "").strip()
+        if isinstance(extend_info, dict)
+        else ""
+    )
     hold_count = 0
     if isinstance(hold, dict):
         for group in hold.get("holdTypeList") or []:
@@ -498,7 +504,10 @@ def write_strategy_outputs(
 
     result = {
         "strategy_id": strategy_id,
-        "detail_ok": bool(detail.get("tgExtendInfo") and hold_count > 0),
+        "detail_ok": bool(detail.get("tgExtendInfo")),
+        "benchmark_text_ok": bool(benchmark_text),
+        "benchmark_text": benchmark_text or None,
+        "holding_info_ok": bool(hold_count > 0),
         "latest_adjustment_ok": bool(latest.get("adjustList")),
         "history_adjustment_ok": bool(history_events),
         "history_checked_ok": history_checked_ok,
@@ -578,6 +587,9 @@ def collect_one(
         result = {
             "strategy_id": strategy_id,
             "detail_ok": False,
+            "benchmark_text_ok": False,
+            "benchmark_text": None,
+            "holding_info_ok": False,
             "latest_adjustment_ok": False,
             "history_adjustment_ok": False,
             "history_checked_ok": False,
@@ -599,6 +611,8 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "strategy_total": total,
         "detail_ok_total": sum(1 for row in results if row.get("detail_ok")),
+        "benchmark_text_ok_total": sum(1 for row in results if row.get("benchmark_text_ok")),
+        "holding_info_ok_total": sum(1 for row in results if row.get("holding_info_ok")),
         "latest_adjustment_ok_total": sum(1 for row in results if row.get("latest_adjustment_ok")),
         "history_adjustment_ok_total": sum(1 for row in results if row.get("history_adjustment_ok")),
         "history_checked_ok_total": sum(1 for row in results if row.get("history_checked_ok")),

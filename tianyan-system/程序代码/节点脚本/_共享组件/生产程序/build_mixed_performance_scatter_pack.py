@@ -45,6 +45,12 @@ BUCKET_LABELS = {
 }
 MISSING_BUCKETS = {"", "未分档", "未知", "NA", "N/A", "-"}
 BROAD_UNKNOWN_TOLERANCE = 0.0001
+NO_COMPARISON_BENCHMARK_PHRASES = (
+    "不设置业绩比较基准",
+    "未设置业绩比较基准",
+    "不设业绩比较基准",
+    "无业绩比较基准",
+)
 
 
 def as_number(value: Any) -> float | None:
@@ -65,6 +71,11 @@ def clean_text(value: Any) -> str:
         return ""
     text = str(value).strip()
     return "" if text.lower() in {"nan", "none"} else text
+
+
+def explicitly_has_no_comparison_benchmark(value: Any) -> bool:
+    text = clean_text(value).replace(" ", "")
+    return any(phrase in text for phrase in NO_COMPARISON_BENCHMARK_PHRASES)
 
 
 def is_yes(value: Any) -> bool:
@@ -99,6 +110,28 @@ def risk_asset_bucket(value: float | None) -> str:
     if percent <= 0:
         return "L0"
     return f"L{min(10, max(1, math.ceil(percent / 10.0)))}"
+
+
+def canonical_risk_asset_bucket(row: dict[str, Any], product_type: str, broad_weight: float | None) -> str:
+    """Keep advisor filtering aligned with the audited strategy-list bucket.
+
+    Some upstream risk profiles retain zero placeholders when the benchmark
+    cannot be reliably decomposed.  Recomputing those placeholders would turn
+    an explicitly unbucketed strategy into L0.  Public funds may still derive a
+    bucket from their independent benchmark vector when no explicit bucket is
+    available.
+    """
+
+    if product_type == "投顾策略" and (
+        not is_yes(row.get("有基准"))
+        or explicitly_has_no_comparison_benchmark(row.get("业绩比较基准"))
+    ):
+        return ""
+    declared = clean_text(row.get("基准风险资产权重"))
+    declared_bucket = "" if declared in MISSING_BUCKETS else declared
+    if product_type == "投顾策略":
+        return declared_bucket
+    return risk_asset_bucket(broad_weight) or declared_bucket
 
 
 def risk_asset_note(row: dict[str, Any], value: float | None, bucket: str) -> str:
@@ -150,7 +183,9 @@ def build_row(row: dict[str, Any]) -> dict[str, Any] | None:
         product_id = clean_text(row.get("产品ID"))
         detail_url = f"./fund.html?code={code}" if product_type == "公募基金" else f"./strategy.html?id={product_id}"
     broad_weight = risk_asset_weight(row)
-    canonical_bucket = risk_asset_bucket(broad_weight) or clean_text(row.get("基准风险资产权重"))
+    canonical_bucket = canonical_risk_asset_bucket(row, product_type, broad_weight)
+    if product_type == "投顾策略" and not canonical_bucket:
+        broad_weight = None
 
     return {
         "id": clean_text(row.get("产品ID")) or clean_text(row.get("产品代码")) or product_name,

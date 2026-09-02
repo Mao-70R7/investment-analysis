@@ -8,7 +8,6 @@
     "gfsec_fima_collect"
   ],
   "criticality": "optional",
-  "failureImpact": "channel",
   "timeoutSeconds": 600,
   "maxProcessAttempts": 1,
   "resourceLock": null,
@@ -19,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "gfsec_fima_gate"
+  "action": "gfsec_fima_gate",
+  "failureImpact": "channel"
 }

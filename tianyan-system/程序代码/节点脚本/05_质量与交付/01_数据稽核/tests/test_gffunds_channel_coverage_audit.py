@@ -277,7 +277,8 @@ class ChannelPerformanceFreshnessAuditTests(unittest.TestCase):
                                 "channelId": "qieman",
                                 "ruleId": "QIEMAN_LATEST_NAV_DATE_COVERAGE_LOW",
                                 "table": "策略日度业绩",
-                                "minimumLatestDateRate": 0.99,
+                                "minimumFreshDateRate": 0.98,
+                                "maximumStrategyBusinessDayLagFromChannelLatest": 1,
                                 "maximumBusinessDayLagFromSystemLatest": 1,
                             }
                         ],
@@ -293,15 +294,18 @@ class ChannelPerformanceFreshnessAuditTests(unittest.TestCase):
         self.assertEqual(issues[0]["ruleId"], "QIEMAN_LATEST_NAV_DATE_COVERAGE_LOW")
         self.assertEqual(issues[0]["sample"][0]["相差工作日"], 2)
 
-    def test_latest_date_strategy_coverage_requires_ninety_nine_percent(self) -> None:
+    def test_strategy_freshness_accepts_one_business_day_lag_at_ninety_eight_percent(self) -> None:
         failed = self.run_audit(
-            [(f"Q{index:03d}", "2026-08-11" if index < 98 else "2026-08-07") for index in range(100)]
+            [(f"Q{index:03d}", "2026-08-11" if index < 97 else "2026-08-07") for index in range(100)]
         )
         passed = self.run_audit(
-            [(f"Q{index:03d}", "2026-08-11" if index < 99 else "2026-08-07") for index in range(100)]
+            [
+                (f"Q{index:03d}", "2026-08-11" if index < 70 else "2026-08-10" if index < 98 else "2026-08-07")
+                for index in range(100)
+            ]
         )
         self.assertEqual(len(failed), 1)
-        self.assertEqual(failed[0]["sample"][0]["最新日覆盖率"], 0.98)
+        self.assertEqual(failed[0]["sample"][0]["允许时效窗口覆盖率"], 0.97)
         self.assertEqual(passed, [])
 
 

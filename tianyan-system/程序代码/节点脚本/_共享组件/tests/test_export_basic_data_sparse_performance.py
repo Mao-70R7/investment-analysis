@@ -26,19 +26,20 @@ class SparsePerformanceDisplayTest(unittest.TestCase):
                 "披露累计收益率_百分比" REAL, "是否可画曲线" INTEGER
             );
             CREATE TABLE "策略日度业绩" (
-                "统一策略ID" TEXT, "交易日期" TEXT, "单位净值" REAL,
-                "累计收益率_百分比" REAL
+                "统一策略ID" TEXT, "渠道ID" TEXT, "交易日期" TEXT, "单位净值" REAL,
+                "累计收益率_百分比" REAL, "业绩区段类型" TEXT
             );
             CREATE TABLE "策略区间业绩" (
-                "统一策略ID" TEXT, "统计日期" TEXT, "区间代码" TEXT,
-                "策略收益率_百分比" REAL, "基准收益率_百分比" REAL
+                "统一策略ID" TEXT, "渠道ID" TEXT, "统计日期" TEXT, "区间代码" TEXT,
+                "策略收益率_百分比" REAL, "基准收益率_百分比" REAL,
+                "原始快照ID" TEXT
             );
             CREATE TABLE "策略披露风险指标" (
                 "统一策略ID" TEXT, "统计日期" TEXT, "区间代码" TEXT,
                 "官方最大回撤_百分比" REAL, "官方波动率_百分比" REAL,
                 "官方夏普" REAL, "数据来源字段" TEXT
             );
-            INSERT INTO "策略日度业绩" VALUES ('gfbank_cgb__demo', '2026-07-27', 1.2896, 28.96);
+            INSERT INTO "策略日度业绩" VALUES ('gfbank_cgb__demo', 'gfbank_cgb', '2026-07-27', 1.2896, 28.96, 'official_snapshot');
             '''
         )
 
@@ -71,7 +72,7 @@ class SparsePerformanceDisplayTest(unittest.TestCase):
         self.conn.execute(
             '''
             INSERT INTO "策略区间业绩"
-            VALUES ('gfbank_cgb__demo', '2026-07-27', 'annualized', 6.25, NULL)
+            VALUES ('gfbank_cgb__demo', 'gfbank_cgb', '2026-07-27', 'annualized', 6.25, NULL, NULL)
             '''
         )
 
@@ -83,7 +84,7 @@ class SparsePerformanceDisplayTest(unittest.TestCase):
         self.conn.executemany(
             '''
             INSERT INTO "策略区间业绩"
-            VALUES ('gfsec_robot__biotech.theme', '2023-08-01', ?, ?, NULL)
+            VALUES ('gfsec_robot__biotech.theme', 'gfsec_robot', '2023-08-01', ?, ?, NULL, NULL)
             ''',
             [
                 ("1m", -3.8581),
@@ -107,7 +108,7 @@ class SparsePerformanceDisplayTest(unittest.TestCase):
         self.conn.executemany(
             '''
             INSERT INTO "策略区间业绩"
-            VALUES ('gfsec_robot__biotech.theme', '2023-08-01', ?, ?, NULL)
+            VALUES ('gfsec_robot__biotech.theme', 'gfsec_robot', '2023-08-01', ?, ?, NULL, NULL)
             ''',
             [
                 ("1m", -3.8581),
@@ -145,7 +146,7 @@ class SparsePerformanceDisplayTest(unittest.TestCase):
         self.conn.executemany(
             '''
             INSERT INTO "策略区间业绩"
-            VALUES ('gfbank_cgb__demo', '2026-07-29', ?, ?, ?)
+            VALUES ('gfbank_cgb__demo', 'gfbank_cgb', '2026-07-29', ?, ?, ?, NULL)
             ''',
             [
                 ("1m", 0.15, 0.22),
@@ -182,6 +183,60 @@ class SparsePerformanceDisplayTest(unittest.TestCase):
         self.assertEqual(by_name["基准业绩"]["近1年"], 3.57)
         self.assertEqual(by_name["基准业绩"]["成立以来"], 20.25)
         self.assertIsNone(by_name["沪深300业绩"]["今年以来"])
+
+    def test_ttfund_public_quote_does_not_advance_official_app_date(self) -> None:
+        self.conn.executemany(
+            '''
+            INSERT INTO "策略产品披露净值" VALUES (?, ?, ?, ?, 1)
+            ''',
+            [
+                ("ttfund__demo", "2026-08-10", 1.1000, 10.0),
+                ("ttfund__demo", "2026-08-11", 1.1010, 10.1),
+            ],
+        )
+        self.conn.execute(
+            '''
+            INSERT INTO "策略日度业绩" VALUES
+            ('ttfund__demo', 'ttfund', '2026-08-12', 1.1020, 10.2, 'public_quote')
+            '''
+        )
+        self.conn.execute(
+            '''
+            INSERT INTO "策略区间业绩" VALUES
+            ('ttfund__demo', 'ttfund', '2026-08-12', 'since_inception', 10.2, NULL, 'ttfund-quote_batch-demo')
+            '''
+        )
+
+        returns = MODULE.build_disclosed_return_map(self.conn)["ttfund__demo"]
+        latest = MODULE.build_disclosed_latest_value_map(self.conn)["ttfund__demo"]
+
+        self.assertEqual(returns["收益数据截至"], "2026-08-11")
+        self.assertEqual(latest["最新业绩日期"], "2026-08-11")
+        self.assertEqual(latest["官方单位净值"], 1.101)
+
+    def test_structured_benchmark_uses_daily_rebalanced_returns(self) -> None:
+        dates = ["2025-11-25", "2025-11-26", "2025-11-27"]
+        components = [
+            {"code": "000300.SH", "name": "沪深300", "weight": 0.1},
+            {"code": "CBA00103.CS", "name": "中债新综合全价", "weight": 0.9},
+        ]
+        levels = {
+            "000300.SH": [
+                {"日期": "2025-11-25", "数值": 100.0},
+                {"日期": "2025-11-26", "数值": 110.0},
+                {"日期": "2025-11-27", "数值": 99.0},
+            ],
+            "CBA00103.CS": [
+                {"日期": "2025-11-25", "数值": 100.0},
+                {"日期": "2025-11-26", "数值": 101.0},
+                {"日期": "2025-11-27", "数值": 102.01},
+            ],
+        }
+
+        curve = MODULE.build_formula_benchmark_series(dates, components, levels)
+
+        # Day 1: +1.9%; day 2: -0.1%; compound = 1.017981.
+        self.assertAlmostEqual(curve[-1]["数值"], 1.017981, places=8)
 
     def test_strategy_detail_template_never_uses_app_screenshot_as_curve(self) -> None:
         template = (

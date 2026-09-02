@@ -246,12 +246,20 @@ def latest_performance_dates(conn: sqlite3.Connection, tables: tuple[str, ...]) 
     for table in tables:
         if not table_exists(conn, table):
             continue
+        columns = {str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table}")')}
+        official_only = ""
+        if table == T_DAILY and "业绩区段类型" in columns:
+            official_only = (
+                f''' AND NOT ("{C_CHANNEL}" = 'ttfund' '''
+                '''AND COALESCE("业绩区段类型", '') = 'public_quote')'''
+            )
         for row in fetch_all(
             conn,
             f'''
             SELECT "{C_SID}" AS sid, MAX("{C_TRADE_DATE}") AS max_date
             FROM "{table}"
             WHERE "{C_CHANNEL}" IN ({",".join("?" for _ in REFINED_CHANNELS)})
+              {official_only}
             GROUP BY "{C_SID}"
             ''',
             REFINED_CHANNELS,

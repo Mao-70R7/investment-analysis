@@ -51,7 +51,7 @@ def normalize_family_name(value: Any) -> str:
 def relationship_advisor_key(value: Any) -> str:
     """Use the approved business name at the relationship matching boundary."""
 
-    return normalize_text(canonical_advisor_institution(value))
+    return normalize_text(canonical_advisor_institution(value, CHANNEL_ID))
 
 
 def load_jsonl(path: Path):
@@ -309,7 +309,7 @@ def build_relationships(
             "parentDsAdvType": parent_extra.get("ds_adv_type"),
             "childAdvisorName": child.get("advisor_name"),
             "parentAdvisorName": parent.get("advisor_name"),
-            "canonicalAdvisorName": canonical_advisor_institution(child.get("advisor_name")),
+            "canonicalAdvisorName": canonical_advisor_institution(child.get("advisor_name"), CHANNEL_ID),
             "protocolName": child_extra.get("protocol_name"),
             "protocolNameMatched": True,
             "curve": curve,

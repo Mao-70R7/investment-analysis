@@ -42,6 +42,17 @@
       "minimumIntervalPerformanceRows": 100,
       "minimumRecommendationRows": 1
     },
+    "southern": {
+      "dailyUpdateEnabled": false,
+      "updateMode": "manual_only",
+      "preserveExistingDatabaseRows": true,
+      "minimumInventoryRetentionRatio": 0.95,
+      "minimumPerformanceStrategyRatio": 1.0,
+      "minimumCurrentHoldingRatio": 1.0,
+      "minimumHistoricalHoldingRatio": 1.0,
+      "minimumExactBenchmarkRatio": 0.94,
+      "loginWaitSeconds": 60
+    },
     "qieman": {
       "minimumInventoryRetentionRatio": 0.95,
       "minimumPerformanceStrategyRatio": 0.99,
@@ -56,7 +67,10 @@
       "historyRequestIdleTimeoutSeconds": 120,
       "historyRequestTotalTimeoutSeconds": 600,
       "historyRequestAttempts": 4,
-      "minimumLatestNavDateRatio": 0.99
+      "historyProcessBatchSize": 50,
+      "historyProcessAttempts": 4,
+      "maximumNavDateLagBusinessDays": 1,
+      "minimumFreshNavDateRatio": 0.98
     }
   },
   "backup": {

@@ -32,7 +32,7 @@ def locate_code_root() -> Path:
 
 
 PROJECT_ROOT = locate_code_root()
-DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "analysis_zh_current.sqlite"
+DEFAULT_DB_PATH = Path(os.environ.get("ADVISOR_DATABASE_ROOT") or PROJECT_ROOT / "data") / "analysis_zh_current.sqlite"
 DEFAULT_REPORT_ROOT = PROJECT_ROOT / "site"
 DEFAULT_SITE_DIR = DEFAULT_REPORT_ROOT / "basic_data"
 ALGORITHM_VERSION = "standard_rebalance_asset_dual_nav_v10_all_channels_20260528"
@@ -41,7 +41,7 @@ PERFORMANCE_RECENCY_TOLERANCE_DAYS = 5
 PERFORMANCE_MIN_POINT_COUNT = 2
 PERFORMANCE_MAX_GAP_DAYS = 45
 REPORT_TEMPLATE_DIR = PROJECT_ROOT / "basic_data"
-DISPLAY_STRATEGY_CHANNEL_IDS = {"ttfund", "gffunds", "gfsec_fima", "gfsec_robot", "qieman"}
+DISPLAY_STRATEGY_CHANNEL_IDS = {"ttfund", "gffunds", "gfsec_fima", "gfsec_robot", "qieman", "southern"}
 LIST_ONLY_DISPLAY_CHANNELS: set[str] = {"gfsec_robot"}
 LEGACY_ARCHIVE_CHANNEL_IDS: set[str] = {"gfsec_robot"}
 FUND_RANK_PERIODS = [
@@ -413,7 +413,7 @@ FIELD_DICTIONARY: dict[str, str] = {
     "上次调仓后权重": "当前仓位场景下为最后一次调仓后的基金目标权重；历史调仓场景下为该次调仓前权重。",
     "调仓后收益率": "该基金从调仓后起算日至当前净值日期或下一调仓区间结束日的区间收益率。",
     "调仓后收益贡献": "调仓后权重乘以调仓后收益率得到的收益贡献，单位为百分点。",
-    "调仓贡献曲线": "比较两次调仓之间调仓前仓位模拟、调仓后仓位实际模拟、基准和沪深300的区间收益表现。当前页面导出使用调前端点收益叠加参考曲线形态缩放兜底，避免直线展示；基金级逐日精确贡献建议落入预计算表后再展示。",
+    "调仓贡献曲线": "比较两次调仓之间调仓前仓位、调仓后仓位、基准和沪深300的区间收益表现。且慢策略仅在官方调前/调后基金权重完整、基金复权净值权重覆盖率达到98%时，按基金逐日净值回放；不满足条件时不画推测曲线。",
     "原始数据来源": "该展示字段来自策略主表、官方业绩、历史调仓、当前持仓、推算持仓或自建回放结果。",
 }
 
@@ -505,7 +505,8 @@ OFFICIAL_INTERVAL_MATRIX_FIELD_BY_CODE = {
     "since_inception": "成立以来",
     "std": "成立以来",
 }
-CONTRIBUTION_EXACT_EVENT_LIMIT = 0
+QIEMAN_CONTRIBUTION_EVENT_LIMIT = 12
+CONTRIBUTION_MIN_NAV_WEIGHT_COVERAGE_PCT = 98.0
 RECENT_POINTS_TO_KEEP = 180
 # Strategy detail is the date-level audit surface.  Do not thin official or
 # benchmark histories here; compact list/overview packs have their own limits.
@@ -554,6 +555,7 @@ CORE_GLOBAL_BENCHMARK_CODES = [
     "CBA00303.CS",
     "CBA00123.CS",
     "CBA00121.CS",
+    "CBA00103.CS",
     "CBA00601.CS",
     "CBA00603.CS",
     "AU9999.SGE",
@@ -972,6 +974,10 @@ def build_official_interval_return_map(conn: sqlite3.Connection) -> dict[str, di
         SELECT "统一策略ID", "统计日期", "区间代码", "策略收益率_百分比", "基准收益率_百分比"
         FROM "策略区间业绩"
         WHERE "策略收益率_百分比" IS NOT NULL
+          AND NOT (
+              "渠道ID" = 'ttfund'
+              AND COALESCE("原始快照ID", '') LIKE 'ttfund-quote_batch-%'
+          )
         """,
     )
     result: dict[str, dict[str, Any]] = {}
@@ -1439,6 +1445,7 @@ def latest_business_date(conn: sqlite3.Connection) -> str | None:
         """
         SELECT MAX(value) FROM (
             SELECT MAX("交易日期") AS value FROM "策略日度业绩"
+            WHERE NOT ("渠道ID" = 'ttfund' AND COALESCE("业绩区段类型", '') = 'public_quote')
             UNION ALL SELECT MAX("交易日期") FROM "基金日度净值"
             UNION ALL SELECT MAX("调仓日期") FROM "策略调仓事件"
         )
@@ -1471,6 +1478,7 @@ def build_channel_stats(conn: sqlite3.Connection, algorithm_version: str) -> lis
             WITH perf AS (
                 SELECT "统一策略ID", MAX("交易日期") AS latest_perf_date
                 FROM "策略日度业绩"
+                WHERE NOT ("渠道ID" = 'ttfund' AND COALESCE("业绩区段类型", '') = 'public_quote')
                 GROUP BY "统一策略ID"
             ),
             rebalance AS (
@@ -1594,6 +1602,7 @@ def build_disclosed_return_map(conn: sqlite3.Connection) -> dict[str, dict[str, 
                2 AS source_priority
         FROM "策略日度业绩"
         WHERE "单位净值" IS NOT NULL AND "单位净值" > 0
+          AND NOT ("渠道ID" = 'ttfund' AND COALESCE("业绩区段类型", '') = 'public_quote')
         ORDER BY "统一策略ID", "交易日期", source_priority
         """,
     )
@@ -1733,6 +1742,7 @@ def build_disclosed_latest_value_map(conn: sqlite3.Connection) -> dict[str, dict
                2 AS source_priority
         FROM "策略日度业绩"
         WHERE "单位净值" IS NOT NULL AND "单位净值" > 0
+          AND NOT ("渠道ID" = 'ttfund' AND COALESCE("业绩区段类型", '') = 'public_quote')
         ORDER BY "统一策略ID", "交易日期", source_priority
         """,
     )
@@ -1810,6 +1820,7 @@ def build_disclosed_risk_map(conn: sqlite3.Connection) -> dict[str, dict[str, An
                2 AS source_priority
         FROM "策略日度业绩"
         WHERE "单位净值" IS NOT NULL AND "单位净值" > 0
+          AND NOT ("渠道ID" = 'ttfund' AND COALESCE("业绩区段类型", '') = 'public_quote')
         ORDER BY "统一策略ID", "交易日期", source_priority
         """,
     )
@@ -3047,7 +3058,11 @@ def build_strategy_rows(conn: sqlite3.Connection, algorithm_version: str) -> tup
             "策略代码": row["渠道策略ID"],
             "策略名称": row["策略名称"],
             "渠道": channel_name,
-            "投顾机构": canonical_advisor_institution(row["投顾机构"]),
+            "投顾机构": canonical_advisor_institution(
+                row["投顾机构"],
+                channel_id,
+                channel_name,
+            ),
             "策略类型": clean_text(row["策略类型"]),
             "披露策略类型": clean_text(row["策略类型"]),
             "披露风险等级": clean_text(row["风险等级"]),
@@ -3993,13 +4008,21 @@ def enrich_rebalance_events_with_strategy_fields(
             # Institution-based rebalance rankings must use the same canonical
             # name as the strategy list.  Keeping a non-empty raw alias here
             # would split one manager into multiple rows downstream.
+            source_channel_id = strategy_id.split("__", 1)[0]
             enriched["投顾机构"] = canonical_advisor_institution(
-                list_row.get("投顾机构") or enriched.get("投顾机构")
+                list_row.get("投顾机构") or enriched.get("投顾机构"),
+                source_channel_id,
+                list_row.get("渠道") or enriched.get("渠道"),
             )
             gf_text = f'{clean_text(list_row.get("投顾机构"), "")} {clean_text(list_row.get("渠道"), "")}'
             enriched["是否广发"] = "是" if re.search(r"广发基金|广发投顾", gf_text) else "否"
         else:
-            enriched["投顾机构"] = canonical_advisor_institution(enriched.get("投顾机构"))
+            source_channel_id = strategy_id.split("__", 1)[0]
+            enriched["投顾机构"] = canonical_advisor_institution(
+                enriched.get("投顾机构"),
+                source_channel_id,
+                enriched.get("渠道"),
+            )
         enriched_events.append(enriched)
     return enriched_events
 
@@ -4210,7 +4233,7 @@ def weighted_fund_return_series(
         return []
     weights: dict[str, float] = {}
     for row in rows:
-        code = clean_text(row.get("基金代码") or row.get("基金代码_分析"), "")
+        code = clean_text(row.get("基金代码_分析") or row.get("基金代码"), "")
         weight = as_float(row.get(weight_key))
         if not code or weight is None or weight <= 0:
             continue
@@ -4245,6 +4268,60 @@ def weighted_fund_return_series(
     if not points or points[0]["日期"] != start_date:
         points.insert(0, {"日期": start_date, "数值": 0.0, "模式": "return"})
     return sample_series(points, "日期", "数值", max_points=max_points, mode="return")
+
+
+def latest_evaluable_event_ids(rows: list[dict[str, Any]]) -> set[str]:
+    """Select the newest evaluable quality event for every strategy."""
+
+    selected: set[str] = set()
+    seen_strategies: set[str] = set()
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            clean_text(row.get("统一策略ID"), ""),
+            clean_text(row.get("调仓日期"), ""),
+            clean_text(row.get("调仓事件ID"), ""),
+        ),
+        reverse=True,
+    )
+    for row in ordered:
+        strategy_id = clean_text(row.get("统一策略ID"), "")
+        event_id = clean_text(row.get("调仓事件ID"), "")
+        if (
+            not strategy_id
+            or strategy_id in seen_strategies
+            or not event_id
+            or clean_text(row.get("评估状态"), "") != "可评估"
+        ):
+            continue
+        selected.add(event_id)
+        seen_strategies.add(strategy_id)
+    return selected
+
+
+def fund_nav_weight_coverage(
+    rows: list[dict[str, Any]],
+    weight_key: str,
+    start_date: str | None,
+    end_date: str | None,
+    fund_nav_cache: dict[str, list[tuple[str, float]]],
+) -> float:
+    if not start_date or not end_date:
+        return 0.0
+    total_weight = 0.0
+    covered_weight = 0.0
+    for row in rows:
+        weight = as_float(row.get(weight_key))
+        code = clean_text(row.get("基金代码_分析") or row.get("基金代码"), "")
+        if not code or weight is None or weight <= 0:
+            continue
+        total_weight += weight
+        series = fund_nav_cache.get(code, [])
+        start_value = value_on_or_before(series, start_date)
+        end_value = value_on_or_before(series, end_date)
+        if start_value is not None and end_value is not None and start_value > 0 and end_value > 0:
+            covered_weight += weight
+    return round(covered_weight / total_weight * 100.0, 4) if total_weight > 0 else 0.0
 
 
 def load_index_levels(conn: sqlite3.Connection, index_code: str = "000300.SH") -> list[dict[str, Any]]:
@@ -4400,6 +4477,47 @@ def parse_weight_from_part(part: str) -> float | None:
         value = float(match.group(1))
         return value / 100.0 if value > 1.0 else value
     return None
+
+
+def load_structured_benchmark_components(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    if not table_exists(conn, "策略业绩基准成分"):
+        return {}
+    rows = fetch_all(
+        conn,
+        '''
+        SELECT "统一策略ID", "指数代码", "指数名称", "指数类型", "权重_百分比",
+               "是否精确拆分", "置信度", "原始快照ID"
+        FROM "策略业绩基准成分"
+        WHERE "权重_百分比" IS NOT NULL AND "权重_百分比" >= 0
+        ORDER BY "统一策略ID", "指数代码"
+        ''',
+    )
+    result: dict[str, dict[str, Any]] = {}
+    for strategy_id, strategy_rows in grouped_rows(rows, "统一策略ID").items():
+        total_weight = sum(as_float(row.get("权重_百分比")) or 0.0 for row in strategy_rows)
+        exact = bool(strategy_rows) and all(int(row.get("是否精确拆分") or 0) == 1 for row in strategy_rows)
+        if not exact or not 99.0 <= total_weight <= 101.0:
+            continue
+        components = [
+            {
+                "code": clean_text(row.get("指数代码"), ""),
+                "name": clean_text(row.get("指数名称"), row.get("指数代码")),
+                "index_type": clean_text(row.get("指数类型"), ""),
+                "weight": (as_float(row.get("权重_百分比")) or 0.0) / total_weight,
+            }
+            for row in strategy_rows
+            if clean_text(row.get("指数代码"), "")
+        ]
+        if not components:
+            continue
+        result[strategy_id] = {
+            "components": components,
+            "说明": " + ".join(f'{item["name"]} * {item["weight"] * 100:.2f}%' for item in components),
+            "source": "渠道结构化业绩基准成分",
+            "confidence": clean_text(strategy_rows[0].get("置信度"), ""),
+            "source_snapshot_id": clean_text(strategy_rows[0].get("原始快照ID"), ""),
+        }
+    return result
 
 
 def year_weight_for_date(weight_by_year: dict[int, float] | dict[str, float], date_value: str) -> float:
@@ -4610,14 +4728,22 @@ def build_formula_benchmark_series(
     required = [item for item in components if item["code"] != "CASH"]
     if any(not index_levels.get(item["code"]) for item in required):
         return []
-    has_dynamic_weight = any(item.get("weight_by_year") for item in components)
     pointers = {item["code"]: 0 for item in required}
     last_values: dict[str, float] = {}
-    base_values: dict[str, float] | None = None
     previous_values: dict[str, float] | None = None
     dynamic_nav = 1.0
     output: list[dict[str, Any]] = []
-    for date_value in sorted(set(dates)):
+    target_dates = sorted(set(dates))
+    target_date_set = set(target_dates)
+    first_date, last_date = target_dates[0], target_dates[-1]
+    calculation_dates = set(target_dates)
+    for item in required:
+        calculation_dates.update(
+            str(row["日期"])
+            for row in index_levels.get(item["code"], [])
+            if first_date <= str(row.get("日期") or "") <= last_date
+        )
+    for date_value in sorted(calculation_dates):
         for item in required:
             rows = index_levels.get(item["code"], [])
             pointer = pointers[item["code"]]
@@ -4629,40 +4755,26 @@ def build_formula_benchmark_series(
             pointers[item["code"]] = pointer
         if any(item["code"] not in last_values for item in required):
             continue
-        if has_dynamic_weight:
-            if previous_values is None:
-                previous_values = dict(last_values)
-                output.append({"日期": date_value, "数值": round(dynamic_nav, 8), "模式": "nav"})
-                continue
-            daily_return = 0.0
-            for item in components:
-                code = item["code"]
-                if code == "CASH":
-                    continue
-                previous = previous_values.get(code)
-                current = last_values.get(code)
-                if not previous or current is None:
-                    continue
-                weight = year_weight_for_date(item.get("weight_by_year", {}), date_value) if item.get("weight_by_year") else float(item["weight"])
-                daily_return += weight * (current / previous - 1.0)
-            dynamic_nav *= 1.0 + daily_return
-            output.append({"日期": date_value, "数值": round(dynamic_nav, 8), "模式": "nav"})
+        if previous_values is None:
             previous_values = dict(last_values)
+            if date_value in target_date_set:
+                output.append({"日期": date_value, "数值": round(dynamic_nav, 8), "模式": "nav"})
             continue
-        if base_values is None:
-            base_values = dict(last_values)
-        weighted_return = 0.0
+        daily_return = 0.0
         for item in components:
-            weight = float(item["weight"])
             code = item["code"]
             if code == "CASH":
                 continue
-            base = base_values.get(code)
+            previous = previous_values.get(code)
             current = last_values.get(code)
-            if not base or current is None:
+            if not previous or current is None:
                 continue
-            weighted_return += weight * (current / base - 1.0)
-        output.append({"日期": date_value, "数值": round(1.0 + weighted_return, 8), "模式": "nav"})
+            weight = year_weight_for_date(item.get("weight_by_year", {}), date_value) if item.get("weight_by_year") else float(item["weight"])
+            daily_return += weight * (current / previous - 1.0)
+        dynamic_nav *= 1.0 + daily_return
+        if date_value in target_date_set:
+            output.append({"日期": date_value, "数值": round(dynamic_nav, 8), "模式": "nav"})
+        previous_values = dict(last_values)
     return output
 
 
@@ -5011,6 +5123,7 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
         SELECT "统一策略ID", "交易日期", "单位净值" AS value
         FROM "策略日度业绩"
         WHERE "单位净值" IS NOT NULL
+          AND NOT ("渠道ID" = 'ttfund' AND COALESCE("业绩区段类型", '') = 'public_quote')
         ORDER BY "统一策略ID", "交易日期"
         """,
         (),
@@ -5103,11 +5216,25 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
         for row in fetch_all(conn, 'SELECT "统一策略ID", "业绩基准" FROM "策略信息"')
     }
     benchmark_text_map = fill_missing_relationship_aliases(benchmark_text_map, relationship_map)
+    structured_benchmark_map = fill_missing_relationship_aliases(
+        load_structured_benchmark_components(conn),
+        relationship_map,
+    )
     benchmark_meta: dict[str, dict[str, Any]] = {}
     formula_benchmark_series: dict[str, list[dict[str, Any]]] = {}
-    for strategy_id in sorted(set(dates_by_strategy) | set(benchmark_text_map)):
+    for strategy_id in sorted(set(dates_by_strategy) | set(benchmark_text_map) | set(structured_benchmark_map)):
         dates = dates_by_strategy.get(strategy_id, [])
-        parsed = parse_benchmark_formula(benchmark_text_map.get(strategy_id))
+        structured = structured_benchmark_map.get(strategy_id) or {}
+        parsed = (
+            {
+                "components": structured.get("components", []),
+                "missing": [],
+                "说明": structured.get("说明"),
+                "source": structured.get("source"),
+            }
+            if structured.get("components")
+            else parse_benchmark_formula(benchmark_text_map.get(strategy_id))
+        )
         factor_missing = [
             f'缺少指数行情：{item["code"]} {item["name"]}'
             for item in parsed.get("components", [])
@@ -5120,6 +5247,8 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
         benchmark_meta[strategy_id] = {
             "业绩基准说明": clean_text(benchmark_text_map.get(strategy_id), "未披露"),
             "基准公式解析": parsed.get("说明"),
+            "基准成分来源": parsed.get("source") or "业绩基准文本解析",
+            "组合计算方法": "指数日收益按披露权重逐日再平衡复合",
             "可计算组件": [
                 {
                     "指数代码": item["code"],
@@ -5136,7 +5265,7 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
     strategy_ids = set(official_series) | set(simulated_series) | set(benchmark_disclosed_series) | set(benchmark_daily_series) | set(hs300_series) | set(formula_benchmark_series)
     for strategy_id in strategy_ids:
         source_row = {
-            "披露业绩": "策略产品披露净值.披露单位净值 + 策略日度业绩.单位净值（同日优先完整披露曲线，新日期使用 public quote 补点）",
+            "披露业绩": "策略产品披露净值.披露单位净值 + 策略日度业绩.单位净值（同日优先完整披露曲线；天天 public quote 仅保留行情血缘，不推进 App 官方业绩日）",
             "模拟业绩": "策略标准业绩净值.标准费前单位净值（统一回放算法）",
             "沪深300业绩": f"指数日度行情.沪深300(000300.SH)收盘点位；数据来源：{index_source}" if hs300_index_series.get(strategy_id) else "策略日度业绩.指数收益率_百分比（App披露指数字段）",
         }
@@ -5160,7 +5289,10 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
             source_row["基准业绩"] = "策略日度业绩.基准收益率_百分比（App日度业绩基准）"
         elif formula_benchmark_series.get(strategy_id):
             benchmark_series[strategy_id] = formula_benchmark_series[strategy_id]
-            source_row["基准业绩"] = f'业绩基准公式解析推算：{benchmark_meta.get(strategy_id, {}).get("基准公式解析")}'
+            source_row["基准业绩"] = (
+                f'{benchmark_meta.get(strategy_id, {}).get("基准成分来源")}；'
+                f'指数日收益按披露权重逐日再平衡复合：{benchmark_meta.get(strategy_id, {}).get("基准公式解析")}'
+            )
         elif benchmark_uses_hs300(benchmark_text_map.get(strategy_id)) and hs300_series.get(strategy_id):
             benchmark_series[strategy_id] = hs300_series[strategy_id]
             source_row["基准业绩"] = "业绩基准文本可映射为沪深300，使用指数日度行情推算"
@@ -5243,11 +5375,10 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
         ORDER BY q."统一策略ID", q."调仓日期" DESC
         """,
     )
-    exact_event_ids = {
-        str(row["调仓事件ID"])
-        for row in event_quality_rows
-        if int(row.get("最近调仓序号") or 999999) <= CONTRIBUTION_EXACT_EVENT_LIMIT
-    }
+    # A newly observed rebalance has no post-period yet. Select the latest
+    # evaluable event instead of the absolute latest event so the default page
+    # curve remains evidence-backed while the new event waits for NAV data.
+    exact_event_ids = latest_evaluable_event_ids(event_quality_rows)
     contribution_curves: dict[str, dict[str, Any]] = {}
     for row in event_quality_rows:
         strategy_id = str(row["统一策略ID"])
@@ -5263,10 +5394,10 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
             event_fund_codes.discard("")
             event_fund_cache = load_fund_nav_cache(conn, event_fund_codes, start_date, end_date)
         pre_series = weighted_fund_return_series(raw_weight_rows, "调前权重_百分比", start_date, end_date, event_fund_cache, reference) if event_id in exact_event_ids else []
-        if not pre_series:
+        if not pre_series and event_id not in exact_event_ids:
             pre_series = sample_pre_rebalance_line(start_date, end_date, row["调前仓位收益率_百分比"], reference)
         fund_after_series = weighted_fund_return_series(raw_weight_rows, "调后权重_百分比", start_date, end_date, event_fund_cache, reference) if event_id in exact_event_ids else []
-        if not after_series and fund_after_series:
+        if event_id in exact_event_ids and fund_after_series:
             after_series = fund_after_series
         contribution_curves.setdefault(strategy_id, {})[event_id] = {
             "标题": clean_text(row["调仓标题"], "调仓贡献"),
@@ -5283,6 +5414,86 @@ def load_detail_maps(conn: sqlite3.Connection, algorithm_version: str) -> dict[s
                 "沪深300业绩": {"模式": "return", "points": normalize_segment(hs300_series.get(strategy_id, []), start_date, end_date)},
             },
         }
+
+    # Qieman discloses complete before/after fund weights but is intentionally
+    # absent from the generic rebalance-quality scoring table. Build only
+    # evidence-backed contribution curves directly from those official weights.
+    # If at least 98% of either side lacks adjusted fund NAV at both endpoints,
+    # leave the curve absent instead of shaping/interpolating a substitute.
+    for strategy_id, events in rebalance_events.items():
+        if not strategy_id.startswith("qieman__"):
+            continue
+        for event in events[:QIEMAN_CONTRIBUTION_EVENT_LIMIT]:
+            event_id = clean_text(event.get("事件ID"), "")
+            if not event_id or event_id in contribution_curves.get(strategy_id, {}):
+                continue
+            start_date = clean_text(event.get("调仓日期"), "")
+            end_date = clean_text(rebalance_event_end_dates.get(event_id), "")
+            raw_weight_rows = contribution_weight_rows.get(event_id, [])
+            if not start_date or not end_date or not raw_weight_rows:
+                continue
+            pre_sum = sum(as_float(item.get("调前权重_百分比")) or 0.0 for item in raw_weight_rows)
+            post_sum = sum(as_float(item.get("调后权重_百分比")) or 0.0 for item in raw_weight_rows)
+            if not (99.0 <= pre_sum <= 101.0 and 99.0 <= post_sum <= 101.0):
+                continue
+            analysis_rows: list[dict[str, Any]] = []
+            for item in raw_weight_rows:
+                analysis_item = dict(item)
+                fund_code = clean_text(item.get("基金代码"), "")
+                series = rebalance_fund_nav_cache.get(fund_code, [])
+                if value_on_or_before(series, start_date) is None or value_on_or_before(series, end_date) is None:
+                    alternate = alternate_fund_codes.get((fund_code, start_date))
+                    if alternate:
+                        analysis_item["基金代码_分析"] = alternate
+                analysis_rows.append(analysis_item)
+            pre_coverage = fund_nav_weight_coverage(
+                analysis_rows, "调前权重_百分比", start_date, end_date, rebalance_fund_nav_cache
+            )
+            post_coverage = fund_nav_weight_coverage(
+                analysis_rows, "调后权重_百分比", start_date, end_date, rebalance_fund_nav_cache
+            )
+            if min(pre_coverage, post_coverage) < CONTRIBUTION_MIN_NAV_WEIGHT_COVERAGE_PCT:
+                continue
+            reference = normalize_segment(benchmark_series.get(strategy_id, []), start_date, end_date)
+            pre_series = weighted_fund_return_series(
+                analysis_rows,
+                "调前权重_百分比",
+                start_date,
+                end_date,
+                rebalance_fund_nav_cache,
+                reference,
+                max_points=400,
+            )
+            post_series = weighted_fund_return_series(
+                analysis_rows,
+                "调后权重_百分比",
+                start_date,
+                end_date,
+                rebalance_fund_nav_cache,
+                reference,
+                max_points=400,
+            )
+            if len(pre_series) < 2 or len(post_series) < 2:
+                continue
+            contribution_curves.setdefault(strategy_id, {})[event_id] = {
+                "标题": clean_text(event.get("调仓标题"), "官方调仓贡献"),
+                "起始日期": start_date,
+                "结束日期": end_date,
+                "评估状态": "官方权重净值回放",
+                "评估说明": (
+                    "且慢官方调前/调后基金权重均完整；按基金复权净值逐日回放，"
+                    f"调前净值权重覆盖{pre_coverage:.2f}%，调后覆盖{post_coverage:.2f}%。"
+                    "未使用端点插值或参考曲线形态缩放。"
+                ),
+                "调仓评价": "仅展示可核验贡献曲线，未混入通用调仓胜负评分",
+                "调仓超额": None,
+                "series": {
+                    "调仓前仓位模拟": {"模式": "return", "points": pre_series},
+                    "调仓后仓位实际": {"模式": "return", "points": post_series},
+                    "基准业绩": {"模式": "return", "points": reference},
+                    "沪深300业绩": {"模式": "return", "points": normalize_segment(hs300_series.get(strategy_id, []), start_date, end_date)},
+                },
+            }
     signal_events, signal_instructions = load_signal_detail_maps(conn)
     return {
         "direct_holdings": direct_holdings,
@@ -9698,10 +9909,15 @@ STRATEGY_DETAIL_JS = r"""
   }
   function contributionFor(snapshot) {
     const curves = detail.contributionCurves || {};
-    if (snapshot && snapshot.id && curves[String(snapshot.id)]) {
+    const drawable = (payload) => {
+      const series = payload?.series || {};
+      return (series?.调仓前仓位模拟?.points || []).length >= 2
+        && (series?.调仓后仓位实际?.points || []).length >= 2;
+    };
+    if (snapshot && snapshot.id && drawable(curves[String(snapshot.id)])) {
       return { snapshot, payload: curves[String(snapshot.id)] };
     }
-    const fallback = snapshots.find((item) => item.id !== "current" && curves[String(item.id)]);
+    const fallback = snapshots.find((item) => item.id !== "current" && drawable(curves[String(item.id)]));
     return fallback ? { snapshot: fallback, payload: curves[String(fallback.id)] } : { snapshot: null, payload: null };
   }
   function renderContribution(snapshot) {
@@ -9719,7 +9935,10 @@ STRATEGY_DETAIL_JS = r"""
     if (selected && Array.isArray(selected.points) && selected.points.length) {
       series[selectedName] = { 模式: "nav", points: selected.points };
     }
-    desc.textContent = `${meta.起始日期 || target.snapshot?.日期 || ""} 至 ${meta.结束日期 || "最新"}，默认展示调仓前后仓位曲线；基准、沪深300和全局基准可在图例中勾选。`;
+    const fallbackText = snapshot?.id && target.snapshot?.id && snapshot.id !== target.snapshot.id
+      ? `；所选快照尚不可评估，已回退到最近可评估调仓 ${target.snapshot?.日期 || ""}`
+      : "";
+    desc.textContent = `${meta.起始日期 || target.snapshot?.日期 || ""} 至 ${meta.结束日期 || "最新"}，默认展示调仓前后仓位曲线${fallbackText}；基准、沪深300和全局基准可在图例中勾选。`;
     const defaultVisible = selectedName ? ["调仓前仓位模拟", "调仓后仓位实际", selectedName] : ["调仓前仓位模拟", "调仓后仓位实际"];
     B.drawReturnChart(B.byId("contributionChart"), series, { alreadyReturn: false, title: "调仓贡献曲线", height: 280, defaultVisibleSeries: defaultVisible });
   }

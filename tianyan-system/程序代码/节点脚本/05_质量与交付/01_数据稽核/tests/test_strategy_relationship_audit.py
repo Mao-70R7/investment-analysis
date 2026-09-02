@@ -136,7 +136,7 @@ class StrategyRelationshipAuditTests(unittest.TestCase):
             profile = {
                 "基准风险资产权重": "",
                 "基准风险资产权重说明": "",
-                "基准风险资产权重": None,
+                "基准风险资产权重_百分比": None,
                 "权益中枢": None,
                 "固收中枢": None,
                 "基准风险资产中枢": None,

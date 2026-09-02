@@ -14,10 +14,16 @@ from unittest.mock import patch
 FRAMEWORK_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "orchestrator.py").is_file())
 sys.path.insert(0, str(FRAMEWORK_ROOT))
 
-from progress import parse_progress  # noqa: E402
+from progress import (  # noqa: E402
+    build_pipeline_status,
+    parse_progress,
+    render_pipeline_status,
+    render_progress,
+)
 from node_runner import (  # noqa: E402
     NodeExecution,
     NodeRunner,
+    _lock_owner_active,
     acquire_resource_lock,
     is_ephemeral_runtime_context_key,
     release_resource_lock,
@@ -27,6 +33,8 @@ from orchestrator import (  # noqa: E402
     Orchestrator,
     classify_run,
     dependency_blockers,
+    stable_topological_order,
+    validate_execution_order,
     validate_pipeline,
 )
 from state_store import StateStore  # noqa: E402
@@ -79,6 +87,76 @@ class NodeFrameworkTest(unittest.TestCase):
     def test_progress_parses_structured_and_legacy_counts(self) -> None:
         self.assertEqual(parse_progress('PROGRESS {"completed":2,"total":5}')["completed"], 2)
         self.assertEqual(parse_progress("progress 3/9 strategies")["total"], 9)
+
+    def test_pipeline_status_reports_overall_stage_node_and_eta(self) -> None:
+        nodes = [
+            {"id": "preflight", "name": "预检", "phase": "01_运行预检"},
+            {"id": "collect", "name": "采集", "phase": "02_渠道采集"},
+            {"id": "gate", "name": "验收", "phase": "02_渠道采集"},
+            {"id": "publish", "name": "发布", "phase": "03_质量交付"},
+        ]
+        payload = {
+            "completed": 5,
+            "total": 10,
+            "unit": "只策略",
+            "success": 4,
+            "failed": 1,
+            "current": "strategy-5",
+            "message": "正在采集",
+        }
+        status = build_pipeline_status(
+            nodes,
+            1,
+            payload,
+            node_elapsed_seconds=10,
+            total_elapsed_seconds=50,
+            duration_estimates={"collect": 20, "gate": 30, "publish": 40},
+        )
+        self.assertEqual(status["overallPercent"], 37.5)
+        self.assertEqual(status["stagePercent"], 25.0)
+        self.assertEqual(status["nodePercent"], 50.0)
+        self.assertEqual(status["estimatedRemainingSeconds"], 80)
+        line = render_pipeline_status("整体心跳", nodes[1], status, device="不适用")
+        self.assertIn("阶段=2/3 渠道采集", line)
+        self.assertIn("整体=37.5%", line)
+        self.assertIn("阶段进度=25.0%", line)
+        self.assertIn("节点进度=50.0%，5/10只策略", line)
+        self.assertIn("整体预计剩余=00:01:20", line)
+        progress_line = render_progress("采集", payload)
+        self.assertIn("成功4", progress_line)
+        self.assertIn("失败1", progress_line)
+        self.assertIn("当前=strategy-5", progress_line)
+
+    def test_eta_history_excludes_dry_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = StateStore(root / "state.sqlite")
+            for run_id, dry_run, started, finished in (
+                (
+                    "dry",
+                    True,
+                    "2026-08-19T00:00:00+08:00",
+                    "2026-08-19T00:10:00+08:00",
+                ),
+                (
+                    "real",
+                    False,
+                    "2026-08-19T01:00:00+08:00",
+                    "2026-08-19T01:00:30+08:00",
+                ),
+            ):
+                state.create_run(run_id, root / run_id, {"dryRun": dry_run})
+                state.connection.execute(
+                    "INSERT INTO daily_update_node_attempt("
+                    "run_id,node_id,attempt,status,started_at,finished_at,returncode) "
+                    "VALUES(?,?,1,'success',?,?,0)",
+                    (run_id, "collect", started, finished),
+                )
+            state.connection.commit()
+            try:
+                self.assertEqual(state.recent_node_duration_seconds("collect"), 30.0)
+            finally:
+                state.close()
 
     def test_state_store_records_node_attempt_and_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -439,38 +517,39 @@ class NodeFrameworkTest(unittest.TestCase):
             finally:
                 state.close()
 
-    def test_explicit_from_node_restore_preserves_optional_channel_failure(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            node = root / "node"
-            node.mkdir()
-            (node / "run.ps1").write_text(
-                "param([string]$WorkspaceRoot,[string]$RunId,[string]$NodeRunDir,[switch]$DryRun)\n"
-                "$artifact=Join-Path $NodeRunDir 'partial.txt'\n"
-                "Set-Content -LiteralPath $artifact -Value 'partial' -Encoding UTF8\n"
-                "$payload=@{validation=@{status='failed';detail='partial channel'};"
-                "artifacts=@(@{key='partial';path=$artifact;validationStatus='failed'})}\n"
-                "$payload|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "
-                "(Join-Path $NodeRunDir 'node_result.json') -Encoding UTF8\nexit 20\n",
-                encoding="utf-8-sig",
-            )
-            runner, state = self.runner(root)
-            manifest = self.manifest(node)
-            manifest.update({"criticality": "optional", "failureImpact": "channel"})
-            try:
-                first = runner.run(manifest, {}, {}, allow_skip=False)
-                restored = runner.restore_previous(manifest)
-                attempts = state.connection.execute(
-                    "SELECT COUNT(*) FROM daily_update_node_attempt "
-                    "WHERE run_id=? AND node_id=?",
-                    ("fixture-run", "fixture"),
-                ).fetchone()[0]
-            finally:
-                state.close()
-            self.assertEqual(first.status, "failed")
-            self.assertEqual(restored.status, "failed")
-            self.assertEqual(restored.returncode, 20)
-            self.assertEqual(attempts, 1)
+    def test_explicit_from_node_restore_preserves_optional_failure(self) -> None:
+        for failure_impact in ("channel", "warning"):
+            with self.subTest(failure_impact=failure_impact), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                node = root / "node"
+                node.mkdir()
+                (node / "run.ps1").write_text(
+                    "param([string]$WorkspaceRoot,[string]$RunId,[string]$NodeRunDir,[switch]$DryRun)\n"
+                    "$artifact=Join-Path $NodeRunDir 'partial.txt'\n"
+                    "Set-Content -LiteralPath $artifact -Value 'partial' -Encoding UTF8\n"
+                    "$payload=@{validation=@{status='failed';detail='partial optional'};"
+                    "artifacts=@(@{key='partial';path=$artifact;validationStatus='failed'})}\n"
+                    "$payload|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "
+                    "(Join-Path $NodeRunDir 'node_result.json') -Encoding UTF8\nexit 20\n",
+                    encoding="utf-8-sig",
+                )
+                runner, state = self.runner(root)
+                manifest = self.manifest(node)
+                manifest.update({"criticality": "optional", "failureImpact": failure_impact})
+                try:
+                    first = runner.run(manifest, {}, {}, allow_skip=False)
+                    restored = runner.restore_previous(manifest)
+                    attempts = state.connection.execute(
+                        "SELECT COUNT(*) FROM daily_update_node_attempt "
+                        "WHERE run_id=? AND node_id=?",
+                        ("fixture-run", "fixture"),
+                    ).fetchone()[0]
+                finally:
+                    state.close()
+                self.assertEqual(first.status, "failed")
+                self.assertEqual(restored.status, "failed")
+                self.assertEqual(restored.returncode, 20)
+                self.assertEqual(attempts, 1)
 
     def test_explicit_from_node_restore_rejects_critical_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -527,6 +606,56 @@ class NodeFrameworkTest(unittest.TestCase):
             finally:
                 release_resource_lock(reclaimed, reclaimed_token)
 
+    def test_resource_lock_rejects_reused_pid_with_newer_process_start(self) -> None:
+        payload = {
+            "pid": 1234,
+            "acquiredAt": "2026-09-01T10:00:00+00:00",
+        }
+        with patch("node_runner._process_exists", return_value=True), patch(
+            "node_runner._process_start_time",
+            return_value=1_788_259_800.0,
+        ):
+            self.assertFalse(_lock_owner_active(payload))
+
+    def test_recovery_checkpoint_records_next_node_and_ten_minute_interval(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            orchestrator = Orchestrator.__new__(Orchestrator)
+            orchestrator.run_id = "fixture-run"
+            orchestrator.run_dir = root
+            orchestrator.resume_checkpoint_path = root / "resume_checkpoint.json"
+            orchestrator.resume_checkpoint_history_path = root / "resume_checkpoints.jsonl"
+            orchestrator.events_path = root / "events.jsonl"
+            orchestrator.console_path = root / "console.log"
+            orchestrator.checkpoint_interval_seconds = 600
+            orchestrator.args = type("Args", (), {"mode": "daily"})()
+            orchestrator.active_plan_nodes = [
+                {"id": "collect", "name": "采集", "phase": "02", "supportsResume": True},
+                {"id": "publish", "name": "发布", "phase": "05", "supportsResume": False},
+            ]
+            orchestrator.results = {
+                "collect": NodeExecution(
+                    "collect",
+                    "success",
+                    0,
+                    root / "collect.json",
+                    "hash",
+                    {},
+                    None,
+                )
+            }
+
+            orchestrator.recovery_checkpoint(reason="node_finished")
+            payload = json.loads(orchestrator.resume_checkpoint_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["checkpointIntervalSeconds"], 600)
+            self.assertEqual(payload["nextResumeNode"], "publish")
+            self.assertEqual(payload["reusableNodeIds"], ["collect"])
+            self.assertEqual(
+                len(orchestrator.resume_checkpoint_history_path.read_text(encoding="utf-8").splitlines()),
+                1,
+            )
+
     def test_critical_node_can_depend_on_optional_node_for_degraded_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -537,6 +666,26 @@ class NodeFrameworkTest(unittest.TestCase):
             critical = self.manifest(directory)
             critical.update({"id": "critical", "dependencies": ["optional"]})
             validate_pipeline([optional, critical])
+
+    def test_misordered_acyclic_pipeline_is_sorted_before_execution(self) -> None:
+        nodes = [
+            {"id": "metadata", "dependencies": ["load"]},
+            {"id": "preflight", "dependencies": []},
+            {"id": "load", "dependencies": ["preflight"]},
+            {"id": "report", "dependencies": ["metadata"]},
+        ]
+        ordered = stable_topological_order(nodes)
+        self.assertEqual(
+            [node["id"] for node in ordered],
+            ["preflight", "load", "metadata", "report"],
+        )
+        validate_execution_order(ordered)
+
+    def test_incomplete_execution_slice_is_rejected_before_first_node(self) -> None:
+        with self.assertRaisesRegex(ValueError, "missing prior dependencies"):
+            validate_execution_order(
+                [{"id": "metadata", "dependencies": ["process_load"]}]
+            )
 
     def test_failed_optional_dependency_requires_explicit_degraded_opt_in(self) -> None:
         result = NodeExecution(
@@ -603,6 +752,36 @@ class NodeFrameworkTest(unittest.TestCase):
         )
         self.assertEqual(status, "failed_critical")
         self.assertEqual(critical, ["core"])
+
+    def test_warning_optional_channel_chain_keeps_run_publishable(self) -> None:
+        result_path = Path("result.json")
+        nodes = [
+            {"id": "southern_collect", "criticality": "optional", "failureImpact": "warning"},
+            {"id": "southern_gate", "criticality": "optional", "failureImpact": "warning"},
+            {"id": "southern_load", "criticality": "optional", "failureImpact": "warning"},
+            {"id": "core", "criticality": "critical"},
+            {"id": "publish", "criticality": "publish"},
+        ]
+        results = {
+            "southern_collect": NodeExecution(
+                "southern_collect", "failed", 20, result_path, "collect", {}, "login challenge"
+            ),
+            "southern_gate": NodeExecution(
+                "southern_gate", "skipped", 0, result_path, "gate", {}, "dependency failed"
+            ),
+            "southern_load": NodeExecution(
+                "southern_load", "skipped", 0, result_path, "load", {}, "dependency failed"
+            ),
+            "core": NodeExecution("core", "success", 0, result_path, "core", {}, None),
+            "publish": NodeExecution("publish", "success", 0, result_path, "publish", {}, None),
+        }
+
+        status, critical, publish, channel = classify_run(nodes, results, {})
+
+        self.assertEqual(status, "success_with_warning")
+        self.assertEqual(critical, [])
+        self.assertEqual(publish, [])
+        self.assertEqual(channel, [])
 
     def test_daily_run_continues_to_aggregate_after_channel_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

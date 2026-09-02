@@ -20,6 +20,19 @@ from urllib.request import Request, urlopen
 PROJECT_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "AGENTS.md").is_file())
 sys.path.insert(0, str(PROJECT_ROOT / "节点脚本" / "_共享组件" / "python_src"))
 
+
+def configured_root(environment_key: str, fallback: Path) -> Path:
+    configured = str(os.environ.get(environment_key) or "").strip()
+    return Path(configured).resolve() if configured else fallback.resolve()
+
+
+RAW_ROOT = configured_root("ADVISOR_RAW_ROOT", PROJECT_ROOT / "data" / "raw")
+NORMALIZED_ROOT = configured_root(
+    "ADVISOR_NORMALIZED_ROOT",
+    PROJECT_ROOT / "data" / "normalized",
+)
+DATABASE_ROOT = configured_root("ADVISOR_DATABASE_ROOT", PROJECT_ROOT / "data")
+
 from advisor_monitor.collectors.gffunds_public import (  # noqa: E402
     CHANNEL_ID,
     CHANNEL_NAME,
@@ -29,7 +42,6 @@ from advisor_monitor.collectors.gffunds_public import (  # noqa: E402
     parse_amount,
     safe_name,
 )
-from advisor_monitor.collectors.official_apps_public import load_gffunds_strategy_ids_from_analysis_db  # noqa: E402
 from advisor_monitor.gffunds_public_jobs import post_public_json  # noqa: E402
 from advisor_monitor.progress import ConsoleProgress  # noqa: E402
 
@@ -39,7 +51,7 @@ except ImportError:  # pragma: no cover
     pdfplumber = None
 
 
-DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "analysis_zh_current.sqlite"
+DEFAULT_DB_PATH = DATABASE_ROOT / "analysis_zh_current.sqlite"
 USER_AGENT = "Mozilla/5.0 advisor-monitor/0.1"
 
 
@@ -87,7 +99,7 @@ def load_strategy_ids(args: argparse.Namespace) -> list[str]:
     if args.strategy_id:
         ids = [str(item).strip().upper() for item in args.strategy_id if str(item).strip()]
     else:
-        ids = load_gffunds_strategy_ids_from_analysis_db(PROJECT_ROOT)
+        ids = list(db_existing_metadata(args.db_path))
     deduped: list[str] = []
     for item in ids:
         if item.startswith("GFJJ") and item not in deduped:
@@ -113,7 +125,7 @@ def db_existing_metadata(db_path: Path) -> dict[str, dict[str, Any]]:
 
 
 def latest_metadata_capture_by_strategy() -> dict[str, datetime]:
-    root = PROJECT_ROOT / "data" / "raw" / CHANNEL_ID / "strategy_metadata"
+    root = RAW_ROOT / CHANNEL_ID / "strategy_metadata"
     latest: dict[str, datetime] = {}
     if not root.exists():
         return latest
@@ -211,7 +223,7 @@ def protocol_type3(payload: dict[str, Any]) -> dict[str, Any]:
 
 def cache_paths(protocol_url: str) -> tuple[Path, Path, Path]:
     digest = hashlib.sha256(protocol_url.encode("utf-8")).hexdigest()[:24]
-    cache_dir = PROJECT_ROOT / "data" / "raw" / CHANNEL_ID / "protocol_cache"
+    cache_dir = RAW_ROOT / CHANNEL_ID / "protocol_cache"
     return cache_dir / f"{digest}.pdf", cache_dir / f"{digest}.txt", cache_dir / f"{digest}.json"
 
 
@@ -509,9 +521,9 @@ def main() -> None:
     run_at = now_local()
     day = run_at.strftime("%Y-%m-%d")
     run_id = args.run_id or run_at.strftime("%Y%m%dT%H%M%S%z")
-    raw_dir = PROJECT_ROOT / "data" / "raw" / CHANNEL_ID / "strategy_metadata" / day / run_id
-    normalized_path = PROJECT_ROOT / "data" / "normalized" / CHANNEL_ID / "strategy_master" / day / f"{run_id}.jsonl"
-    summary_path = PROJECT_ROOT / "data" / "normalized" / CHANNEL_ID / "collection_summary" / day / f"{run_id}.json"
+    raw_dir = RAW_ROOT / CHANNEL_ID / "strategy_metadata" / day / run_id
+    normalized_path = NORMALIZED_ROOT / CHANNEL_ID / "strategy_master" / day / f"{run_id}.jsonl"
+    summary_path = NORMALIZED_ROOT / CHANNEL_ID / "collection_summary" / day / f"{run_id}.json"
 
     existing = db_existing_metadata(args.db_path)
     strategy_ids, selection = select_strategy_ids_for_refresh(

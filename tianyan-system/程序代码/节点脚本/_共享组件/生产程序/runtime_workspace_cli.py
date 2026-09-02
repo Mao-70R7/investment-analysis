@@ -179,6 +179,20 @@ def _recursive_file_count(root: Path) -> int:
     return sum(1 for path in root.rglob("*") if path.is_file())
 
 
+NORMALIZED_REQUIRED_NONEMPTY_ENTITIES = frozenset(
+    {
+        "collection_summary",
+        "strategy_master",
+        "strategy_performance_daily",
+    }
+)
+
+
+def _normalized_entity_name(relative_text: object) -> str:
+    parts = str(relative_text or "").replace("\\", "/").split("/")
+    return parts[1] if len(parts) > 1 else ""
+
+
 def verify_declared_runtime_baselines(layout: WorkspaceLayout) -> dict[str, Any]:
     manifest_path = layout.baseline_root / "migration_manifest.json"
     if not manifest_path.is_file():
@@ -201,6 +215,7 @@ def verify_declared_runtime_baselines(layout: WorkspaceLayout) -> dict[str, Any]
     errors: list[str] = []
     normalized_declared = 0
     normalized_present = 0
+    normalized_optional_empty = 0
     for baseline_index, baseline in enumerate(payload.get("normalizedBaselines") or []):
         for file_index, relative_text in enumerate(baseline.get("files") or []):
             normalized_declared += 1
@@ -216,7 +231,12 @@ def verify_declared_runtime_baselines(layout: WorkspaceLayout) -> dict[str, Any]
             if not target.is_file():
                 errors.append(f"normalized_baseline_missing:{relative_text}")
             elif target.stat().st_size <= 0:
-                errors.append(f"normalized_baseline_empty:{relative_text}")
+                entity = _normalized_entity_name(relative_text)
+                if entity in NORMALIZED_REQUIRED_NONEMPTY_ENTITIES:
+                    errors.append(f"normalized_core_baseline_empty:{relative_text}")
+                else:
+                    normalized_present += 1
+                    normalized_optional_empty += 1
             else:
                 normalized_present += 1
 
@@ -291,6 +311,7 @@ def verify_declared_runtime_baselines(layout: WorkspaceLayout) -> dict[str, Any]
         "manifest": str(manifest_path),
         "normalizedDeclaredFileCount": normalized_declared,
         "normalizedPresentFileCount": normalized_present,
+        "normalizedOptionalEmptyFileCount": normalized_optional_empty,
         "rawTrees": tree_results,
         "rawLatestRuns": latest_run_results,
         "rawFiles": file_results,

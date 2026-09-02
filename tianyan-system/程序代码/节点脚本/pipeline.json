@@ -1,6 +1,10 @@
 {
   "schemaVersion": 1,
-  "version": "node_pipeline_v8_20260812_public_fund_snapshot_and_bounded_resume",
+  "version": "node_pipeline_v9_20260901_resume_checkpoint",
+  "recovery": {
+    "checkpointIntervalSeconds": 600,
+    "strategy": "validated_node_result_then_native_node_checkpoint"
+  },
   "nodes": [
     {
       "id": "preflight_environment",
@@ -211,10 +215,30 @@
       }
     },
     {
-      "id": "qieman_history_backfill",
-      "directory": "03_且慢/04_历史仓位主库回填",
+      "id": "southern_collect",
+      "directory": "03_南方基金/01_目录与登录态采集",
       "dependencies": [
         "preflight_database"
+      ],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "southern_gate",
+      "directory": "03_南方基金/02_批次验收",
+      "dependencies": [
+        "southern_collect"
+      ],
+      "enabledWhen": {
+        "daily": false
+      }
+    },
+    {
+      "id": "southern_load",
+      "directory": "03_南方基金/03_增量入库",
+      "dependencies": [
+        "southern_gate"
       ],
       "enabledWhen": {
         "daily": false

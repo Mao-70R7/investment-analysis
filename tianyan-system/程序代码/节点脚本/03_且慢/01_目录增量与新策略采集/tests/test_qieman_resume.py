@@ -83,9 +83,39 @@ def test_latest_partial_history_run_dir_reuses_rich_failed_summary_attempt() -> 
     assert selected == rich_failed.resolve()
 
 
+def test_daily_summary_records_each_strategy_latest_nav_date_distribution() -> None:
+    source = MODULE_PATH.read_text(encoding="utf-8-sig")
+
+    assert '"nav_latest_date_counts"' in source
+    assert 'nav.get("latestDate")' in source
+
+
+def test_history_batch_targets_cover_catalog_without_overshoot() -> None:
+    assert MODULE.history_batch_targets(0, 50) == []
+    assert MODULE.history_batch_targets(40, 50) == [40]
+    assert MODULE.history_batch_targets(120, 50) == [50, 100, 120]
+    assert MODULE.history_batch_targets(613, 50) == [
+        50,
+        100,
+        150,
+        200,
+        250,
+        300,
+        350,
+        400,
+        450,
+        500,
+        550,
+        600,
+        613,
+    ]
+
+
 if __name__ == "__main__":
     test_latest_partial_stargate_run_dir_stays_within_same_node_run()
     test_latest_partial_stargate_run_dir_ignores_attempt_without_raw_json()
     test_latest_partial_history_run_dir_prefers_richest_incomplete_attempt()
     test_latest_partial_history_run_dir_reuses_rich_failed_summary_attempt()
-    print("qieman resume tests: 4 passed")
+    test_daily_summary_records_each_strategy_latest_nav_date_distribution()
+    test_history_batch_targets_cover_catalog_without_overshoot()
+    print("qieman resume tests: 6 passed")

@@ -23,6 +23,18 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FofSourceBootstrapTests(unittest.TestCase):
+    def test_minimal_publish_never_builds_per_fund_detail_artifacts(self) -> None:
+        args = SimpleNamespace(minimal_publish_only=True, skip_fund_enrichment=False)
+        self.assertFalse(MODULE.should_build_fund_detail_artifacts(args))
+
+    def test_explicit_skip_disables_per_fund_detail_artifacts(self) -> None:
+        args = SimpleNamespace(minimal_publish_only=False, skip_fund_enrichment=True)
+        self.assertFalse(MODULE.should_build_fund_detail_artifacts(args))
+
+    def test_non_minimal_mode_can_build_per_fund_detail_artifacts(self) -> None:
+        args = SimpleNamespace(minimal_publish_only=False, skip_fund_enrichment=False)
+        self.assertTrue(MODULE.should_build_fund_detail_artifacts(args))
+
     @staticmethod
     def write_summary(path: Path, *, strategy_total: int, data_date: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,7 +61,10 @@ class FofSourceBootstrapTests(unittest.TestCase):
                 mock.patch.object(MODULE, "FOF_BENCHMARK_OUTPUT_ROOT", output_root),
                 mock.patch.object(MODULE.subprocess, "run") as run,
             ):
-                self.assertEqual(MODULE.ensure_fof_benchmark_source(root / "report"), source)
+                self.assertEqual(
+                    MODULE.ensure_fof_benchmark_source(root / "report", root / "unused.sqlite"),
+                    source,
+                )
                 run.assert_not_called()
 
     def test_missing_source_is_bootstrapped_once_without_database_write(self) -> None:
@@ -87,7 +102,7 @@ class FofSourceBootstrapTests(unittest.TestCase):
                 mock.patch.object(MODULE, "FOF_BENCHMARK_OUTPUT_ROOT", benchmark_output),
                 mock.patch.object(MODULE.subprocess, "run", side_effect=fake_run),
             ):
-                generated = MODULE.ensure_fof_benchmark_source(report_root)
+                generated = MODULE.ensure_fof_benchmark_source(report_root, root / "input.sqlite")
 
             self.assertTrue(generated.is_file())
             self.assertEqual(len(calls), 2)
@@ -127,7 +142,6 @@ class FofSourceBootstrapTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0)
 
             with (
-                mock.patch.object(MODULE, "DB_PATH", root / "missing.sqlite"),
                 mock.patch.object(MODULE, "FOF_H1_SOURCE_SCRIPT_PATH", h1_script),
                 mock.patch.object(MODULE, "FOF_BENCHMARK_ENRICH_SCRIPT_PATH", enrich_script),
                 mock.patch.object(MODULE, "FOF_BENCHMARK_DATA_PATH", benchmark_input),
@@ -135,7 +149,7 @@ class FofSourceBootstrapTests(unittest.TestCase):
                 mock.patch.object(MODULE, "FOF_BENCHMARK_OUTPUT_ROOT", benchmark_output),
                 mock.patch.object(MODULE.subprocess, "run", side_effect=fake_run),
             ):
-                generated = MODULE.ensure_fof_benchmark_source(report_root)
+                generated = MODULE.ensure_fof_benchmark_source(report_root, root / "missing.sqlite")
 
             self.assertEqual(generated.parent.name, "new")
             self.assertEqual(len(calls), 2)
@@ -158,7 +172,7 @@ class FofSourceBootstrapTests(unittest.TestCase):
                 mock.patch.object(MODULE, "FOF_BENCHMARK_DATA_PATH", root / "missing_benchmark.json"),
                 mock.patch.object(MODULE.subprocess, "run") as run,
             ):
-                selected = MODULE.ensure_fof_benchmark_source(report_root)
+                selected = MODULE.ensure_fof_benchmark_source(report_root, root / "unused.sqlite")
 
             self.assertEqual(selected, source)
             run.assert_not_called()

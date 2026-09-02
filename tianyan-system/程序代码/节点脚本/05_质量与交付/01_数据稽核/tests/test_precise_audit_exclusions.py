@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from contextlib import closing
@@ -16,6 +17,7 @@ SCRIPT_PATH = next(
 )
 SPEC = importlib.util.spec_from_file_location("standard_data_audit_precise", SCRIPT_PATH)
 assert SPEC and SPEC.loader
+sys.path.insert(0, str(SCRIPT_PATH.parent))
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
@@ -43,10 +45,54 @@ class PreciseAuditExclusionTests(unittest.TestCase):
                 "修复责任脚本": "fixture",
                 "修复责任节点": "index_benchmark",
             },
+            "TTFUND_PUBLIC_QUOTE_ADVANCES_OFFICIAL_DATE": {
+                "原因说明": "fixture",
+                "优化建议": "fixture",
+                "修复责任脚本": "fixture",
+                "修复责任节点": "strategy_governance",
+            },
+            "QIEMAN_EXACT_BENCHMARK_COMPONENT_INVALID": {
+                "原因说明": "fixture",
+                "优化建议": "fixture",
+                "修复责任脚本": "fixture",
+                "修复责任节点": "qieman_load",
+            },
+            "QIEMAN_EXACT_BENCHMARK_CURVE_CHECKPOINT_MISMATCH": {
+                "原因说明": "fixture",
+                "优化建议": "fixture",
+                "修复责任脚本": "fixture",
+                "修复责任节点": "report_build",
+            },
+            "QIEMAN_OFFICIAL_REBALANCE_CONTRIBUTION_CURVE_MISSING": {
+                "原因说明": "fixture",
+                "优化建议": "fixture",
+                "修复责任脚本": "fixture",
+                "修复责任节点": "report_build",
+            },
         }
 
     def tearDown(self) -> None:
         MODULE.RULE_CATALOG = self.original_catalog
+
+    def test_fund_detail_coverage_applies_only_to_page_sets_that_publish_fund_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            report_root = Path(temporary)
+            site_dir = report_root / "basic_data"
+            site_dir.mkdir()
+
+            self.assertTrue(MODULE.fund_detail_pages_required(site_dir))
+
+            (report_root / "deployment_manifest.json").write_text(
+                json.dumps({"pageSet": "minimal_publish"}),
+                encoding="utf-8",
+            )
+            self.assertFalse(MODULE.fund_detail_pages_required(site_dir))
+
+            (report_root / "deployment_manifest.json").write_text(
+                json.dumps({"pageSet": "all"}),
+                encoding="utf-8",
+            )
+            self.assertTrue(MODULE.fund_detail_pages_required(site_dir))
 
     def test_one_business_day_benchmark_source_lag_warns_but_long_lag_blocks(self) -> None:
         with closing(sqlite3.connect(":memory:")) as conn:
@@ -112,12 +158,186 @@ class PreciseAuditExclusionTests(unittest.TestCase):
         self.assertEqual(issues[0]["ruleId"], "TTFUND_INCOMPLETE_STRATEGY_BENCHMARK_MISSING")
         self.assertEqual(issues[0]["sample"][0]["策略曲线点数"], 1)
 
+    def test_public_quote_cannot_advance_ttfund_official_performance_date(self) -> None:
+        with closing(sqlite3.connect(":memory:")) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.executescript(
+                '''
+                CREATE TABLE "策略信息" (
+                    "统一策略ID" TEXT PRIMARY KEY,
+                    "渠道策略ID" TEXT,
+                    "策略名称" TEXT,
+                    "渠道ID" TEXT
+                );
+                CREATE TABLE "策略日度业绩" (
+                    "统一策略ID" TEXT,
+                    "渠道ID" TEXT,
+                    "交易日期" TEXT,
+                    "业绩区段类型" TEXT
+                );
+                CREATE TABLE "策略产品披露净值" (
+                    "统一策略ID" TEXT,
+                    "渠道ID" TEXT,
+                    "交易日期" TEXT,
+                    "业绩区段类型" TEXT
+                );
+                CREATE TABLE "策略治理标签" (
+                    "统一策略ID" TEXT,
+                    "官方最新业绩日期" TEXT
+                );
+                INSERT INTO "策略信息" VALUES ('ttfund__S1', 'S1', '示例策略', 'ttfund');
+                INSERT INTO "策略日度业绩" VALUES ('ttfund__S1', 'ttfund', '2026-08-12', 'public_quote');
+                INSERT INTO "策略产品披露净值" VALUES ('ttfund__S1', 'ttfund', '2026-08-11', 'official_app_curve');
+                INSERT INTO "策略治理标签" VALUES ('ttfund__S1', '2026-08-12');
+                '''
+            )
+            issues: list[dict] = []
+            MODULE.audit_ttfund_official_performance_date_lineage(issues, conn)
+            self.assertEqual([issue["ruleId"] for issue in issues], ["TTFUND_PUBLIC_QUOTE_ADVANCES_OFFICIAL_DATE"])
+
+            conn.execute(
+                '''UPDATE "策略治理标签" SET "官方最新业绩日期"='2026-08-11' WHERE "统一策略ID"='ttfund__S1' '''
+            )
+            issues = []
+            MODULE.audit_ttfund_official_performance_date_lineage(issues, conn)
+            self.assertEqual(issues, [])
+
+    def test_qieman_exact_benchmark_components_must_close_to_one_hundred_percent(self) -> None:
+        with closing(sqlite3.connect(":memory:")) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.executescript(
+                '''
+                CREATE TABLE "策略业绩基准成分" (
+                    "统一策略ID" TEXT,
+                    "渠道ID" TEXT,
+                    "渠道策略ID" TEXT,
+                    "指数代码" TEXT,
+                    "权重_百分比" REAL,
+                    "是否精确拆分" INTEGER
+                );
+                INSERT INTO "策略业绩基准成分" VALUES
+                    ('qieman__ZH044931', 'qieman', 'ZH044931', '000300.SH', 10.0, 1),
+                    ('qieman__ZH044931', 'qieman', 'ZH044931', 'CBA00103.CS', 89.0, 1);
+                '''
+            )
+            issues: list[dict] = []
+            MODULE.audit_qieman_structured_benchmark_components(issues, conn)
+        self.assertEqual([issue["ruleId"] for issue in issues], ["QIEMAN_EXACT_BENCHMARK_COMPONENT_INVALID"])
+
+    def test_qieman_benchmark_checkpoint_and_contribution_curve_regressions(self) -> None:
+        rules = {
+            "strategyBenchmarkCurveCheckpoints": [
+                {
+                    "strategyId": "qieman__ZH044931",
+                    "curveName": "基准业绩",
+                    "date": "2025-11-27",
+                    "expectedCumulativeReturnPct": 8.65,
+                    "tolerancePctPoints": 0.015,
+                    "requiredComponentCodes": ["000300.SH", "CBA00103.CS"],
+                    "requiredMethodContains": "逐日再平衡",
+                }
+            ],
+            "strategyContributionCurveRequirements": [
+                {
+                    "strategyId": "qieman__ZH044931",
+                    "minEventCount": 1,
+                    "minPointsPerSide": 2,
+                    "requiredEvaluationStatus": "官方权重净值回放",
+                }
+            ],
+        }
+        valid_detail = {
+            "benchmarkMeta": {
+                "可计算组件": [
+                    {"指数代码": "000300.SH", "权重": 10.0},
+                    {"指数代码": "CBA00103.CS", "权重": 90.0},
+                ],
+                "组合计算方法": "指数日收益按披露权重逐日再平衡复合",
+            },
+            "curves": {
+                "基准业绩": {
+                    "模式": "nav",
+                    "points": [
+                        {"日期": "2020-06-12", "数值": 1.0},
+                        {"日期": "2025-11-27", "数值": 1.0865},
+                    ],
+                }
+            },
+            "contributionCurves": {
+                "event-1": {
+                    "评估状态": "官方权重净值回放",
+                    "series": {
+                        "调仓前仓位模拟": {"points": [{"日期": "2026-01-01", "数值": 0}, {"日期": "2026-01-02", "数值": 0.1}]},
+                        "调仓后仓位实际": {"points": [{"日期": "2026-01-01", "数值": 0}, {"日期": "2026-01-02", "数值": 0.2}]},
+                    },
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            site_dir = Path(temporary) / "basic_data"
+            detail_dir = site_dir / "data" / "details"
+            detail_dir.mkdir(parents=True)
+            detail_path = detail_dir / "qieman__ZH044931.js"
+
+            detail_path.write_text(
+                "window.STRATEGY_DETAIL = " + json.dumps(valid_detail, ensure_ascii=False) + ";\n",
+                encoding="utf-8",
+            )
+            issues: list[dict] = []
+            MODULE.audit_strategy_detail_regression_rules(issues, site_dir, rules)
+            self.assertEqual(issues, [])
+
+            invalid_detail = json.loads(json.dumps(valid_detail, ensure_ascii=False))
+            invalid_detail["benchmarkMeta"]["可计算组件"][1]["指数代码"] = "CBA00603.CS"
+            invalid_detail["curves"]["基准业绩"]["points"][1]["数值"] = 1.0857
+            invalid_detail["contributionCurves"] = {}
+            detail_path.write_text(
+                "window.STRATEGY_DETAIL = " + json.dumps(invalid_detail, ensure_ascii=False) + ";\n",
+                encoding="utf-8",
+            )
+            issues = []
+            MODULE.audit_strategy_detail_regression_rules(issues, site_dir, rules)
+
+        self.assertEqual(
+            {issue["ruleId"] for issue in issues},
+            {
+                "QIEMAN_EXACT_BENCHMARK_CURVE_CHECKPOINT_MISMATCH",
+                "QIEMAN_OFFICIAL_REBALANCE_CONTRIBUTION_CURVE_MISSING",
+            },
+        )
+
     def test_declared_nonrankable_strategy_is_not_treated_as_ranking_omission(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             report_root = Path(temporary)
             site_dir = report_root / "basic_data"
             data_dir = site_dir / "data"
             data_dir.mkdir(parents=True)
+            asset_dir = site_dir / "assets"
+            asset_dir.mkdir()
+            (asset_dir / "institutions.js").write_text(
+                '\n'.join(
+                    [
+                        'withGlobalStrategyFilters("./mixed-performance-scatter.html"',
+                        'productType: "投顾策略"',
+                        'riskWeight: bucket',
+                        'channel: scope.channel',
+                        'institution: scope.institution',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (asset_dir / "mixed-performance-scatter.js").write_text(
+                '\n'.join(
+                    [
+                        'initialParams.get("channel")',
+                        'initialParams.get("institution")',
+                        'initialParams.get("riskWeight")',
+                        'id="mixedChannel"',
+                        'id="mixedInstitution"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
             summary = {
                 "strategies": [
                     {

@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
 import unicodedata
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from business_naming import canonical_advisor_institution
+from business_naming import canonical_advisor_institution, is_undisclosed_institution
 
 
 PROJECT_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "AGENTS.md").is_file())
@@ -1156,10 +1157,18 @@ def audit_ttfund_strategy_benchmark_curve_freshness(
     issues: list[dict[str, Any]],
     conn: sqlite3.Connection,
 ) -> None:
+    performance_columns = {
+        str(row[1]) for row in conn.execute('PRAGMA table_info("策略日度业绩")')
+    }
+    official_section_filter = (
+        ' AND COALESCE(p."业绩区段类型", \'\') <> \'public_quote\''
+        if "业绩区段类型" in performance_columns
+        else ""
+    )
     stale_rows = [
         dict(row)
         for row in conn.execute(
-            '''
+            f'''
             WITH latest AS (
                 SELECT s."统一策略ID", s."渠道策略ID", s."策略名称",
                        MAX(p."交易日期") AS "策略最新日期",
@@ -1168,6 +1177,7 @@ def audit_ttfund_strategy_benchmark_curve_freshness(
                 FROM "策略信息" s
                 JOIN "策略日度业绩" p ON p."统一策略ID" = s."统一策略ID"
                 WHERE s."渠道ID" = 'ttfund'
+                  {official_section_filter}
                 GROUP BY s."统一策略ID", s."渠道策略ID", s."策略名称"
             )
             SELECT *
@@ -1238,6 +1248,187 @@ def audit_ttfund_strategy_benchmark_curve_freshness(
             ),
             incomplete_strategy_rows[:50],
             rule_id="TTFUND_INCOMPLETE_STRATEGY_BENCHMARK_MISSING",
+        )
+
+
+def audit_ttfund_official_performance_date_lineage(
+    issues: list[dict[str, Any]],
+    conn: sqlite3.Connection,
+) -> None:
+    """Prevent a public quote snapshot from becoming the App official date."""
+
+    tables = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    required = {"策略产品披露净值", "策略日度业绩", "策略治理标签", "策略信息"}
+    if not required.issubset(tables):
+        return
+    daily_columns = {
+        str(row[1]) for row in conn.execute('PRAGMA table_info("策略日度业绩")')
+    }
+    governance_columns = {
+        str(row[1]) for row in conn.execute('PRAGMA table_info("策略治理标签")')
+    }
+    if "业绩区段类型" not in daily_columns or "官方最新业绩日期" not in governance_columns:
+        return
+    invalid_rows = [
+        dict(row)
+        for row in conn.execute(
+            '''
+            WITH official AS (
+                SELECT "统一策略ID", MAX("交易日期") AS "App官方最新日期"
+                FROM "策略产品披露净值"
+                WHERE "渠道ID"='ttfund'
+                  AND COALESCE("业绩区段类型", '') <> 'public_quote'
+                GROUP BY "统一策略ID"
+            ), public_quote AS (
+                SELECT "统一策略ID", MAX("交易日期") AS "公开行情快照日期"
+                FROM "策略日度业绩"
+                WHERE "渠道ID"='ttfund' AND "业绩区段类型"='public_quote'
+                GROUP BY "统一策略ID"
+            )
+            SELECT s."统一策略ID", s."渠道策略ID", s."策略名称",
+                   o."App官方最新日期", q."公开行情快照日期",
+                   g."官方最新业绩日期" AS "治理最新业绩日期"
+            FROM "策略信息" s
+            JOIN official o ON o."统一策略ID"=s."统一策略ID"
+            JOIN public_quote q ON q."统一策略ID"=s."统一策略ID"
+            JOIN "策略治理标签" g ON g."统一策略ID"=s."统一策略ID"
+            WHERE s."渠道ID"='ttfund'
+              AND g."官方最新业绩日期" > o."App官方最新日期"
+              AND g."官方最新业绩日期" <= q."公开行情快照日期"
+            ORDER BY g."官方最新业绩日期" DESC, s."统一策略ID"
+            LIMIT 50
+            '''
+        )
+    ]
+    if invalid_rows:
+        add_issue(
+            issues,
+            "error",
+            "sqlite.策略治理标签.官方最新业绩日期",
+            "天天公开行情快照推进了官方最新业绩日期",
+            (
+                "公开行情快照只能补充当日估值血缘；天天 App 尚未披露同日官方曲线时，"
+                "不得把该日期写成策略官方最新业绩日期。"
+            ),
+            invalid_rows,
+            rule_id="TTFUND_PUBLIC_QUOTE_ADVANCES_OFFICIAL_DATE",
+        )
+
+
+def audit_qieman_structured_benchmark_components(
+    issues: list[dict[str, Any]],
+    conn: sqlite3.Connection,
+) -> None:
+    tables = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "策略业绩基准成分" not in tables:
+        return
+    invalid_rows = [
+        dict(row)
+        for row in conn.execute(
+            '''
+            SELECT "统一策略ID", MAX("渠道策略ID") AS "渠道策略ID",
+                   COUNT(*) AS "成分数", ROUND(SUM("权重_百分比"), 6) AS "权重合计",
+                   SUM(CASE WHEN "指数代码" IS NULL OR TRIM("指数代码")='' THEN 1 ELSE 0 END) AS "空代码数",
+                   SUM(CASE WHEN "权重_百分比" IS NULL OR "权重_百分比" <= 0 THEN 1 ELSE 0 END) AS "非法权重数"
+            FROM "策略业绩基准成分"
+            WHERE "渠道ID"='qieman' AND "是否精确拆分"=1
+            GROUP BY "统一策略ID"
+            HAVING ABS(SUM("权重_百分比") - 100.0) > 0.01
+                OR SUM(CASE WHEN "指数代码" IS NULL OR TRIM("指数代码")='' THEN 1 ELSE 0 END) > 0
+                OR SUM(CASE WHEN "权重_百分比" IS NULL OR "权重_百分比" <= 0 THEN 1 ELSE 0 END) > 0
+            ORDER BY "统一策略ID"
+            LIMIT 50
+            '''
+        )
+    ]
+    if invalid_rows:
+        add_issue(
+            issues,
+            "error",
+            "sqlite.策略业绩基准成分",
+            "且慢精确基准成分不闭合",
+            "官方精确拆分必须包含有效指数代码，且正权重合计为 100%。",
+            invalid_rows,
+            rule_id="QIEMAN_EXACT_BENCHMARK_COMPONENT_INVALID",
+        )
+
+
+def audit_southern_structured_benchmark_components(
+    issues: list[dict[str, Any]],
+    conn: sqlite3.Connection,
+) -> None:
+    tables = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if not {"策略信息", "策略业绩基准成分"}.issubset(tables):
+        return
+    strategy_total = int(
+        conn.execute('SELECT COUNT(*) FROM "策略信息" WHERE "渠道ID"=?', ("southern",)).fetchone()[0]
+    )
+    if strategy_total <= 0:
+        return
+    invalid_rows = [
+        dict(row)
+        for row in conn.execute(
+            '''
+            SELECT "统一策略ID", MAX("渠道策略ID") AS "渠道策略ID",
+                   COUNT(*) AS "成分数", ROUND(SUM("权重_百分比"), 6) AS "权重合计",
+                   SUM(CASE WHEN "指数代码" IS NULL OR TRIM("指数代码")='' THEN 1 ELSE 0 END) AS "空代码数",
+                   SUM(CASE WHEN "权重_百分比" IS NULL OR "权重_百分比" <= 0 THEN 1 ELSE 0 END) AS "非法权重数"
+            FROM "策略业绩基准成分"
+            WHERE "渠道ID"='southern' AND "是否精确拆分"=1
+            GROUP BY "统一策略ID"
+            HAVING ABS(SUM("权重_百分比") - 100.0) > 0.01
+                OR SUM(CASE WHEN "指数代码" IS NULL OR TRIM("指数代码")='' THEN 1 ELSE 0 END) > 0
+                OR SUM(CASE WHEN "权重_百分比" IS NULL OR "权重_百分比" <= 0 THEN 1 ELSE 0 END) > 0
+            ORDER BY "统一策略ID"
+            LIMIT 50
+            '''
+        )
+    ]
+    if invalid_rows:
+        add_issue(
+            issues,
+            "error",
+            "sqlite.策略业绩基准成分",
+            "南方基金精确基准成分不闭合",
+            "官方 ratioinfo 精确拆分必须包含有效指数代码，且正权重合计为 100%。",
+            invalid_rows,
+            rule_id="SOUTHERN_EXACT_BENCHMARK_COMPONENT_INVALID",
+        )
+    missing = [
+        dict(row)
+        for row in conn.execute(
+            '''
+            SELECT s."统一策略ID", s."渠道策略ID", s."策略名称"
+            FROM "策略信息" s
+            LEFT JOIN (
+                SELECT DISTINCT "统一策略ID"
+                FROM "策略业绩基准成分"
+                WHERE "渠道ID"='southern' AND "是否精确拆分"=1
+            ) b ON b."统一策略ID"=s."统一策略ID"
+            WHERE s."渠道ID"='southern' AND b."统一策略ID" IS NULL
+            ORDER BY s."渠道策略ID"
+            LIMIT 50
+            '''
+        )
+    ]
+    if missing:
+        add_issue(
+            issues,
+            "warn",
+            "sqlite.策略业绩基准成分",
+            "南方基金官方未披露精确基准",
+            f"{len(missing)}/{strategy_total} 个南方基金策略的官方 benchmarklist 为空，保持缺失并继续重试。",
+            missing,
+            rule_id="SOUTHERN_OFFICIAL_BENCHMARK_NOT_DISCLOSED",
         )
 
 
@@ -1365,11 +1556,21 @@ def audit_core_fact_semantics(issues: list[dict[str, Any]], db_path: Path) -> No
 
         if "策略日度业绩" in tables:
             anomaly_where = '"单位净值" <= 0 OR ABS("日收益率_百分比") > 50'
+            governance_join = (
+                'LEFT JOIN "策略治理标签" g ON g."统一策略ID" = p."统一策略ID"'
+                if "策略治理标签" in tables
+                else ""
+            )
+            governance_filter = (
+                '(COALESCE(g."是否业绩异常", 0) <> 1 OR COALESCE(g."是否纳入常规排名", 1) <> 0)'
+                if "策略治理标签" in tables
+                else "1 = 1"
+            )
             anomaly_sql = f'''
                 FROM "策略日度业绩" p
-                LEFT JOIN "策略治理标签" g ON g."统一策略ID" = p."统一策略ID"
+                {governance_join}
                 WHERE ({anomaly_where.replace('"单位净值"', 'p."单位净值"').replace('"日收益率_百分比"', 'p."日收益率_百分比"')})
-                  AND (COALESCE(g."是否业绩异常", 0) <> 1 OR COALESCE(g."是否纳入常规排名", 1) <> 0)
+                  AND {governance_filter}
             '''
             anomaly_count = conn.execute(f'SELECT COUNT(*) {anomaly_sql}').fetchone()[0]
             if anomaly_count:
@@ -1380,9 +1581,9 @@ def audit_core_fact_semantics(issues: list[dict[str, Any]], db_path: Path) -> No
                         SELECT p."统一策略ID", p."渠道ID", p."渠道策略ID", p."交易日期", p."单位净值",
                                p."日收益率_百分比", p."累计收益率_百分比", p."原始快照ID"
                         FROM "策略日度业绩" p
-                        LEFT JOIN "策略治理标签" g ON g."统一策略ID" = p."统一策略ID"
+                        {governance_join}
                         WHERE ({anomaly_where.replace('"单位净值"', 'p."单位净值"').replace('"日收益率_百分比"', 'p."日收益率_百分比"')})
-                          AND (COALESCE(g."是否业绩异常", 0) <> 1 OR COALESCE(g."是否纳入常规排名", 1) <> 0)
+                          AND {governance_filter}
                         ORDER BY p."统一策略ID", p."交易日期"
                         LIMIT 20
                         '''
@@ -1476,8 +1677,12 @@ def audit_core_fact_semantics(issues: list[dict[str, Any]], db_path: Path) -> No
 
             if "策略信息" in tables:
                 audit_ttfund_strategy_benchmark_curve_freshness(issues, conn)
+                audit_ttfund_official_performance_date_lineage(issues, conn)
 
-        if {"策略当前持仓", "策略信息"}.issubset(tables):
+            audit_qieman_structured_benchmark_components(issues, conn)
+            audit_southern_structured_benchmark_components(issues, conn)
+
+        if {"策略当前持仓", "策略信息", "策略治理标签", "策略当前持仓推算补齐"}.issubset(tables):
             suspect_sql = '''
                 WITH latest AS (
                     SELECT "统一策略ID", MAX("持仓日期") AS holding_date
@@ -1492,7 +1697,7 @@ def audit_core_fact_semantics(issues: list[dict[str, Any]], db_path: Path) -> No
                     JOIN latest l ON l."统一策略ID" = h."统一策略ID" AND l.holding_date = h."持仓日期"
                     JOIN "策略信息" s ON s."统一策略ID" = h."统一策略ID"
                     LEFT JOIN "策略治理标签" g ON g."统一策略ID" = h."统一策略ID"
-                    WHERE h."渠道ID" IN ('ttfund', 'gffunds')
+                    WHERE h."渠道ID" IN ('ttfund', 'gffunds', 'southern')
                       AND COALESCE(s."策略状态", '') <> 'stopped'
                       AND COALESCE(g."是否测试组合", 0) = 0
                       AND COALESCE(g."是否信号类组合", 0) = 0
@@ -1524,6 +1729,35 @@ def audit_core_fact_semantics(issues: list[dict[str, Any]], db_path: Path) -> No
                     f"{len(suspects)} 只在运作策略的最新直接持仓存在空权重，或多基金权重合计低于 50%。",
                     suspects[:20],
                     rule_id="STRATEGY_CURRENT_HOLDING_WEIGHT_SCALE_SUSPECT",
+                )
+
+        if "策略历史持仓" in tables:
+            invalid_history_snapshots = [
+                dict(row)
+                for row in conn.execute(
+                    '''
+                    SELECT "统一策略ID", "渠道ID", "历史快照ID", "持仓日期",
+                           COUNT(*) AS position_count,
+                           SUM(CASE WHEN "基金权重_百分比" IS NULL THEN 1 ELSE 0 END) AS null_weight_count,
+                           ROUND(SUM(COALESCE("基金权重_百分比", 0)), 6) AS weight_sum
+                    FROM "策略历史持仓"
+                    WHERE COALESCE("是否精确权重", 0) = 1
+                    GROUP BY "统一策略ID", "渠道ID", "历史快照ID", "持仓日期"
+                    HAVING null_weight_count > 0 OR ABS(weight_sum - 100) > 0.5
+                    ORDER BY ABS(weight_sum - 100) DESC, "统一策略ID", "持仓日期"
+                    LIMIT 50
+                    '''
+                )
+            ]
+            if invalid_history_snapshots:
+                add_issue(
+                    issues,
+                    "error",
+                    "sqlite.策略历史持仓",
+                    "精确历史持仓权重不闭合",
+                    "标记为精确权重的历史快照存在空权重或合计不在 99.5%-100.5% 内，可能是 0-1 与 0-100 单位混用或快照不完整。",
+                    invalid_history_snapshots,
+                    rule_id="STRATEGY_HISTORICAL_HOLDING_WEIGHT_CLOSURE_INVALID",
                 )
 
         if "策略调仓事件" in tables:
@@ -2030,6 +2264,22 @@ def audit_public_fund_benchmark_buckets(issues: list[dict[str, Any]], db_path: P
                 )
 
 
+def fund_detail_pages_required(site_dir: Path) -> bool:
+    """Require per-fund pages only when the declared page set includes them.
+
+    A missing or malformed deployment manifest fails closed: the full-package
+    requirement remains active.  Only the explicit minimal_publish contract,
+    which separately blocks fund.html and fund_details artifacts, opts out.
+    """
+
+    manifest_path = site_dir.parent / "deployment_manifest.json"
+    try:
+        manifest = load_json_object(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return True
+    return manifest.get("pageSet") != "minimal_publish"
+
+
 def audit_fof_universe_coverage(issues: list[dict[str, Any]], db_path: Path, site_dir: Path) -> None:
     if not db_path.exists():
         return
@@ -2164,18 +2414,19 @@ def audit_fof_universe_coverage(issues: list[dict[str, Any]], db_path: Path, sit
                 rule_id="FOF_UNIVERSE_NAV_HISTORY_INCOMPLETE",
             )
 
-    detail_dir = site_dir / "data" / "fund_details"
-    missing_detail_files = [code for code in fof_codes if not (detail_dir / f"{code}.js").exists()]
-    if missing_detail_files:
-        add_issue(
-            issues,
-            "error",
-            "fof_universe.fund_details",
-            "FOF详情页缺失",
-            f"全市场 FOF 中有 {len(missing_detail_files)} / {len(fof_codes)} 只缺少基金详情页增强包。",
-            missing_detail_files[:80],
-            rule_id="FOF_UNIVERSE_DETAIL_PAGE_MISSING",
-        )
+    if fund_detail_pages_required(site_dir):
+        detail_dir = site_dir / "data" / "fund_details"
+        missing_detail_files = [code for code in fof_codes if not (detail_dir / f"{code}.js").exists()]
+        if missing_detail_files:
+            add_issue(
+                issues,
+                "error",
+                "fof_universe.fund_details",
+                "FOF详情页缺失",
+                f"全市场 FOF 中有 {len(missing_detail_files)} / {len(fof_codes)} 只缺少基金详情页增强包。",
+                missing_detail_files[:80],
+                rule_id="FOF_UNIVERSE_DETAIL_PAGE_MISSING",
+            )
 
 
 def audit_strategy_governance_semantics(issues: list[dict[str, Any]], db_path: Path) -> None:
@@ -2267,7 +2518,10 @@ def audit_strategy_governance_semantics(issues: list[dict[str, Any]], db_path: P
         base = normalize_target_profit_series(row.get("策略名称"))
         if not base:
             continue
-        advisor = canonical_advisor_institution(row.get("投顾机构"))
+        advisor = canonical_advisor_institution(
+            row.get("投顾机构"),
+            row.get("渠道ID"),
+        )
         series_groups[(advisor, base)].append(row)
     mixed_samples = []
     for (advisor, series_name), group_rows in sorted(series_groups.items()):
@@ -2742,6 +2996,16 @@ def audit_mixed_performance_pack(issues: list[dict[str, Any]], site_dir: Path, d
     }
     mixed_strategy_rows = [row for row in pack.get("rows") or [] if row.get("productType") == "投顾策略"]
     actual_ids = {str(row.get("id") or "").strip() for row in mixed_strategy_rows if row.get("id")}
+    expected_by_id = {
+        str(row.get("统一策略ID") or "").strip(): row
+        for row in expected_rows
+        if row.get("统一策略ID")
+    }
+    mixed_by_id = {
+        str(row.get("id") or "").strip(): row
+        for row in mixed_strategy_rows
+        if row.get("id")
+    }
 
     source_meta: dict[str, Any] = {}
     declared_nonrankable_ids: set[str] = set()
@@ -2835,6 +3099,82 @@ def audit_mixed_performance_pack(issues: list[dict[str, Any]], site_dir: Path, d
                 "sourceMismatches": source_mismatches[:20],
             },
             rule_id="MIXED_RANKING_STRATEGY_UNIVERSE_MISMATCH",
+        )
+
+    filter_scope_mismatches: list[dict[str, Any]] = []
+    filter_fields = {
+        "channel": ("渠道", lambda value: str(value or "").strip()),
+        "institution": ("投顾机构", lambda value: str(value or "").strip()),
+        "hasBenchmark": ("有基准", lambda value: str(value or "").strip() == "是"),
+        "hasPerformance": ("有业绩走势", lambda value: str(value or "").strip() == "是"),
+        "hasHistoryPosition": ("有历史仓位", lambda value: str(value or "").strip() == "是"),
+        "clientActive": ("对客未终止", lambda value: str(value or "").strip() == "是"),
+        "broadEquityBucket": ("基准风险资产权重", lambda value: str(value or "").strip()),
+    }
+    for strategy_id in sorted(expected_rankable_ids & actual_ids):
+        summary_row = expected_by_id[strategy_id]
+        mixed_row = mixed_by_id[strategy_id]
+        differences: dict[str, Any] = {}
+        for mixed_field, (summary_field, normalize_summary) in filter_fields.items():
+            expected_value = normalize_summary(summary_row.get(summary_field))
+            actual_value = mixed_row.get(mixed_field)
+            if isinstance(expected_value, bool):
+                actual_value = bool(actual_value)
+            else:
+                actual_value = str(actual_value or "").strip()
+            if actual_value != expected_value:
+                differences[mixed_field] = {"institutionOverview": expected_value, "ranking": actual_value}
+        if differences:
+            filter_scope_mismatches.append(
+                {
+                    "统一策略ID": strategy_id,
+                    "策略名称": summary_row.get("策略名称"),
+                    "差异": differences,
+                }
+            )
+        if len(filter_scope_mismatches) >= 50:
+            break
+
+    institution_asset = site_dir / "assets" / "institutions.js"
+    ranking_asset = site_dir / "assets" / "mixed-performance-scatter.js"
+    contract_missing: list[str] = []
+    try:
+        institution_source = institution_asset.read_text(encoding="utf-8")
+        ranking_source = ranking_asset.read_text(encoding="utf-8")
+        institution_tokens = [
+            'withGlobalStrategyFilters("./mixed-performance-scatter.html"',
+            'productType: "投顾策略"',
+            "riskWeight: bucket",
+            "channel: scope.channel",
+            "institution: scope.institution",
+        ]
+        ranking_tokens = [
+            'initialParams.get("channel")',
+            'initialParams.get("institution")',
+            'initialParams.get("riskWeight")',
+            'id="mixedChannel"',
+            'id="mixedInstitution"',
+        ]
+        contract_missing.extend(f"institutions.js:{token}" for token in institution_tokens if token not in institution_source)
+        contract_missing.extend(f"mixed-performance-scatter.js:{token}" for token in ranking_tokens if token not in ranking_source)
+    except OSError as exc:
+        contract_missing.append(f"asset read failed: {exc}")
+
+    if filter_scope_mismatches or contract_missing:
+        add_issue(
+            issues,
+            "error",
+            "institution_overview_to_mixed_ranking",
+            "机构总览与全市场产品排名筛选口径不一致",
+            (
+                f"发现 {len(filter_scope_mismatches)} 条策略筛选字段不一致；"
+                f"跳转筛选契约缺项 {len(contract_missing)} 个。"
+            ),
+            {
+                "fieldMismatches": filter_scope_mismatches,
+                "contractMissing": contract_missing,
+            },
+            rule_id="INSTITUTION_RANKING_FILTER_SCOPE_MISMATCH",
         )
 
     expected_guangfa = sum(
@@ -3170,13 +3510,9 @@ def audit_page_strategy_business_scope(
         for source_id, name in (scope.get("canonicalChannelBySourceId") or {}).items()
         if str(source_id).strip() and str(name).strip()
     }
-    institution_aliases = {
-        str(alias).strip(): str(name).strip()
-        for alias, name in (scope.get("canonicalInstitutionAliases") or {}).items()
-        if str(alias).strip() and str(name).strip()
-    }
     disabled_rows: list[dict[str, Any]] = []
     naming_rows: list[dict[str, Any]] = []
+    manager_fallback_rows: list[dict[str, Any]] = []
     page_counts: Counter[str] = Counter()
     for row in summary.get("strategies") or []:
         if not isinstance(row, dict):
@@ -3196,11 +3532,25 @@ def audit_page_strategy_business_scope(
         expected_channel = channel_names.get(source_id)
         actual_channel = str(row.get("渠道") or "").strip()
         institution = str(row.get("投顾机构") or "").strip()
-        expected_institution = institution_aliases.get(institution)
+        expected_institution = canonical_advisor_institution(
+            institution,
+            source_id,
+            actual_channel or expected_channel,
+        )
         reasons: list[str] = []
         if expected_channel and actual_channel != expected_channel:
             reasons.append(f"渠道应为{expected_channel}")
-        if expected_institution and institution != expected_institution:
+        if is_undisclosed_institution(institution) and expected_institution and institution != expected_institution:
+            manager_fallback_rows.append(
+                {
+                    "统一策略ID": strategy_id,
+                    "策略名称": row.get("策略名称"),
+                    "渠道": actual_channel,
+                    "投顾机构": institution,
+                    "应兜底为": expected_institution,
+                }
+            )
+        elif expected_institution and institution != expected_institution:
             reasons.append(f"投顾机构应为{expected_institution}")
         if reasons:
             naming_rows.append(
@@ -3263,6 +3613,16 @@ def audit_page_strategy_business_scope(
             f"发现 {len(naming_rows)} 条策略仍使用来源货架名或旧机构别名。",
             naming_rows[:30],
             rule_id="PAGE_BUSINESS_NAMING_NOT_CANONICAL",
+        )
+    if manager_fallback_rows:
+        add_issue(
+            issues,
+            "error",
+            "page.strategy_scope.manager_fallback",
+            "未披露投顾管理人未按渠道兜底",
+            f"发现 {len(manager_fallback_rows)} 条策略的管理人仍为空或为未披露占位值。",
+            manager_fallback_rows[:30],
+            rule_id="PAGE_MANAGER_CHANNEL_FALLBACK_NOT_APPLIED",
         )
 
 
@@ -3495,21 +3855,6 @@ def audit_channel_performance_freshness_rules(
         )
         if denominator <= 0 and rule.get("skipWhenChannelAbsent") is True:
             continue
-        latest_total = (
-            int(
-                conn.execute(
-                    f"SELECT COUNT(DISTINCT {sql_identifier(strategy_field)}) "
-                    f"FROM {sql_identifier(table)} "
-                    f"WHERE {sql_identifier(channel_field)}=? AND {sql_identifier(date_field)}=?",
-                    (channel_id, channel_latest),
-                ).fetchone()[0]
-                or 0
-            )
-            if channel_latest
-            else 0
-        )
-        latest_rate = latest_total / denominator if denominator else 0.0
-
         system_latest = channel_latest
         if active_channel_ids:
             placeholders = ",".join("?" for _ in active_channel_ids)
@@ -3524,18 +3869,43 @@ def audit_channel_performance_freshness_rules(
             ).strip()
         lag = business_day_lag(channel_latest, system_latest)
         try:
-            minimum_rate = float(rule.get("minimumLatestDateRate") or 0.99)
+            minimum_rate = float(
+                rule.get("minimumFreshDateRate", rule.get("minimumLatestDateRate", 0.98))
+            )
         except (TypeError, ValueError):
-            minimum_rate = 0.99
+            minimum_rate = 0.98
         try:
             maximum_lag = int(rule.get("maximumBusinessDayLagFromSystemLatest") or 1)
         except (TypeError, ValueError):
             maximum_lag = 1
+        try:
+            maximum_strategy_lag = int(
+                rule.get("maximumStrategyBusinessDayLagFromChannelLatest") or 1
+            )
+        except (TypeError, ValueError):
+            maximum_strategy_lag = 1
+        fresh_total = 0
+        if channel_latest:
+            date_rows = conn.execute(
+                f"SELECT {sql_identifier(strategy_field)}, "
+                f"MAX({sql_identifier(date_field)}) AS latest_date "
+                f"FROM {sql_identifier(table)} "
+                f"WHERE {sql_identifier(channel_field)}=? "
+                f"GROUP BY {sql_identifier(strategy_field)}",
+                (channel_id,),
+            ).fetchall()
+            fresh_total = sum(
+                1
+                for _strategy_id, latest_date in date_rows
+                if (strategy_lag := business_day_lag(latest_date, channel_latest)) is not None
+                and strategy_lag <= maximum_strategy_lag
+            )
+        fresh_rate = fresh_total / denominator if denominator else 0.0
         failed = bool(
             not channel_latest
             or lag is None
             or lag > maximum_lag
-            or latest_rate + 1e-9 < minimum_rate
+            or fresh_rate + 1e-9 < minimum_rate
         )
         if not failed:
             continue
@@ -3543,8 +3913,8 @@ def audit_channel_performance_freshness_rules(
             issues,
             str(rule.get("severity") or "error"),
             f"sqlite.{table}.{channel_id}.freshness",
-            "渠道业绩最新日期或最新日策略覆盖不足",
-            "渠道业绩必须跟上系统最新交易日允许的工作日差，并保证绝大多数已有业绩策略到达渠道最新日。",
+            "渠道业绩最新日期或允许时效窗口策略覆盖不足",
+            "渠道业绩必须跟上系统最新交易日允许的工作日差，并保证绝大多数已有业绩策略到达渠道最新日或仅滞后允许的工作日数。",
             [
                 {
                     "渠道ID": channel_id,
@@ -3553,9 +3923,10 @@ def audit_channel_performance_freshness_rules(
                     "相差工作日": lag,
                     "允许最大工作日差": maximum_lag,
                     "有业绩策略数": denominator,
-                    "到达渠道最新日策略数": latest_total,
-                    "最新日覆盖率": round(latest_rate, 6),
-                    "最低最新日覆盖率": minimum_rate,
+                    "策略允许最大工作日延迟": maximum_strategy_lag,
+                    "到达允许时效窗口策略数": fresh_total,
+                    "允许时效窗口覆盖率": round(fresh_rate, 6),
+                    "最低允许时效窗口覆盖率": minimum_rate,
                 }
             ],
             rule_id=str(rule.get("ruleId") or "CHANNEL_PERFORMANCE_FRESHNESS_LOW"),
@@ -3790,6 +4161,188 @@ def audit_system_field_rules(issues: list[dict[str, Any]], db_path: Path, site_d
 
     if isinstance(rules.get("fieldDictionary"), dict):
         audit_field_dictionary(issues, site_dir, rules["fieldDictionary"])
+
+
+def strategy_detail_path(site_dir: Path, strategy_id: str) -> Path | None:
+    detail_dir = site_dir / "data" / "details"
+    direct = detail_dir / f"{strategy_id}.js"
+    for path in (direct, direct.with_suffix(direct.suffix + ".gz")):
+        if path.is_file():
+            return path
+    if not detail_dir.is_dir():
+        return None
+    matches = sorted(detail_dir.glob(f"*/{strategy_id}.js*"))
+    return matches[0] if matches else None
+
+
+def audit_strategy_detail_regression_rules(
+    issues: list[dict[str, Any]],
+    site_dir: Path,
+    field_rules: dict[str, Any],
+) -> None:
+    detail_cache: dict[str, tuple[Path | None, dict[str, Any] | None, str]] = {}
+
+    def load_detail(strategy_id: str) -> tuple[Path | None, dict[str, Any] | None, str]:
+        if strategy_id in detail_cache:
+            return detail_cache[strategy_id]
+        path = strategy_detail_path(site_dir, strategy_id)
+        if path is None:
+            result = (None, None, "详情包缺失")
+        else:
+            try:
+                payload = read_js_object(path)
+                result = (path, payload if isinstance(payload, dict) else None, "")
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                result = (path, None, f"详情包解析失败: {exc}")
+        detail_cache[strategy_id] = result
+        return result
+
+    checkpoint_failures: list[dict[str, Any]] = []
+    for rule in field_rules.get("strategyBenchmarkCurveCheckpoints") or []:
+        if not isinstance(rule, dict):
+            continue
+        strategy_id = str(rule.get("strategyId") or "").strip()
+        target_date = str(rule.get("date") or "")[:10]
+        if not strategy_id or not target_date:
+            continue
+        path, detail, load_error = load_detail(strategy_id)
+        sample: dict[str, Any] = {
+            "统一策略ID": strategy_id,
+            "检查日期": target_date,
+            "详情包": str(path or ""),
+        }
+        reasons: list[str] = []
+        if load_error or not detail:
+            reasons.append(load_error or "详情包内容为空")
+        else:
+            meta = detail.get("benchmarkMeta") if isinstance(detail.get("benchmarkMeta"), dict) else {}
+            components = meta.get("可计算组件") if isinstance(meta.get("可计算组件"), list) else []
+            actual_codes = {
+                str(item.get("指数代码") or "").strip()
+                for item in components
+                if isinstance(item, dict) and str(item.get("指数代码") or "").strip()
+            }
+            required_codes = {
+                str(value).strip()
+                for value in rule.get("requiredComponentCodes") or []
+                if str(value).strip()
+            }
+            if required_codes and not required_codes.issubset(actual_codes):
+                reasons.append("基准成分代码未使用官方精确拆分")
+            required_method = str(rule.get("requiredMethodContains") or "").strip()
+            actual_method = str(meta.get("组合计算方法") or "")
+            if required_method and required_method not in actual_method:
+                reasons.append("基准复合方法不符合规则")
+
+            curve_name = str(rule.get("curveName") or "基准业绩")
+            curve = (detail.get("curves") or {}).get(curve_name) if isinstance(detail.get("curves"), dict) else None
+            points = curve.get("points") if isinstance(curve, dict) else []
+            points = points if isinstance(points, list) else []
+            valid_points = [
+                item for item in points
+                if isinstance(item, dict) and item.get("日期") and number_value(item.get("数值")) is not None
+            ]
+            point = next((item for item in valid_points if str(item.get("日期") or "")[:10] == target_date), None)
+            if not valid_points or point is None:
+                reasons.append("缺少检查日期的基准曲线点")
+            else:
+                mode = str((curve or {}).get("模式") or valid_points[0].get("模式") or "nav").lower()
+                target_value = number_value(point.get("数值"))
+                base_value = number_value(valid_points[0].get("数值"))
+                if mode in {"return", "return_pct"}:
+                    actual_return = target_value
+                elif base_value is not None and abs(base_value) > 1e-12 and target_value is not None:
+                    actual_return = (target_value / base_value - 1.0) * 100.0
+                else:
+                    actual_return = None
+                try:
+                    expected_return = float(rule.get("expectedCumulativeReturnPct"))
+                    tolerance = max(0.0, float(rule.get("tolerancePctPoints") or 0.01))
+                except (TypeError, ValueError):
+                    expected_return = None
+                    tolerance = 0.01
+                sample.update(
+                    {
+                        "期望累计收益_百分比": expected_return,
+                        "实际累计收益_百分比": round(actual_return, 6) if actual_return is not None else None,
+                        "允许误差_百分点": tolerance,
+                        "实际基准成分代码": sorted(actual_codes),
+                        "实际复合方法": actual_method,
+                    }
+                )
+                if expected_return is None or actual_return is None or abs(actual_return - expected_return) > tolerance:
+                    reasons.append("基准累计收益与已核验官方点位不一致")
+        if reasons:
+            sample["问题"] = "；".join(reasons)
+            checkpoint_failures.append(sample)
+    if checkpoint_failures:
+        add_issue(
+            issues,
+            "error",
+            "page.strategy_details.benchmark_checkpoint",
+            "且慢精确基准曲线与官方核验点不一致",
+            "结构化指数代码、逐日再平衡方法和已核验官方累计收益点必须同时一致。",
+            checkpoint_failures[:50],
+            rule_id="QIEMAN_EXACT_BENCHMARK_CURVE_CHECKPOINT_MISMATCH",
+        )
+
+    contribution_failures: list[dict[str, Any]] = []
+    for rule in field_rules.get("strategyContributionCurveRequirements") or []:
+        if not isinstance(rule, dict):
+            continue
+        strategy_id = str(rule.get("strategyId") or "").strip()
+        if not strategy_id:
+            continue
+        path, detail, load_error = load_detail(strategy_id)
+        reasons: list[str] = []
+        qualified_events = 0
+        if load_error or not detail:
+            reasons.append(load_error or "详情包内容为空")
+        else:
+            curves = detail.get("contributionCurves")
+            curves = curves if isinstance(curves, dict) else {}
+            required_status = str(rule.get("requiredEvaluationStatus") or "").strip()
+            try:
+                min_points = max(2, int(rule.get("minPointsPerSide") or 2))
+            except (TypeError, ValueError):
+                min_points = 2
+            for event in curves.values():
+                if not isinstance(event, dict):
+                    continue
+                if required_status and str(event.get("评估状态") or "") != required_status:
+                    continue
+                series = event.get("series") if isinstance(event.get("series"), dict) else {}
+                before = series.get("调仓前仓位模拟") if isinstance(series.get("调仓前仓位模拟"), dict) else {}
+                after = series.get("调仓后仓位实际") if isinstance(series.get("调仓后仓位实际"), dict) else {}
+                before_points = before.get("points") if isinstance(before.get("points"), list) else []
+                after_points = after.get("points") if isinstance(after.get("points"), list) else []
+                if len(before_points) >= min_points and len(after_points) >= min_points:
+                    qualified_events += 1
+            try:
+                min_events = max(1, int(rule.get("minEventCount") or 1))
+            except (TypeError, ValueError):
+                min_events = 1
+            if qualified_events < min_events:
+                reasons.append(f"可核验调仓贡献事件仅 {qualified_events} 个，最低要求 {min_events} 个")
+        if reasons:
+            contribution_failures.append(
+                {
+                    "统一策略ID": strategy_id,
+                    "详情包": str(path or ""),
+                    "可核验调仓贡献事件数": qualified_events,
+                    "问题": "；".join(reasons),
+                }
+            )
+    if contribution_failures:
+        add_issue(
+            issues,
+            "error",
+            "page.strategy_details.contribution_curves",
+            "且慢官方调仓贡献曲线缺失",
+            "具备完整官方调前/调后权重及足够基金净值覆盖的策略必须生成可核验贡献曲线，禁止用插值替代。",
+            contribution_failures[:50],
+            rule_id="QIEMAN_OFFICIAL_REBALANCE_CONTRIBUTION_CURVE_MISSING",
+        )
 
 
 def write_reports(output_dir: Path, report: dict[str, Any]) -> None:
@@ -4134,6 +4687,119 @@ def audit_ttfund_incremental_plan_cache_freshness(issues: list[dict[str, Any]]) 
             "详情失败时生成的布局缓存不得刷新详情冷却期；应仅以有效 strategyDetailPageData 响应缓存判定完整性和新鲜度。",
             {"plan_path": str(path), "mismatches": mismatches},
             rule_id="TTFUND_DETAIL_CACHE_FRESHNESS_SOURCE_INVALID",
+        )
+
+    selection = payload.get("selection") if isinstance(payload, dict) else None
+    selection = selection if isinstance(selection, dict) else {}
+    rolling_keys = {
+        "mandatory_detail_ids",
+        "routine_detail_selected_ids",
+        "routine_detail_deferred_ids",
+        "strategy_work_bundles",
+    }
+    if not rolling_keys.issubset(selection):
+        add_issue(
+            issues,
+            "warn",
+            "ttfund_incremental_plan.strategy_work_bundle",
+            "天天详情计划仍是优化前的阶段级格式",
+            "最近一次生产计划早于单策略任务包优化；程序已更新，但需在下一次真实增量计划生成后复核滚动额度、任务包唯一性和字段级断点。",
+            {"plan_path": str(path), "missing_fields": sorted(rolling_keys - set(selection))},
+            rule_id="TTFUND_DETAIL_ROLLING_WORK_BUNDLE_INVALID",
+        )
+        return
+
+    bundle_mismatches: list[dict[str, Any]] = []
+
+    def string_ids(name: str) -> list[str]:
+        value = selection.get(name)
+        if not isinstance(value, list):
+            bundle_mismatches.append({"scope": f"{name}_type", "actual": type(value).__name__})
+            return []
+        result = [str(item).strip() for item in value if str(item).strip()]
+        if len(result) != len(set(result)):
+            bundle_mismatches.append({"scope": f"{name}_duplicate", "total": len(result)})
+        return result
+
+    mandatory_ids = string_ids("mandatory_detail_ids")
+    routine_ids = string_ids("routine_detail_selected_ids")
+    deferred_ids = string_ids("routine_detail_deferred_ids")
+    selected_detail_ids = string_ids("selected_detail_ids")
+    piggyback_ids = string_ids("routine_detail_piggyback_ids")
+    current_holding_ids = string_ids("selected_current_holding_ids")
+    history_ids = string_ids("selected_history_ids")
+    routine_limit = selection.get("detail_refresh_limit")
+    stopped_cooldown = selection.get("stopped_detail_cooldown_days")
+    if not isinstance(routine_limit, int) or not 60 <= routine_limit <= 80:
+        bundle_mismatches.append(
+            {"scope": "routine_detail_limit", "expected": "60..80", "actual": routine_limit}
+        )
+    elif len(routine_ids) > routine_limit:
+        bundle_mismatches.append(
+            {"scope": "routine_detail_limit_exceeded", "limit": routine_limit, "actual": len(routine_ids)}
+        )
+    if not isinstance(stopped_cooldown, int) or stopped_cooldown < 30:
+        bundle_mismatches.append(
+            {"scope": "stopped_detail_cooldown", "expected_minimum": 30, "actual": stopped_cooldown}
+        )
+    if set(mandatory_ids) & set(routine_ids):
+        bundle_mismatches.append({"scope": "mandatory_routine_overlap"})
+    if set(selected_detail_ids) != set(mandatory_ids) | set(routine_ids):
+        bundle_mismatches.append(
+            {
+                "scope": "selected_detail_partition",
+                "selected_total": len(selected_detail_ids),
+                "mandatory_total": len(mandatory_ids),
+                "routine_total": len(routine_ids),
+            }
+        )
+    if not set(piggyback_ids).issubset(set(routine_ids)):
+        bundle_mismatches.append({"scope": "piggyback_not_in_routine_selection"})
+    if set(routine_ids) & set(deferred_ids):
+        bundle_mismatches.append({"scope": "selected_deferred_overlap"})
+
+    bundles = selection.get("strategy_work_bundles")
+    bundles = bundles if isinstance(bundles, list) else []
+    if selection.get("strategy_work_bundle_total") != len(bundles):
+        bundle_mismatches.append(
+            {
+                "scope": "work_bundle_total",
+                "declared": selection.get("strategy_work_bundle_total"),
+                "actual": len(bundles),
+            }
+        )
+    bundle_by_id: dict[str, dict[str, Any]] = {}
+    for row in bundles:
+        if not isinstance(row, dict):
+            bundle_mismatches.append({"scope": "work_bundle_row_type"})
+            continue
+        strategy_id = str(row.get("strategy_id") or "").strip()
+        if not strategy_id or strategy_id in bundle_by_id:
+            bundle_mismatches.append({"scope": "work_bundle_strategy_id", "strategy_id": strategy_id})
+            continue
+        bundle_by_id[strategy_id] = row
+    for strategy_id in selected_detail_ids:
+        bundle = bundle_by_id.get(strategy_id) or {}
+        required = bundle.get("required_fields") if isinstance(bundle.get("required_fields"), dict) else {}
+        if not required.get("detail") or not bundle.get("deep_detail_refresh"):
+            bundle_mismatches.append({"scope": "detail_bundle_missing", "strategy_id": strategy_id})
+    for field, ids in (("current_holding", current_holding_ids), ("rebalance_history", history_ids)):
+        for strategy_id in ids:
+            bundle = bundle_by_id.get(strategy_id) or {}
+            required = bundle.get("required_fields") if isinstance(bundle.get("required_fields"), dict) else {}
+            if not required.get(field):
+                bundle_mismatches.append(
+                    {"scope": "required_field_missing", "strategy_id": strategy_id, "field": field}
+                )
+    if bundle_mismatches:
+        add_issue(
+            issues,
+            "error",
+            "ttfund_incremental_plan.strategy_work_bundle",
+            "天天详情滚动刷新或单策略任务包不符合约束",
+            "常规详情必须共享 60 至 80 个额度并与强制任务分离；同一策略只能有一个任务包，且详情、基准、仓位和历史按字段验证与断点续跑。",
+            {"plan_path": str(path), "mismatches": bundle_mismatches[:100]},
+            rule_id="TTFUND_DETAIL_ROLLING_WORK_BUNDLE_INVALID",
         )
 
 
@@ -4642,6 +5308,324 @@ def audit_gfsec_fima_position_history_preview(
         )
 
 
+def audit_rebalance_quality_freshness(
+    issues: list[dict[str, Any]],
+    db_path: Path,
+    field_rules: dict[str, Any],
+) -> None:
+    rule = field_rules.get("rebalanceQualityFreshnessCheck")
+    if not isinstance(rule, dict) or rule.get("enabled") is False:
+        return
+    rule_id = str(rule.get("ruleId") or "REBALANCE_QUALITY_FACTS_STALE")
+    algorithm_version = str(
+        rule.get("algorithmVersion") or "standard_rebalance_asset_dual_nav_v10_all_channels_20260528"
+    ).strip()
+    excluded_channels = sorted(
+        {str(value).strip() for value in rule.get("excludedChannelIds") or ["qieman"] if str(value).strip()}
+    )
+    if not db_path.is_file():
+        return
+    required_tables = {
+        "策略调仓事件",
+        "策略模拟净值区间",
+        "调仓质量事件分析",
+        "调仓质量基金明细",
+        "调仓质量构建状态",
+    }
+    uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        tables = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing_tables = sorted(required_tables - tables)
+        if missing_tables:
+            add_issue(
+                issues,
+                "error",
+                "sqlite.rebalance_quality",
+                "调仓质量事实表缺失",
+                f"缺少调仓质量闭环所需表：{', '.join(missing_tables)}。",
+                {"missingTables": missing_tables},
+                rule_id=rule_id,
+            )
+            return
+        channel_filter = ""
+        channel_params: list[Any] = []
+        if excluded_channels:
+            placeholders = ",".join("?" for _ in excluded_channels)
+            channel_filter = f' AND "渠道ID" NOT IN ({placeholders})'
+            channel_params.extend(excluded_channels)
+        source_sql = f'''
+            SELECT DISTINCT "调仓事件ID", "统一策略ID", "渠道ID", "调仓日期"
+            FROM "策略模拟净值区间"
+            WHERE "算法版本"=? AND "调仓事件ID" IS NOT NULL AND TRIM("调仓事件ID")<>''
+              {channel_filter}
+        '''
+        source_params: list[Any] = [algorithm_version, *channel_params]
+        source_stats = conn.execute(
+            f'SELECT COUNT(*) AS row_count, MAX("调仓日期") AS latest_date FROM ({source_sql})',
+            source_params,
+        ).fetchone()
+        quality_stats = conn.execute(
+            'SELECT COUNT(*) AS row_count, MAX("调仓日期") AS latest_date FROM "调仓质量事件分析"'
+        ).fetchone()
+        missing_rows = [
+            dict(row)
+            for row in conn.execute(
+                f'''
+                WITH source AS ({source_sql})
+                SELECT source.* FROM source
+                LEFT JOIN "调仓质量事件分析" q ON q."调仓事件ID"=source."调仓事件ID"
+                WHERE q."调仓事件ID" IS NULL
+                ORDER BY source."调仓日期" DESC, source."统一策略ID"
+                LIMIT 50
+                ''',
+                source_params,
+            )
+        ]
+        orphan_rows = [
+            dict(row)
+            for row in conn.execute(
+                f'''
+                WITH source AS ({source_sql})
+                SELECT q."调仓事件ID", q."统一策略ID", q."渠道ID", q."调仓日期"
+                FROM "调仓质量事件分析" q
+                LEFT JOIN source ON source."调仓事件ID"=q."调仓事件ID"
+                WHERE source."调仓事件ID" IS NULL
+                ORDER BY q."调仓日期" DESC, q."统一策略ID"
+                LIMIT 50
+                ''',
+                source_params,
+            )
+        ]
+        quality_core_orphans = int(
+            conn.execute(
+                '''
+                SELECT COUNT(*) FROM "调仓质量事件分析" q
+                LEFT JOIN "策略调仓事件" e ON e."调仓事件ID"=q."调仓事件ID"
+                WHERE e."调仓事件ID" IS NULL
+                '''
+            ).fetchone()[0]
+            or 0
+        )
+        fund_detail_orphans = int(
+            conn.execute(
+                '''
+                SELECT COUNT(*) FROM "调仓质量基金明细" f
+                LEFT JOIN "调仓质量事件分析" q ON q."调仓事件ID"=f."调仓事件ID"
+                WHERE q."调仓事件ID" IS NULL
+                '''
+            ).fetchone()[0]
+            or 0
+        )
+        status = conn.execute(
+            'SELECT * FROM "调仓质量构建状态" WHERE "构建ID"=?', ("latest",)
+        ).fetchone()
+        source_count = int(source_stats["row_count"] or 0)
+        quality_count = int(quality_stats["row_count"] or 0)
+        source_latest = str(source_stats["latest_date"] or "")
+        quality_latest = str(quality_stats["latest_date"] or "")
+        reasons: list[str] = []
+        if source_count != quality_count:
+            reasons.append(f"源事件数{source_count}与质量事件数{quality_count}不一致")
+        if source_latest != quality_latest:
+            reasons.append(f"源最新调仓日{source_latest or '空'}与质量最新调仓日{quality_latest or '空'}不一致")
+        if missing_rows:
+            reasons.append(f"至少{len(missing_rows)}个当前事件缺少质量事实")
+        if orphan_rows:
+            reasons.append(f"至少{len(orphan_rows)}个质量事件不属于当前模拟区间")
+        if quality_core_orphans:
+            reasons.append(f"{quality_core_orphans}个质量事件无法关联当前调仓事件")
+        if fund_detail_orphans:
+            reasons.append(f"{fund_detail_orphans}条质量基金明细缺少父事件")
+        if status is None:
+            reasons.append("缺少latest构建状态")
+        else:
+            status_excluded = set()
+            try:
+                status_excluded = {str(value) for value in json.loads(status["排除渠道JSON"] or "[]")}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                reasons.append("构建状态的排除渠道JSON无法解析")
+            if str(status["算法版本"] or "") != algorithm_version:
+                reasons.append("构建状态算法版本与规则不一致")
+            if status_excluded != set(excluded_channels):
+                reasons.append("构建状态排除渠道与规则不一致")
+            if int(status["源事件数"] or 0) != source_count or int(status["质量事件数"] or 0) != quality_count:
+                reasons.append("构建状态计数与当前事实不一致")
+            if str(status["源最新调仓日期"] or "") != source_latest or str(status["质量最新调仓日期"] or "") != quality_latest:
+                reasons.append("构建状态最新调仓日期与当前事实不一致")
+            if int(status["缺失事件数"] or 0) or int(status["孤立事件数"] or 0):
+                reasons.append("构建状态记录了缺失或孤立事件")
+        if reasons:
+            add_issue(
+                issues,
+                "error",
+                "sqlite.rebalance_quality",
+                "调仓质量事实滞后于当前调仓事件",
+                "；".join(reasons) + "。",
+                {
+                    "algorithmVersion": algorithm_version,
+                    "excludedChannels": excluded_channels,
+                    "sourceEventCount": source_count,
+                    "qualityEventCount": quality_count,
+                    "sourceLatestRebalanceDate": source_latest,
+                    "qualityLatestRebalanceDate": quality_latest,
+                    "missingEvents": missing_rows,
+                    "orphanedEvents": orphan_rows,
+                    "qualityCoreOrphanCount": quality_core_orphans,
+                    "fundDetailOrphanCount": fund_detail_orphans,
+                },
+                rule_id=rule_id,
+            )
+
+
+def audit_rebalance_contribution_curve_coverage(
+    issues: list[dict[str, Any]],
+    db_path: Path,
+    site_dir: Path,
+    field_rules: dict[str, Any],
+) -> None:
+    rule = field_rules.get("rebalanceContributionCurveCoverageCheck")
+    if not isinstance(rule, dict) or rule.get("enabled") is False:
+        return
+    rule_id = str(rule.get("ruleId") or "REBALANCE_CONTRIBUTION_CURVE_MISSING")
+    excluded_channels = sorted(
+        {str(value).strip() for value in rule.get("excludedChannelIds") or ["qieman"] if str(value).strip()}
+    )
+    required_status = str(rule.get("requiredEvaluationStatus") or "可评估").strip()
+    try:
+        min_points = max(2, int(rule.get("minPointsPerSide") or 2))
+    except (TypeError, ValueError):
+        min_points = 2
+    if not db_path.is_file() or not site_dir.is_dir():
+        return
+
+    filters = ['"评估状态"=?']
+    params: list[Any] = [required_status]
+    if excluded_channels:
+        placeholders = ",".join("?" for _ in excluded_channels)
+        filters.append(f'"渠道ID" NOT IN ({placeholders})')
+        params.extend(excluded_channels)
+    where_clause = "WHERE " + " AND ".join(filters)
+    uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        tables = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "调仓质量事件分析" not in tables:
+            return
+        expected_rows = [
+            dict(row)
+            for row in conn.execute(
+                f'''
+                WITH ranked AS (
+                    SELECT "调仓事件ID", "统一策略ID", "策略名称", "渠道ID", "调仓日期", "评估状态",
+                           ROW_NUMBER() OVER (
+                               PARTITION BY "统一策略ID"
+                               ORDER BY "调仓日期" DESC, "调仓事件ID" DESC
+                           ) AS rn
+                    FROM "调仓质量事件分析"
+                    {where_clause}
+                )
+                SELECT "调仓事件ID", "统一策略ID", "策略名称", "渠道ID", "调仓日期"
+                FROM ranked
+                WHERE rn=1
+                ORDER BY "调仓日期" DESC, "统一策略ID"
+                ''',
+                params,
+            )
+        ]
+
+    # This is a page-coverage rule. Historical strategies retained in the
+    # database but absent from the published strategy universe intentionally
+    # have no public detail page and are outside this check's scope.
+    summary_path = site_dir / "data" / "basic_summary_core.js"
+    if summary_path.is_file():
+        try:
+            summary = read_js_object(summary_path)
+            strategies = summary.get("strategies") if isinstance(summary, dict) else None
+            if isinstance(strategies, list):
+                published_ids = {
+                    str(row.get("统一策略ID") or "").strip()
+                    for row in strategies
+                    if isinstance(row, dict) and str(row.get("统一策略ID") or "").strip()
+                }
+                expected_rows = [
+                    row for row in expected_rows if str(row.get("统一策略ID") or "").strip() in published_ids
+                ]
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            # The general page-pack audit owns malformed summary files. Keep
+            # the unfiltered candidates here so this rule never hides errors.
+            pass
+
+    failures: list[dict[str, Any]] = []
+
+    def valid_point_count(points: Any) -> int:
+        dates: set[str] = set()
+        for point in points if isinstance(points, list) else []:
+            if not isinstance(point, dict):
+                continue
+            point_date = str(point.get("日期") or "").strip()
+            value = point.get("数值")
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if point_date and math.isfinite(numeric_value):
+                dates.add(point_date)
+        return len(dates)
+
+    for row in expected_rows:
+        strategy_id = str(row["统一策略ID"] or "")
+        event_id = str(row["调仓事件ID"] or "")
+        detail_path = strategy_detail_path(site_dir, strategy_id)
+        failure = dict(row)
+        failure["详情包"] = str(detail_path or "")
+        if detail_path is None:
+            failure["问题"] = "策略详情包缺失"
+            failures.append(failure)
+            continue
+        try:
+            detail = read_js_object(detail_path)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            failure["问题"] = f"策略详情包解析失败: {exc}"
+            failures.append(failure)
+            continue
+        curves = detail.get("contributionCurves") if isinstance(detail, dict) else None
+        event_curve = curves.get(event_id) if isinstance(curves, dict) else None
+        if not isinstance(event_curve, dict):
+            failure["问题"] = "最新可评估事件没有同事件ID的调仓贡献曲线"
+            failures.append(failure)
+            continue
+        series = event_curve.get("series") if isinstance(event_curve.get("series"), dict) else {}
+        before = series.get("调仓前仓位模拟") if isinstance(series.get("调仓前仓位模拟"), dict) else {}
+        after = series.get("调仓后仓位实际") if isinstance(series.get("调仓后仓位实际"), dict) else {}
+        before_count = valid_point_count(before.get("points"))
+        after_count = valid_point_count(after.get("points"))
+        if before_count < min_points or after_count < min_points:
+            failure["调仓前曲线点数"] = before_count
+            failure["调仓后曲线点数"] = after_count
+            failure["问题"] = f"曲线两侧各需至少{min_points}个不同日期的有效点"
+            failures.append(failure)
+    if failures:
+        add_issue(
+            issues,
+            "error",
+            "page.strategy_details.contribution_curves",
+            "最新可评估调仓事件的贡献曲线缺失",
+            (
+                f"{len(failures)}/{len(expected_rows)}个最新可评估事件未形成同事件ID、"
+                f"调前调后各至少{min_points}点的页面曲线。"
+            ),
+            {
+                "requiredEvaluationStatus": required_status,
+                "excludedChannels": excluded_channels,
+                "expectedEventCount": len(expected_rows),
+                "failureCount": len(failures),
+                "failures": failures[:50],
+            },
+            rule_id=rule_id,
+        )
+
+
 def main() -> None:
     global RULE_CATALOG, DISABLED_CHANNEL_IDS
     args = parse_args()
@@ -4660,6 +5644,8 @@ def main() -> None:
     output_dir = args.output_root / datetime.now().astimezone().strftime("%Y-%m-%d") / run_id
     issues: list[dict[str, Any]] = []
     audit_sqlite(issues, args.db_path)
+    audit_rebalance_quality_freshness(issues, args.db_path, field_rules)
+    audit_rebalance_contribution_curve_coverage(issues, args.db_path, args.site_dir, field_rules)
     audit_strategy_parent_child_relationships(issues, args.db_path, args.site_dir)
     audit_core_fact_semantics(issues, args.db_path)
     audit_public_fund_benchmark_buckets(issues, args.db_path)
@@ -4683,6 +5669,7 @@ def main() -> None:
     audit_gfsec_legacy_page_scope(issues, args.site_dir)
     audit_page_strategy_business_scope(issues, args.db_path, args.site_dir, args.field_rules_path)
     audit_system_field_rules(issues, args.db_path, args.site_dir, args.field_rules_path)
+    audit_strategy_detail_regression_rules(issues, args.site_dir, field_rules)
     audit_gfsec_fima_position_history_preview(issues, field_rules)
     audit_incremental_gap_summary(issues)
     audit_ttfund_incremental_plan_cache_freshness(issues)

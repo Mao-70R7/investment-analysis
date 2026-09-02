@@ -7,6 +7,7 @@ const path = require("node:path");
 const {
   collectStrategy,
   fetchPaged,
+  isReusableCompletedResult,
   resultFromFile,
   runMainWithKeepAlive,
 } = require("../collect_qieman_signed_history_catalog");
@@ -123,12 +124,34 @@ function testIncompleteHistoryFileIsRetried() {
   }
 }
 
+function testCompletedCheckpointIsReusedOnlyWhenRawPairIsValid() {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "qieman-resume-pair-test-"));
+  try {
+    const navDir = path.join(temporary, "raw", "nav");
+    const historyDir = path.join(temporary, "raw", "regular_adjustments");
+    fs.mkdirSync(navDir, { recursive: true });
+    fs.mkdirSync(historyDir, { recursive: true });
+    fs.writeFileSync(path.join(navDir, "ZH_TEST.json"), JSON.stringify([]));
+    fs.writeFileSync(
+      path.join(historyDir, "ZH_TEST.json"),
+      JSON.stringify({ complete: true, retainedBaseline: true, content: [] }),
+    );
+    const result = { strategyCode: "ZH_TEST", complete: true };
+    assert.equal(isReusableCompletedResult(result, temporary), true);
+    fs.rmSync(path.join(historyDir, "ZH_TEST.json"));
+    assert.equal(isReusableCompletedResult(result, temporary), false);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await testKeepAlive();
   await testConfiguredPageSizeControlsPagingBoundary();
   await testHistoryTimeoutRetainsOnlyCompleteBaseline();
   testIncompleteHistoryFileIsRetried();
-  process.stdout.write("qieman history collector tests: 4 passed\n");
+  testCompletedCheckpointIsReusedOnlyWhenRawPairIsValid();
+  process.stdout.write("qieman history collector tests: 5 passed\n");
 }
 
 main().catch((error) => {

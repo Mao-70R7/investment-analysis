@@ -19,6 +19,11 @@ from node_runner import (  # noqa: E402
     atomic_json,
     release_resource_lock,
 )
+from progress import (  # noqa: E402
+    build_pipeline_status,
+    format_duration,
+    render_pipeline_status,
+)
 from state_store import StateStore, now_text  # noqa: E402
 from workspace import WorkspaceContext, load_workspace  # noqa: E402
 
@@ -80,7 +85,10 @@ def load_pipeline(workspace: WorkspaceContext) -> tuple[dict[str, Any], list[dic
         manifest["_manifest_path"] = str(manifest_path)
         definitions.append(manifest)
     validate_pipeline(definitions)
-    return payload, definitions
+    ordered_definitions = stable_topological_order(definitions)
+    payload["_declaredNodeOrder"] = [str(node["id"]) for node in definitions]
+    payload["_executionNodeOrder"] = [str(node["id"]) for node in ordered_definitions]
+    return payload, ordered_definitions
 
 
 def validate_pipeline(nodes: list[dict[str, Any]]) -> None:
@@ -148,6 +156,48 @@ def validate_pipeline(nodes: list[dict[str, Any]]) -> None:
 
     for node_id in ids:
         visit(node_id)
+
+
+def stable_topological_order(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return dependency-safe nodes while preserving declared order where possible."""
+
+    remaining = list(nodes)
+    ordered: list[dict[str, Any]] = []
+    completed: set[str] = set()
+    while remaining:
+        ready_index = next(
+            (
+                index
+                for index, node in enumerate(remaining)
+                if set(node.get("dependencies") or []) <= completed
+            ),
+            None,
+        )
+        if ready_index is None:
+            unresolved = {
+                str(node.get("id") or ""): sorted(
+                    set(node.get("dependencies") or []) - completed
+                )
+                for node in remaining
+            }
+            raise ValueError(f"pipeline has unresolved dependencies: {unresolved}")
+        node = remaining.pop(ready_index)
+        ordered.append(node)
+        completed.add(str(node["id"]))
+    return ordered
+
+
+def validate_execution_order(nodes: list[dict[str, Any]]) -> None:
+    """Fail before the first node when a selected execution slice is incomplete."""
+
+    completed: set[str] = set()
+    for node in nodes:
+        missing = sorted(set(node.get("dependencies") or []) - completed)
+        if missing:
+            raise ValueError(
+                f"node {node['id']} execution plan is missing prior dependencies: {missing}"
+            )
+        completed.add(str(node["id"]))
 
 
 def classify_run(
@@ -277,6 +327,15 @@ class Orchestrator:
         self.events_path = self.run_dir / "events.jsonl"
         self.summary_path = self.run_dir / "summary.json"
         self.summary_md_path = self.run_dir / "summary.md"
+        self.resume_checkpoint_path = self.run_dir / "resume_checkpoint.json"
+        self.resume_checkpoint_history_path = self.run_dir / "resume_checkpoints.jsonl"
+        recovery_config = self.pipeline.get("recovery")
+        if not isinstance(recovery_config, dict):
+            recovery_config = {}
+        self.checkpoint_interval_seconds = max(
+            60,
+            int(recovery_config.get("checkpointIntervalSeconds") or 600),
+        )
         if resumed and existing is not None:
             metadata = json.loads(str(existing["metadata_json"] or "{}"))
             if bool(metadata.get("dryRun")) != bool(args.dry_run):
@@ -297,6 +356,7 @@ class Orchestrator:
             )
         self.runtime_context: dict[str, str] = {}
         self.results: dict[str, NodeExecution] = {}
+        self.active_plan_nodes: list[dict[str, Any]] = []
         self.started = time.monotonic()
 
     def close(self) -> None:
@@ -312,6 +372,114 @@ class Orchestrator:
         row = {"timestamp": now_text(), "runId": self.run_id, "event": name, **payload}
         with self.events_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def recovery_checkpoint(
+        self,
+        *,
+        reason: str,
+        manifest: dict[str, Any] | None = None,
+        attempt: int | None = None,
+        elapsed_seconds: int | None = None,
+        progress: dict[str, Any] | None = None,
+        pipeline_status: dict[str, Any] | None = None,
+        log_path: Path | None = None,
+        run_status: str = "running",
+    ) -> None:
+        """Persist one compact, atomic recovery marker without changing business data."""
+
+        nodes = list(self.active_plan_nodes)
+        reusable_statuses = {"success", "warn"}
+        next_resume_node = ""
+        for node in nodes:
+            result = self.results.get(str(node["id"]))
+            if result is None or result.status not in reusable_statuses:
+                next_resume_node = str(node["id"])
+                break
+        if manifest is not None:
+            next_resume_node = str(manifest.get("id") or next_resume_node)
+        processed_ids = list(self.results)
+        reusable_ids = [
+            node_id
+            for node_id, result in self.results.items()
+            if result.status in reusable_statuses
+        ]
+        current_node = None
+        if manifest is not None:
+            current_node = {
+                "id": str(manifest.get("id") or ""),
+                "name": str(manifest.get("name") or ""),
+                "phase": str(manifest.get("phase") or ""),
+                "attempt": attempt,
+                "elapsedSeconds": elapsed_seconds,
+                "supportsResume": bool(manifest.get("supportsResume")),
+                "progress": progress or {},
+                "logPath": str(log_path or ""),
+            }
+        if pipeline_status is None:
+            overall_percent = round(
+                len(processed_ids) * 100.0 / max(1, len(nodes)),
+                1,
+            )
+            pipeline_status = {
+                "completedNodes": len(processed_ids),
+                "totalNodes": len(nodes),
+                "overallPercent": overall_percent,
+            }
+        timestamp = now_text()
+        payload = {
+            "schemaVersion": 1,
+            "runId": self.run_id,
+            "mode": self.args.mode,
+            "status": run_status,
+            "updatedAt": timestamp,
+            "reason": reason,
+            "checkpointIntervalSeconds": self.checkpoint_interval_seconds,
+            "nextResumeNode": next_resume_node if run_status not in {"success", "success_with_warning"} else "",
+            "processedNodeIds": processed_ids,
+            "reusableNodeIds": reusable_ids,
+            "progress": pipeline_status,
+            "currentNode": current_node,
+            "recoverySemantics": {
+                "completedNodes": "续作时重新校验 node_result 和产物后复用",
+                "currentNode": "优先使用节点自身检查点；无内部检查点时只重启当前节点",
+            },
+        }
+        atomic_json(self.resume_checkpoint_path, payload)
+        history_row = {
+            "timestamp": timestamp,
+            "runId": self.run_id,
+            "reason": reason,
+            "status": run_status,
+            "nextResumeNode": payload["nextResumeNode"],
+            "processedNodes": len(processed_ids),
+            "totalNodes": len(nodes),
+            "overallPercent": pipeline_status.get("overallPercent"),
+            "currentNode": current_node.get("id") if current_node else "",
+            "attempt": attempt,
+        }
+        with self.resume_checkpoint_history_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(history_row, ensure_ascii=False) + "\n")
+        self.event(
+            "recovery_checkpoint",
+            reason=reason,
+            nextResumeNode=payload["nextResumeNode"],
+            currentNode=history_row["currentNode"],
+            overallPercent=history_row["overallPercent"],
+        )
+        if reason == "interval":
+            self.console(
+                f"[10分钟恢复点] 已保存；中断后建议从 {payload['nextResumeNode'] or '收尾'} 继续，"
+                f"恢复点={self.resume_checkpoint_path}"
+            )
+
+    def safe_recovery_checkpoint(self, **kwargs: Any) -> None:
+        try:
+            self.recovery_checkpoint(**kwargs)
+        except Exception as exc:  # noqa: BLE001 - checkpoint metadata must never stop the update.
+            self.console(
+                "[恢复点警告] 恢复点写入失败，主任务继续："
+                f"{type(exc).__name__}: {exc}"
+            )
 
     def selected_nodes(self) -> list[dict[str, Any]]:
         if self.args.mode in {"daily", "resume"}:
@@ -352,13 +520,46 @@ class Orchestrator:
 
     def run(self) -> int:
         nodes = self.selected_nodes()
+        self.active_plan_nodes = list(nodes)
+        if not hasattr(self, "checkpoint_interval_seconds"):
+            self.checkpoint_interval_seconds = 600
+        if not hasattr(self, "resume_checkpoint_path"):
+            self.resume_checkpoint_path = self.run_dir / "resume_checkpoint.json"
+        if not hasattr(self, "resume_checkpoint_history_path"):
+            self.resume_checkpoint_history_path = self.run_dir / "resume_checkpoints.jsonl"
+        standalone = self.args.mode == "node" and getattr(self.args, "standalone", False)
+        if not standalone:
+            validate_execution_order(nodes)
         self.console("=" * 78)
         self.console(f"天眼系统节点调度启动，run_id={self.run_id}，mode={self.args.mode}")
         self.console(f"计划节点：{len(nodes)}；日志：{self.run_dir}")
+        declared_order = list(self.pipeline.get("_declaredNodeOrder") or [])
+        execution_order = list(self.pipeline.get("_executionNodeOrder") or [])
+        if declared_order and declared_order != execution_order:
+            moved = [
+                node_id
+                for index, node_id in enumerate(execution_order)
+                if index >= len(declared_order) or declared_order[index] != node_id
+            ]
+            self.console(
+                "[依赖顺序修正] 已在启动阶段按 DAG 自动调整节点顺序："
+                + ", ".join(moved)
+            )
         if self.args.mode == "node" and getattr(self.args, "standalone", False):
             self.console("[单节点诊断] 已跳过依赖节点，仅验证目标节点；本次结果不会进入主库或发布流程。")
         self.console("=" * 78)
         self.event("run_started", mode=self.args.mode, nodes=[node["id"] for node in nodes])
+        duration_estimates = {
+            str(node["id"]): estimate
+            for node in nodes
+            if (
+                estimate := self.state.recent_node_duration_seconds(str(node["id"]))
+            ) is not None
+        }
+        self.console(
+            f"[耗时基线] 最近真实成功批次覆盖 {len(duration_estimates)}/{len(nodes)} 个节点；"
+            "无样本节点使用同批节点中位耗时，仍无依据时显示待估算。"
+        )
         runner = NodeRunner(
             self.workspace,
             self.state,
@@ -367,6 +568,11 @@ class Orchestrator:
             self.console,
             self.event,
             dry_run=self.args.dry_run,
+            plan_nodes=nodes,
+            duration_estimates=duration_estimates,
+            plan_started_monotonic=self.started,
+            recovery_checkpoint=self.safe_recovery_checkpoint,
+            checkpoint_interval_seconds=self.checkpoint_interval_seconds,
         )
         completed = 0
         resume_from_node = (
@@ -386,8 +592,9 @@ class Orchestrator:
         publish_failures: list[str] = []
         channel_failures: list[str] = []
         self.state.update_run(self.run_id, status="running", current_stage=None, error=None)
+        self.safe_recovery_checkpoint(reason="run_started")
         try:
-            for node in nodes:
+            for node_index, node in enumerate(nodes):
                 if restoring_upstream and node["id"] == resume_from_node:
                     restoring_upstream = False
                 standalone_target = (
@@ -405,12 +612,33 @@ class Orchestrator:
                     dependency: self.results[dependency].output_fingerprint
                     for dependency in required_dependencies
                 }
-                percent = int(completed * 100 / max(1, len(nodes)))
                 elapsed_now = int(time.monotonic() - self.started)
-                eta = int(elapsed_now / completed * (len(nodes) - completed)) if completed else None
                 self.console(
-                    f"[总进度 {percent:3d}% | 已完成 {completed}/{len(nodes)} | 总耗时 {elapsed_now}s | "
-                    f"预计剩余 {eta if eta is not None else '待计算'}s] 当前节点：{node['id']} {node['name']}"
+                    render_pipeline_status(
+                        "整体进度",
+                        node,
+                        build_pipeline_status(
+                            nodes,
+                            node_index,
+                            None,
+                            node_elapsed_seconds=0,
+                            total_elapsed_seconds=elapsed_now,
+                            duration_estimates=duration_estimates,
+                        ),
+                    )
+                )
+                self.safe_recovery_checkpoint(
+                    reason="node_started",
+                    manifest=node,
+                    elapsed_seconds=0,
+                    pipeline_status=build_pipeline_status(
+                        nodes,
+                        node_index,
+                        None,
+                        node_elapsed_seconds=0,
+                        total_elapsed_seconds=elapsed_now,
+                        duration_estimates=duration_estimates,
+                    ),
                 )
                 if restoring_upstream:
                     execution = runner.restore_previous(node)
@@ -461,6 +689,7 @@ class Orchestrator:
                     returncode=execution.returncode,
                     resultPath=str(execution.result_path),
                 )
+                self.safe_recovery_checkpoint(reason="node_finished")
             final_status, critical_failures, publish_failures, channel_failures = classify_run(
                 nodes,
                 self.results,
@@ -491,6 +720,11 @@ class Orchestrator:
             "status": final_status,
             "finishedAt": now_text(),
             "elapsedSeconds": elapsed,
+            "progress": {
+                "completedNodes": completed,
+                "totalNodes": len(nodes),
+                "overallPercent": round(completed * 100.0 / max(1, len(nodes)), 1),
+            },
             "completedNodes": list(self.results),
             "nodeResults": {key: str(value.result_path) for key, value in self.results.items()},
             "runtimeContext": self.runtime_context,
@@ -589,8 +823,30 @@ class Orchestrator:
             finished_at=now_text(),
             error=error,
         )
+        self.safe_recovery_checkpoint(reason="run_finished", run_status=final_status)
         self.event("run_finished", status=final_status, error=error)
-        self.console(f"[运行结束] 状态={final_status}，完成节点={completed}/{len(nodes)}，耗时={elapsed}s")
+        status_counts = {
+            status: sum(1 for result in self.results.values() if result.status == status)
+            for status in ("success", "warn", "failed", "interrupted", "skipped")
+        }
+        self.console(
+            f"[最终结果] 状态={final_status} | 整体完成度="
+            f"{completed * 100.0 / max(1, len(nodes)):.1f}%（{completed}/{len(nodes)}节点） | "
+            f"成功={status_counts['success']} | 警告={status_counts['warn']} | "
+            f"失败={status_counts['failed'] + status_counts['interrupted']} | "
+            f"跳过={status_counts['skipped']} | 总耗时={format_duration(elapsed)}"
+        )
+        delivery_status = {
+            node_id: self.results[node_id].status if node_id in self.results else "未执行"
+            for node_id in ("data_audit", "database_backup", "publish", "pages_verify")
+        }
+        self.console(
+            "[交付闭环] "
+            f"数据稽核={delivery_status['data_audit']} | "
+            f"数据库备份={delivery_status['database_backup']} | "
+            f"发布={delivery_status['publish']} | "
+            f"在线版本验证={delivery_status['pages_verify']}"
+        )
         self.console(f"执行摘要：{self.summary_path}")
         if final_status in {"success", "success_with_warning"}:
             return 0

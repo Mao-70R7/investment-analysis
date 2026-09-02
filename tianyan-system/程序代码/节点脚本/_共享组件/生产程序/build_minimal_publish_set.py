@@ -39,7 +39,6 @@ PUBLIC_PAGES = (
     "strategy.html",
     "compare.html",
     "mixed-performance-scatter.html",
-    "fund.html",
     "ai-strategy.html",
 )
 
@@ -64,7 +63,6 @@ ASSET_FILES = (
     "strategy-detail.js",
     "insights.js",
     "mixed-performance-scatter.js",
-    "fund-detail.js",
     "ai-strategy-config.js",
     "ai-strategy.js",
 )
@@ -72,7 +70,6 @@ ASSET_FILES = (
 DATA_FILES = (
     "basic_summary_core.js",
     "fund_detail_pack.js",
-    "fund_economic_exposure_pack.js",
     "ai_semantic_index.js",
     "ai_topic_evidence_pack.js",
     "mixed_performance_scatter_pack.js",
@@ -97,7 +94,6 @@ PAGE_RENDERERS = {
     "strategy.html": "strategy-detail.js",
     "compare.html": "insights.js",
     "mixed-performance-scatter.html": "mixed-performance-scatter.js",
-    "fund.html": "fund-detail.js",
     "ai-strategy.html": "ai-strategy.js",
 }
 
@@ -114,7 +110,6 @@ PAGE_PACK_REPLACEMENTS = {
         "ai_semantic_index.js": None,
     },
     "mixed-performance-scatter.html": {"basic_summary_core.js": None},
-    "fund.html": {"ai_semantic_index.js": None},
     "ai-strategy.html": {"basic_summary_core.js": "strategy_list_pack.js"},
 }
 
@@ -139,9 +134,7 @@ SCRIPT_FILES = (
 )
 
 ACTIVE_PAGE = {
-    "compare.html": "strategies.html",
     "strategy.html": "strategies.html",
-    "fund.html": "mixed-performance-scatter.html",
 }
 
 FUND_RANK_PREFIXES = ("近一月", "近三月", "近6月", "近1年")
@@ -151,9 +144,8 @@ BLOCKING_ZERO_CHECKS = (
     "officialPerformanceImageInvalidReferenceCount",
     "officialPerformanceImageMissingSourceAssetCount",
     "officialPerformanceImageMissingPublishedAssetCount",
-    "brokenFundDetailCount",
-    "fundDetailParseErrorCount",
-    "fundDetailChartScaleErrorCount",
+    "forbiddenFundDetailPageCount",
+    "forbiddenFundDetailFileCount",
     "currentHoldingScaleErrorReferenceCount",
 )
 WARNING_ONLY_CHECKS = (
@@ -163,6 +155,11 @@ STRATEGY_FILTER_FACT_FIELDS = (
     "有基准",
     "有业绩走势",
     "有历史仓位",
+    "对客未终止",
+)
+INSTITUTION_DEFAULT_FILTER_FIELDS = (
+    "有基准",
+    "有业绩走势",
     "对客未终止",
 )
 
@@ -303,8 +300,12 @@ def validate_strategy_list_workflow(basic_root: Path) -> None:
             continue
         text = page.read_text(encoding="utf-8-sig")
         nav = re.search(r'<nav class="nav".*?</nav>', text, flags=re.DOTALL)
-        if nav and 'href="./compare.html"' in nav.group(0):
-            errors.append(f"{page_name} still exposes strategy comparison as a primary navigation item")
+        if not nav:
+            errors.append(f"{page_name} is missing the primary navigation")
+            continue
+        compare_link_count = nav.group(0).count('href="./compare.html"')
+        if compare_link_count != 0:
+            errors.append(f"{page_name} must not expose strategy comparison in primary navigation")
     if errors:
         raise RuntimeError("; ".join(errors))
 
@@ -428,7 +429,7 @@ def rewrite_strategy_detail_paths(payload: dict, version: str) -> dict:
 
 
 def validate_strategy_filter_facts(summary: dict) -> int:
-    """Ensure the default business scope can be evaluated from the list pack."""
+    """Ensure institution filters and its initial business scope are usable."""
 
     rows = summary.get("strategies") or []
     invalid_counts = {
@@ -441,17 +442,20 @@ def validate_strategy_filter_facts(summary: dict) -> int:
             "Strategy list business completeness facts are missing or invalid: "
             + json.dumps(invalid_counts, ensure_ascii=False, sort_keys=True)
         )
-    recommended_count = sum(
+    default_scope_count = sum(
         1
         for row in rows
-        if all(str(row.get(field) or "").strip() == "是" for field in STRATEGY_FILTER_FACT_FIELDS)
+        if all(
+            str(row.get(field) or "").strip() == "是"
+            for field in INSTITUTION_DEFAULT_FILTER_FIELDS
+        )
     )
-    if rows and recommended_count == 0:
+    if rows and default_scope_count == 0:
         raise RuntimeError(
-            "Strategy list default scope would be empty although strategy rows exist; "
+            "Institution overview default scope would be empty although strategy rows exist; "
             "check business completeness fact generation"
         )
-    return recommended_count
+    return default_scope_count
 
 
 def build_route_packs(source: Path, target: Path, version: str) -> None:
@@ -514,6 +518,15 @@ def build_route_packs(source: Path, target: Path, version: str) -> None:
         "window.__BASIC_DATA__ = window.__BASIC_DATA__ || {}; window.__BASIC_DATA__.fundDetailPack = ",
         fund_index,
     )
+
+
+def write_mixed_pack_without_fund_detail(source: Path, target: Path) -> None:
+    payload = assignment_payload(source, "window.__MIXED_PERFORMANCE_SCATTER_PACK__")
+    for row in payload.get("rows", []):
+        detail_url = str(row.get("detailUrl") or "")
+        if "fund.html" in detail_url:
+            row["detailUrl"] = ""
+    write_assignment(target, "window.__MIXED_PERFORMANCE_SCATTER_PACK__ = ", payload)
 
 
 def compact_entity_groups(source: Path) -> tuple[dict[str, object], dict[str, object]]:
@@ -1190,7 +1203,6 @@ def minimal_data_pack_manifest(basic_root: Path) -> dict[str, object]:
             "strategy.html": ["strategy_detail_index_pack.js.gz", "fund_index_pack.js.gz", "details/<分片>/<策略ID>.js.gz"],
             "compare.html": ["strategy_detail_index_pack.js.gz", "details/<分片>/<策略ID>.js.gz", "holding_snapshot_pack.js.gz（后台按需）"],
             "mixed-performance-scatter.html": ["mixed_performance_scatter_pack.js.gz"],
-            "fund.html": ["fund_detail_pack.js.gz", "fund_economic_exposure_pack.js.gz", "fund_details/<分片>/<基金代码>.js.gz"],
             "ai-strategy.html": ["strategy_list_pack.js.gz", "holding_snapshot_pack.js.gz", "fund_detail_pack.js.gz", "ai_semantic_index.js.gz", "ai_topic_evidence_pack.js.gz"],
         },
         "files": rows,
@@ -1334,7 +1346,7 @@ jobs:
 def readme_text(stats: dict[str, object]) -> str:
     return f"""# 最小发布集
 
-本目录只包含机构总览、策略列表、全市场产品排名、AI选策略，以及策略/基金详情下钻。策略对比不再作为一级菜单，由策略列表勾选产品后进入。
+本目录包含机构总览、策略列表、全市场产品排名、AI选策略，以及策略/基金详情下钻。策略对比保留为策略列表和 AI 选策略的下钻功能，不在一级菜单单独展示。
 
 ## 访问方式
 
@@ -1346,7 +1358,7 @@ http://127.0.0.1:7676/basic_data/institutions.html
 
 停止本机服务：双击根目录 `停止最小发布集.cmd`。
 
-不要用 `file://` 直接打开页面。策略、基金详情使用 gzip 按需加载，必须通过 HTTP 服务访问；GitHub Pages、Nginx、IIS 和本目录启动脚本都满足要求。
+不要用 `file://` 直接打开页面。策略详情使用 gzip 按需加载，必须通过 HTTP 服务访问；GitHub Pages、Nginx、IIS 和本目录启动脚本都满足要求。
 
 ## AI 模型
 
@@ -1364,8 +1376,7 @@ python -X utf8 scripts/serve_basic_data_site.py --host 0.0.0.0 --port 7676 --dir
 
 - 策略详情：{stats['strategyDetailCount']} 个。
 - 策略源数据完整标记：{stats['strategyDetailDeclaredCompleteCount']} 个；源数据不完整：{stats['strategyDetailDeclaredIncompleteCount']} 个，页面保留真实缺失状态，不做推测补齐。
-- 基金详情：{stats['fundDetailCount']} 个，覆盖全市场排名、策略当前持仓及历史持仓下钻。
-- 仅基础详情：{stats['fundBaseOnlyCount']} 个；对应源站没有增强详情时仍可展示基础信息，不伪造净值或基准。
+- 基金详情：最小发布集不发布基金详情页或单基金详情文件，避免文件数量超过托管上限；基金名称及策略持仓业务字段仍保留展示。
 - 策略对比仓位快照：只保留每只策略最新有效快照，原始 {stats['holdingSnapshotSourceRowCount']} 行，发布 {stats['holdingSnapshotPublishedRowCount']} 行；不影响当前配置对比和 AI 持仓筛选。
 - 机构总览：按销售渠道和投顾管理人查看策略规模、调仓走势、基准风险资产权重及数据完整性。
 - 详情文件采用确定性 gzip；必须通过 HTTP 服务访问，不能用 `file://` 直接打开。
@@ -1448,7 +1459,10 @@ def build_package(args: argparse.Namespace, target: Path) -> dict[str, Any]:
     for name in DATA_FILES:
         if name == "basic_summary_core.js":
             continue
-        copy_public_text(source / "data" / name, basic_target / "data" / name)
+        if name == "mixed_performance_scatter_pack.js":
+            write_mixed_pack_without_fund_detail(source / "data" / name, basic_target / "data" / name)
+        else:
+            copy_public_text(source / "data" / name, basic_target / "data" / name)
     build_route_packs(source, basic_target / "data", version)
     holding_snapshot_stats = write_latest_holding_snapshot_pack(
         source / "data" / "holding_snapshot_pack.js",
@@ -1508,25 +1522,21 @@ def build_package(args: argparse.Namespace, target: Path) -> dict[str, Any]:
     if missing_strategy_details:
         raise RuntimeError(f"Missing strategy detail files: {missing_strategy_details[:20]}")
 
-    selected_codes, selection_stats = selected_fund_codes(source, strategy_fund_codes)
-    fund_chart_stats, fund_chart_examples = fund_detail_chart_inventory(source, selected_codes)
-    if fund_chart_stats["fundDetailParseErrorCount"]:
-        raise RuntimeError("Fund detail parsing failed: " + "; ".join(fund_chart_examples["parseError"][:10]))
+    selection_stats = {
+        "rankingFundCount": 0,
+        "strategyHoldingFundCount": 0,
+        "strategyDetailReferencedFundCount": len(strategy_fund_codes),
+        "strategyDetailOnlyFundCount": len(strategy_fund_codes),
+        "selectedFundCount": 0,
+    }
     if strategy_inventory_stats["currentHoldingScaleErrorReferenceCount"]:
         raise RuntimeError(
             "Current holding period returns contain adjusted-NAV scale errors: "
             f"{strategy_inventory_stats['currentHoldingScaleErrorReferenceCount']} references"
         )
-    if fund_chart_stats["fundDetailChartScaleErrorCount"]:
-        raise RuntimeError(
-            "Fund detail charts contain adjusted-NAV scale errors: "
-            + ", ".join(fund_chart_examples["scaleError"][:20])
-        )
-    strategy_entity_data, fund_entity_data = compact_entity_groups(source)
+    strategy_entity_data, _fund_entity_data = compact_entity_groups(source)
     strategy_entity_fields = strategy_entity_data["fields"]
     strategy_entity_groups = strategy_entity_data["groups"]
-    fund_entity_fields = fund_entity_data["fields"]
-    fund_entity_groups = fund_entity_data["groups"]
     detail_raw = 0
     detail_compressed = 0
     strategy_count = 0
@@ -1545,41 +1555,17 @@ def build_package(args: argparse.Namespace, target: Path) -> dict[str, Any]:
 
     fund_count = 0
     missing_fund_codes: list[str] = []
-    for code in sorted(selected_codes):
-        detail = source / "data" / "fund_details" / f"{code}.js"
-        if not detail.is_file():
-            missing_fund_codes.append(code)
-            continue
-        raw, compressed = write_fund_detail(
-            detail,
-            basic_target / "data" / "fund_details" / shard_key(code) / f"{detail.name}.gz",
-            code,
-            fund_entity_fields,
-            fund_entity_groups.get(code, []),
-            args.compression_level,
-        )
-        detail_raw += raw
-        detail_compressed += compressed
-        fund_count += 1
-
-    write_sanitized_fund_manifest(
-        source / "data" / "fund_details" / "_manifest.js",
-        basic_target / "data" / "fund_details" / "_manifest.js",
-        fund_count,
-    )
-
-    fund_pack = assignment_payload(
-        source / "data" / "fund_detail_pack.js",
-        "window.__BASIC_DATA__.fundDetailPack",
-    )
-    base_fund_codes = {
-        str(row[0]).strip()
-        for row in fund_pack.get("funds", [])
-        if isinstance(row, list) and row and str(row[0]).strip()
+    broken_fund_codes: list[str] = []
+    fund_chart_stats = {
+        "fundDetailParsedCount": 0,
+        "fundDetailNavChartCount": 0,
+        "fundDetailNavChartMissingCount": 0,
+        "fundDetailBenchmarkChartCount": 0,
+        "fundDetailChartScaleErrorCount": 0,
+        "fundDetailParseErrorCount": 0,
     }
-    broken_fund_codes = sorted(set(missing_fund_codes) - base_fund_codes)
-    if broken_fund_codes:
-        raise RuntimeError(f"Fund detail is missing from both enhanced and base packs: {broken_fund_codes[:20]}")
+    forbidden_fund_page_count = int((basic_target / "fund.html").exists())
+    forbidden_fund_file_count = sum(1 for path in basic_target.rglob("*") if path.is_file() and "fund_details" in path.parts)
 
     for name in SCRIPT_FILES:
         script_source = PROJECT_ROOT / "节点脚本" / "_共享组件" / "生产程序" / name
@@ -1630,10 +1616,12 @@ def build_package(args: argparse.Namespace, target: Path) -> dict[str, Any]:
         "strategyDetailWithoutHoldingCount": strategy_inventory_stats["strategyDetailWithoutHoldingCount"],
         "strategyDetailWithoutCurveCount": strategy_inventory_stats["strategyDetailWithoutCurveCount"],
         "strategyDetailReferencedFundCount": len(strategy_fund_codes),
-        "selectedFundCount": len(selected_codes),
+        "selectedFundCount": 0,
         "enhancedFundDetailCount": fund_count,
         "baseOnlyFundCount": len(missing_fund_codes),
         "brokenFundDetailCount": len(broken_fund_codes),
+        "forbiddenFundDetailPageCount": forbidden_fund_page_count,
+        "forbiddenFundDetailFileCount": forbidden_fund_file_count,
         **strategy_inventory_stats,
         **fund_chart_stats,
         **holding_snapshot_stats,
@@ -1660,12 +1648,6 @@ def build_package(args: argparse.Namespace, target: Path) -> dict[str, Any]:
                 "note": "源数据已明确标记不完整，发布集保留真实缺失状态，不做推测补齐。",
             },
             {
-                "type": "base_only_fund_detail",
-                "count": len(missing_fund_codes),
-                "codes": missing_fund_codes[:20],
-                "note": "缺增强详情但基础详情可用。",
-            },
-            {
                 "type": "active_strategy_without_curve",
                 "count": strategy_inventory_stats["activeStrategyWithoutCurveCount"],
                 "note": "活跃策略没有任何可画曲线时保留真实缺失状态；正常披露策略应为0。",
@@ -1681,12 +1663,6 @@ def build_package(args: argparse.Namespace, target: Path) -> dict[str, Any]:
                 "type": "history_rebalance_unassessed",
                 "count": strategy_inventory_stats["unassessedHistoryRebalanceStrategyCount"],
                 "note": "历史事件仅为建仓或底层净值不足时不计算胜率，页面展示具体原因。",
-            },
-            {
-                "type": "fund_detail_nav_chart_missing",
-                "count": fund_chart_stats["fundDetailNavChartMissingCount"],
-                "codes": fund_chart_examples["missingNav"],
-                "note": "成立后不足两个净值点或源站未返回净值的基金无法绘制走势，不生成虚假曲线。",
             },
         ],
     }
@@ -1704,7 +1680,7 @@ def build_package(args: argparse.Namespace, target: Path) -> dict[str, Any]:
         "version": 1,
         "buildId": version,
         "generatedAt": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "pageSet": ["机构总览", "策略列表", "策略列表对比下钻", "全市场产品排名", "AI选策略", "策略详情", "基金详情"],
+        "pageSet": ["机构总览", "策略列表", "策略对比", "全市场产品排名", "AI选策略", "策略详情"],
         "entry": "basic_data/institutions.html",
         "stats": stats,
         "fileCount": len(files),

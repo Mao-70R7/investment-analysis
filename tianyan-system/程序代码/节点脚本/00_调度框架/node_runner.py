@@ -12,7 +12,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from progress import parse_progress, render_progress
+from progress import (
+    build_pipeline_status,
+    parse_progress,
+    render_pipeline_status,
+    render_progress,
+)
 from state_store import StateStore
 from workspace import WorkspaceContext
 
@@ -81,6 +86,10 @@ def _process_exists(pid: int) -> bool:
         process_query_limited_information = 0x1000
         error_access_denied = 5
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if handle:
             kernel32.CloseHandle(handle)
@@ -90,6 +99,74 @@ def _process_exists(pid: int) -> bool:
         os.kill(pid, 0)
     except OSError:
         return False
+    return True
+
+
+def _process_start_time(pid: int) -> float | None:
+    if pid <= 0 or os.name != "nt":
+        return None
+    import ctypes
+
+    class FileTime(ctypes.Structure):
+        _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.GetProcessTimes.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(FileTime),
+        ctypes.POINTER(FileTime),
+        ctypes.POINTER(FileTime),
+        ctypes.POINTER(FileTime),
+    ]
+    kernel32.GetProcessTimes.restype = ctypes.c_int
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    handle = kernel32.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return None
+    creation = FileTime()
+    exit_time = FileTime()
+    kernel_time = FileTime()
+    user_time = FileTime()
+    try:
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        ):
+            return None
+    finally:
+        kernel32.CloseHandle(handle)
+    windows_ticks = (int(creation.high) << 32) | int(creation.low)
+    return windows_ticks / 10_000_000.0 - 11_644_473_600.0
+
+
+def _lock_owner_active(payload: dict[str, Any]) -> bool:
+    try:
+        pid = int(payload.get("pid") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not _process_exists(pid):
+        return False
+    observed_start = _process_start_time(pid)
+    try:
+        recorded_start = float(payload.get("processStartedAtEpoch"))
+    except (TypeError, ValueError):
+        recorded_start = None
+    if observed_start is not None and recorded_start is not None:
+        return abs(observed_start - recorded_start) <= 2.0
+    acquired_text = str(payload.get("acquiredAt") or "").strip()
+    if observed_start is not None and acquired_text:
+        try:
+            acquired_epoch = datetime.fromisoformat(acquired_text).timestamp()
+        except ValueError:
+            acquired_epoch = None
+        if acquired_epoch is not None and observed_start > acquired_epoch + 2.0:
+            return False
     return True
 
 
@@ -105,7 +182,7 @@ def acquire_resource_lock(workspace: WorkspaceContext, name: str, run_id: str, n
                 current = json.loads(path.read_text(encoding="utf-8-sig"))
             except (OSError, json.JSONDecodeError):
                 current = {}
-            if _process_exists(int(current.get("pid") or 0)):
+            if _lock_owner_active(current):
                 raise RuntimeError(
                     f"resource lock is active: {name}, run={current.get('runId')}, node={current.get('nodeId')}"
                 )
@@ -115,7 +192,14 @@ def acquire_resource_lock(workspace: WorkspaceContext, name: str, run_id: str, n
             os.write(
                 descriptor,
                 json.dumps(
-                    {"pid": os.getpid(), "runId": run_id, "nodeId": node_id, "token": token, "acquiredAt": now_text()},
+                    {
+                        "pid": os.getpid(),
+                        "processStartedAtEpoch": _process_start_time(os.getpid()),
+                        "runId": run_id,
+                        "nodeId": node_id,
+                        "token": token,
+                        "acquiredAt": now_text(),
+                    },
                     ensure_ascii=False,
                 ).encode("utf-8"),
             )
@@ -155,6 +239,11 @@ class NodeRunner:
         console: Callable[[str], None],
         event: Callable[..., None] | None = None,
         dry_run: bool = False,
+        plan_nodes: list[dict[str, Any]] | None = None,
+        duration_estimates: dict[str, float] | None = None,
+        plan_started_monotonic: float | None = None,
+        recovery_checkpoint: Callable[..., None] | None = None,
+        checkpoint_interval_seconds: int = 600,
     ) -> None:
         self.workspace = workspace
         self.state = state
@@ -163,6 +252,19 @@ class NodeRunner:
         self.console = console
         self.event = event
         self.dry_run = dry_run
+        self.plan_nodes = list(plan_nodes or [])
+        self.plan_index_by_node = {
+            str(node.get("id") or ""): index
+            for index, node in enumerate(self.plan_nodes)
+        }
+        self.duration_estimates = dict(duration_estimates or {})
+        self.plan_started_monotonic = (
+            float(plan_started_monotonic)
+            if plan_started_monotonic is not None
+            else time.monotonic()
+        )
+        self.recovery_checkpoint = recovery_checkpoint
+        self.checkpoint_interval_seconds = max(60, int(checkpoint_interval_seconds))
         signatures = []
         source_roots = (
             workspace.node_root,
@@ -255,13 +357,12 @@ class NodeRunner:
     ) -> NodeExecution | None:
         row_status = str(row["status"])
         preserved_skip = explicit_recovery and row_status == "skipped"
-        preserved_optional_channel_failure = (
+        preserved_optional_failure = (
             explicit_recovery
             and row_status == "failed"
             and str(manifest.get("criticality") or "") == "optional"
-            and str(manifest.get("failureImpact") or "") == "channel"
         )
-        preserved_non_success = preserved_skip or preserved_optional_channel_failure
+        preserved_non_success = preserved_skip or preserved_optional_failure
         if row_status not in {"success", "warn"} and not preserved_non_success:
             return None
         if input_hash is not None and row["input_fingerprint"] != input_hash:
@@ -283,7 +384,7 @@ class NodeRunner:
             return None
         if row.get("returncode") is not None and int(result.get("returncode") or 0) != int(row["returncode"]):
             return None
-        if result.get("validation", {}).get("status") != "passed" and not preserved_optional_channel_failure:
+        if result.get("validation", {}).get("status") != "passed" and not preserved_optional_failure:
             return None
         current_output_hash = fingerprint(result)
         expected_output_hash = str(row.get("output_fingerprint") or "")
@@ -293,8 +394,8 @@ class NodeRunner:
             return None
         for artifact in result.get("artifacts") or []:
             if artifact.get("validationStatus") == "failed":
-                if preserved_optional_channel_failure:
-                    # Failed-channel artifacts are deliberately not consumed:
+                if preserved_optional_failure:
+                    # Failed optional artifacts are deliberately not consumed:
                     # failed nodes do not restore contextUpdates.  Older failed
                     # attempts may not have hashes, so only the immutable
                     # node_result fingerprint is authoritative for preserving
@@ -327,7 +428,7 @@ class NodeRunner:
         The operator has deliberately selected the first node that must be
         rebuilt, so upstream input fingerprints may differ after a repair.
         Successful and deliberately skipped states retain strict validation.
-        A failed state is reusable only for an optional channel node, and its
+        A failed state is reusable only for an optional node, and its
         failure remains failed so dependency degradation and final
         classification stay truthful. Its failed artifacts are never consumed;
         the node result fingerprint remains mandatory. Successful artifact
@@ -594,6 +695,12 @@ class NodeRunner:
                     "ADVISOR_DAILY_RUN_ID": self.run_id,
                     "ADVISOR_NODE_ID": node_id,
                     "ADVISOR_NODE_RUN_DIR": str(attempt_dir),
+                    "ADVISOR_RECOVERY_CHECKPOINT_PATH": str(
+                        self.run_dir / "resume_checkpoint.json"
+                    ),
+                    "ADVISOR_RECOVERY_CHECKPOINT_INTERVAL_SECONDS": str(
+                        self.checkpoint_interval_seconds
+                    ),
                     "PYTHONUTF8": "1",
                     "PYTHONIOENCODING": "utf-8",
                     "PYTHONUNBUFFERED": "1",
@@ -639,7 +746,11 @@ class NodeRunner:
                     reader = threading.Thread(target=pump_output, name=f"node-output-{node_id}", daemon=True)
                     reader.start()
                     stream_closed = False
+                    latest_progress: dict[str, Any] | None = None
                     next_heartbeat = time.monotonic() + 30
+                    next_recovery_checkpoint = (
+                        time.monotonic() + self.checkpoint_interval_seconds
+                    )
                     while True:
                         now = time.monotonic()
                         if now - started_monotonic > timeout_seconds:
@@ -667,6 +778,7 @@ class NodeRunner:
                             log_handle.flush()
                             progress = parse_progress(text)
                             if progress:
+                                latest_progress = progress
                                 self.console(render_progress(node_name, progress))
                                 if self.event:
                                     self.event("node_progress", nodeId=node_id, attempt=attempt, **progress)
@@ -674,11 +786,70 @@ class NodeRunner:
                                 self.console(f"  {text}")
                         if now >= next_heartbeat and process.poll() is None:
                             elapsed = int(now - started_monotonic)
-                            device = runtime_context.get("ADVISOR_DEVICE_ID") or "无设备"
+                            uses_device = str(manifest.get("resourceLock") or "") == "device"
+                            device = (
+                                runtime_context.get("ADVISOR_DEVICE_ID") or "未选定"
+                                if uses_device
+                                else "不适用"
+                            )
                             self.state.update_run(self.run_id, status="running", current_stage=node_id)
-                            self.console(f"[节点心跳] {node_id} 已运行 {elapsed}s，设备={device}，日志={log_path}")
+                            plan_index = self.plan_index_by_node.get(node_id)
+                            pipeline_status: dict[str, Any] | None = None
+                            if plan_index is not None and self.plan_nodes:
+                                pipeline_status = build_pipeline_status(
+                                    self.plan_nodes,
+                                    plan_index,
+                                    latest_progress,
+                                    node_elapsed_seconds=elapsed,
+                                    total_elapsed_seconds=now - self.plan_started_monotonic,
+                                    duration_estimates=self.duration_estimates,
+                                )
+                                self.console(
+                                    render_pipeline_status(
+                                        "整体心跳",
+                                        manifest,
+                                        pipeline_status,
+                                        device=device,
+                                        log_path=str(log_path),
+                                    )
+                                )
+                            else:
+                                self.console(
+                                    f"[节点心跳] {node_id} 已运行 {elapsed}s，"
+                                    f"设备={device}，日志={log_path}"
+                                )
                             if self.event:
-                                self.event("node_heartbeat", nodeId=node_id, attempt=attempt, elapsedSeconds=elapsed, device=device)
+                                heartbeat_payload = {
+                                    "nodeId": node_id,
+                                    "attempt": attempt,
+                                    "elapsedSeconds": elapsed,
+                                    "device": device,
+                                }
+                                if pipeline_status:
+                                    heartbeat_payload.update(pipeline_status)
+                                self.event("node_heartbeat", **heartbeat_payload)
+                            if (
+                                self.recovery_checkpoint is not None
+                                and now >= next_recovery_checkpoint
+                            ):
+                                try:
+                                    self.recovery_checkpoint(
+                                        reason="interval",
+                                        manifest=manifest,
+                                        attempt=attempt,
+                                        elapsed_seconds=elapsed,
+                                        progress=latest_progress,
+                                        pipeline_status=pipeline_status,
+                                        log_path=log_path,
+                                    )
+                                except Exception as checkpoint_exc:  # noqa: BLE001 - recovery metadata must not stop data work.
+                                    self.console(
+                                        "[恢复点警告] 10分钟恢复点写入失败，节点继续运行："
+                                        f"{type(checkpoint_exc).__name__}: {checkpoint_exc}"
+                                    )
+                                next_recovery_checkpoint = (
+                                    now + self.checkpoint_interval_seconds
+                                )
                             next_heartbeat = now + 30
                         if process.poll() is not None and stream_closed:
                             returncode = int(process.returncode or 0)

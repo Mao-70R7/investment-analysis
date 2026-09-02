@@ -7,9 +7,7 @@
   "dependencies": [
     "gffunds_performance"
   ],
-  "allowFailedOptionalDependencies": true,
   "criticality": "optional",
-  "failureImpact": "channel",
   "timeoutSeconds": 10800,
   "maxProcessAttempts": 2,
   "resourceLock": null,
@@ -20,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "gffunds_collect"
+  "action": "gffunds_collect",
+  "failureImpact": "channel"
 }

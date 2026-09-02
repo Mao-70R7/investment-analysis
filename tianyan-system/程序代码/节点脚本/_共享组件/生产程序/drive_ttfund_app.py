@@ -134,6 +134,15 @@ def parse_args() -> argparse.Namespace:
         help="Text file with one strategy id per line. Lines starting with # are ignored.",
     )
     parser.add_argument(
+        "--work-bundle-file",
+        type=Path,
+        default=None,
+        help=(
+            "JSON strategy work bundles with per-field requirements. When no strategy ids are supplied, "
+            "all bundle ids are processed once with the strongest required capture profile."
+        ),
+    )
+    parser.add_argument(
         "--use-latest-master",
         action="store_true",
         help="Load strategy ids from the latest normalized strategy_master jsonl.",
@@ -257,6 +266,185 @@ def parse_args() -> argparse.Namespace:
         help="Wait time between retry attempts in milliseconds.",
     )
     return parser.parse_args()
+
+
+def load_work_bundles(path: Path | None) -> list[dict[str, Any]]:
+    if path is None:
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if isinstance(payload, dict):
+        payload = payload.get("strategy_work_bundles") or payload.get("bundles") or []
+    if not isinstance(payload, list):
+        raise ValueError(f"work bundle payload must be an array: {path}")
+    bundles: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in payload:
+        if not isinstance(row, dict):
+            raise ValueError(f"work bundle row must be an object: {path}")
+        strategy_id = str(row.get("strategy_id") or "").strip()
+        if not strategy_id:
+            raise ValueError(f"work bundle row is missing strategy_id: {path}")
+        if strategy_id in seen:
+            raise ValueError(f"duplicate strategy_id in work bundle: {strategy_id}")
+        seen.add(strategy_id)
+        required = row.get("required_fields")
+        if not isinstance(required, dict):
+            required = {}
+        normalized_required = {
+            "detail": bool(required.get("detail", True)),
+            "benchmark_text": bool(required.get("benchmark_text")),
+            "current_holding": bool(required.get("current_holding")),
+            "rebalance_history": bool(required.get("rebalance_history")),
+        }
+        bundles.append(
+            {
+                **row,
+                "strategy_id": strategy_id,
+                "required_fields": normalized_required,
+            }
+        )
+    return bundles
+
+
+def default_required_fields(
+    *,
+    missing_scope: str | None,
+    skip_history: bool,
+    require_benchmark_text: bool,
+    require_current_holding: bool,
+) -> dict[str, bool]:
+    return {
+        "detail": True,
+        "benchmark_text": bool(require_benchmark_text),
+        "current_holding": bool(require_current_holding),
+        "rebalance_history": bool(
+            not skip_history and missing_scope not in {"detail", "latest_adjustment"}
+        ),
+    }
+
+
+def field_completion(result: dict[str, Any], required_fields: dict[str, Any]) -> dict[str, bool]:
+    detail_ok = bool(result.get("detail_ok"))
+    return {
+        "detail": detail_ok,
+        "benchmark_text": bool(result.get("benchmark_text_ok")),
+        "current_holding": bool(detail_ok and result.get("holding_info_ok")),
+        "rebalance_history": bool(
+            detail_ok and (result.get("history_adjustment_ok") or result.get("history_page_seen"))
+        ),
+    }
+
+
+def apply_work_bundle_status(
+    result: dict[str, Any],
+    required_fields: dict[str, Any],
+    *,
+    fail_on_missing: bool = False,
+) -> dict[str, Any]:
+    completed = field_completion(result, required_fields)
+    pending = [
+        field
+        for field, required in required_fields.items()
+        if bool(required) and not completed.get(field, False)
+    ]
+    result["required_fields"] = {field: bool(value) for field, value in required_fields.items()}
+    result["completed_fields"] = completed
+    result["pending_fields"] = pending
+    result["required_fields_ok"] = not pending
+    if pending:
+        result["incomplete_reason"] = ",".join(f"{field}_missing" for field in pending)
+        if fail_on_missing and not result.get("error"):
+            result["error"] = result["incomplete_reason"]
+    else:
+        result.pop("incomplete_reason", None)
+        if result.get("error"):
+            # A retry may fail on the page it was probing while the checkpoint
+            # merge has already restored every required business field.  Keep
+            # that attempt diagnostic without misclassifying the completed
+            # strategy bundle as a final collection failure.
+            result["last_attempt_error"] = result["error"]
+            result["error"] = None
+    return result
+
+
+def pending_required_fields(
+    result: dict[str, Any] | None,
+    required_fields: dict[str, Any],
+) -> dict[str, bool]:
+    completed = field_completion(result or {}, required_fields)
+    return {
+        field: bool(required) and not completed.get(field, False)
+        for field, required in required_fields.items()
+    }
+
+
+def merge_checkpoint_result(
+    existing: dict[str, Any] | None,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """Preserve fields already validated in the same run when a retry only fills gaps."""
+
+    if not existing:
+        return candidate
+    merged = dict(existing)
+    merged.update(candidate)
+    groups: tuple[tuple[Any, tuple[str, ...]], ...] = (
+        (
+            lambda row: bool(row.get("detail_ok")),
+            (
+                "detail_ok",
+                "detail_size",
+                "detail_source_file",
+                "detail_field_presence",
+                "strategy_name",
+                "advisor_institution",
+                "risk_level",
+                "service_fee_ok",
+                "service_fee_text",
+                "performance_stage_ok",
+            ),
+        ),
+        (
+            lambda row: bool(row.get("benchmark_text_ok")),
+            ("benchmark_text_ok", "benchmark_text", "benchmark_text_source", "benchmark_ui_text_ok", "benchmark_ui_text"),
+        ),
+        (
+            lambda row: bool(row.get("detail_ok") and row.get("holding_info_ok")),
+            ("holding_info_ok", "holding_date", "holding_fund_count"),
+        ),
+        (
+            lambda row: bool(row.get("latest_adjustment_ok")),
+            ("latest_adjustment_ok", "latest_size"),
+        ),
+        (
+            lambda row: bool(row.get("history_adjustment_ok") or row.get("history_page_seen")),
+            (
+                "history_adjustment_ok",
+                "history_page_seen",
+                "history_size",
+                "history_event_count",
+                "history_delta_count",
+            ),
+        ),
+    )
+    restored_fields: list[str] = []
+    for predicate, keys in groups:
+        if predicate(existing) and not predicate(candidate):
+            for key in keys:
+                if key in existing:
+                    merged[key] = existing[key]
+                    restored_fields.append(key)
+    merged["checkpoint_merged"] = True
+    merged["checkpoint_restored_fields"] = sorted(set(restored_fields))
+    merged["app_open_total"] = int(existing.get("app_open_total") or 0) + int(candidate.get("app_open_total") or 0)
+    return merged
+
+
+def write_json_atomic(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 def resolve_adb_path(adb_path: Path) -> Path:
@@ -1009,6 +1197,7 @@ def drive_one_strategy(
     skip_history: bool,
     keep_run_cache: bool,
     capture_failures: bool,
+    persist_result: bool = True,
 ) -> dict[str, Any]:
     strategy_dir = run_dir / strategy_id
     strategy_dir.mkdir(parents=True, exist_ok=True)
@@ -1017,6 +1206,7 @@ def drive_one_strategy(
     started_at = time.perf_counter()
     result: dict[str, Any] = {
         "strategy_id": strategy_id,
+        "app_open_total": 1,
         "launch_ok": False,
         "activity_ok": False,
         "detail_ui_seen": False,
@@ -1252,8 +1442,8 @@ def drive_one_strategy(
         result["benchmark_text_source"] = "visible_ui"
     result["elapsed_sec"] = round(time.perf_counter() - started_at, 2)
 
-    with (strategy_dir / "result.json").open("w", encoding="utf-8") as handle:
-        json.dump(result, handle, ensure_ascii=False, indent=2)
+    if persist_result:
+        write_json_atomic(strategy_dir / "result.json", result)
     return result
 
 
@@ -1266,6 +1456,7 @@ def build_failed_result(
     trace_text = traceback.format_exc(limit=8)
     result = {
         "strategy_id": strategy_id,
+        "app_open_total": 0,
         "launch_ok": False,
         "activity_ok": False,
         "detail_ui_seen": False,
@@ -1389,6 +1580,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "detail_page_load_failed_2001",
     }
     total_elapsed = 0.0
+    pending_field_counts: Counter[str] = Counter()
     for row in results:
         total_elapsed += row.get("elapsed_sec") or 0.0
         for key in (
@@ -1415,6 +1607,8 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
             detail_missing_ids.append(str(row.get("strategy_id") or ""))
         if not (row.get("detail_ok") and row.get("holding_info_ok")):
             current_holding_missing_ids.append(str(row.get("strategy_id") or ""))
+        for field in row.get("pending_fields") or []:
+            pending_field_counts[str(field)] += 1
     total = len(results)
     return {
         "strategy_total": total,
@@ -1444,6 +1638,10 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "detail_missing_ids": [item for item in detail_missing_ids if item],
         "source_unavailable_total": len([item for item in source_unavailable_ids if item]),
         "source_unavailable_ids": [item for item in source_unavailable_ids if item],
+        "pending_field_counts": dict(sorted(pending_field_counts.items())),
+        "reused_checkpoint_total": sum(1 for row in results if row.get("reused_from_existing")),
+        "app_open_total": sum(int(row.get("app_open_total") or 0) for row in results),
+        "strategy_reopen_total": sum(max(int(row.get("app_open_total") or 0) - 1, 0) for row in results),
         "avg_elapsed_sec": round(total_elapsed / total, 2) if total else 0.0,
         "max_elapsed_sec": max((row.get("elapsed_sec") or 0.0 for row in results), default=0.0),
     }
@@ -1471,8 +1669,8 @@ def write_run_outputs(
         summary["cache_scope_covered_total"] = len(cache_index[missing_scope])
         summary["cache_scope_missing_total"] = max(requested_total - len(cache_index[missing_scope]), 0)
 
-    (run_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    (run_dir / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(run_dir / "summary.json", summary)
+    write_json_atomic(run_dir / "results.json", results)
     return summary
 
 
@@ -1518,6 +1716,7 @@ def capture_current_holding_strategy(
     if fast_path_ok:
         fast_candidate["capture_mode"] = "current_holding_fast"
         fast_candidate["fast_path_ok"] = True
+        fast_candidate["app_open_total"] = 1
         return fast_candidate
 
     fast_elapsed_sec = float(fast_candidate.get("elapsed_sec") or 0.0)
@@ -1526,6 +1725,7 @@ def capture_current_holding_strategy(
         detail_scan_swipes=max(detail_scan_swipes, 1),
     )
     candidate["capture_mode"] = "current_holding_full_fallback"
+    candidate["app_open_total"] = 2
     candidate["fast_path_ok"] = False
     candidate["fast_path_elapsed_sec"] = fast_elapsed_sec
     candidate["fast_path_error"] = fast_candidate.get("error")
@@ -1541,13 +1741,23 @@ def capture_current_holding_strategy(
 def main() -> None:
     args = parse_args()
     adb_path = resolve_adb_path(args.adb_path)
+    work_bundles = load_work_bundles(args.work_bundle_file)
+    work_bundle_by_id = {row["strategy_id"]: row for row in work_bundles}
 
     strategy_ids = list(args.strategy_ids)
     if args.strategy_file:
         strategy_ids.extend(load_strategy_ids_from_file(args.strategy_file))
     if args.use_latest_master:
         strategy_ids.extend(load_latest_strategy_ids(limit=None, offset=0))
+    if work_bundles and not strategy_ids:
+        strategy_ids.extend(row["strategy_id"] for row in work_bundles)
     strategy_ids = list(dict.fromkeys(strategy_ids))
+    if work_bundles:
+        missing_bundle_ids = [strategy_id for strategy_id in strategy_ids if strategy_id not in work_bundle_by_id]
+        if missing_bundle_ids:
+            raise ValueError(
+                "work bundle is missing selected strategy ids: " + ",".join(missing_bundle_ids[:20])
+            )
 
     device_ready, device_error = check_device_ready(adb_path, args.device_id)
     if not device_ready:
@@ -1592,12 +1802,55 @@ def main() -> None:
     deferred_strategy_ids: list[str] = []
     if args.current_holding_fast:
         progress_label = "天天投顾当前仓位采集"
+    elif work_bundles:
+        progress_label = "天天投顾单策略任务包采集"
     elif args.skip_history:
         progress_label = "天天投顾策略详情采集"
     else:
         progress_label = "天天投顾历史调仓采集"
     progress = ConsoleProgress(progress_label, len(strategy_ids))
     progress.emit(0, success=0, failed=0, extra=f"设备 {args.device_id}")
+
+    def required_fields_for(strategy_id: str) -> dict[str, bool]:
+        bundle = work_bundle_by_id.get(strategy_id)
+        if bundle:
+            return dict(bundle["required_fields"])
+        return default_required_fields(
+            missing_scope=args.missing_scope,
+            skip_history=args.skip_history,
+            require_benchmark_text=args.require_benchmark_text,
+            require_current_holding=args.current_holding_fast,
+        )
+
+    def complete_for_strategy(strategy_id: str, result: dict[str, Any]) -> bool:
+        if work_bundles:
+            required = required_fields_for(strategy_id)
+            return all(
+                not bool(required_field) or field_completion(result, required).get(field, False)
+                for field, required_field in required.items()
+            )
+        return is_strategy_complete(
+            result,
+            args.missing_scope,
+            args.skip_history,
+            require_benchmark_text=args.require_benchmark_text,
+            require_current_holding=args.current_holding_fast,
+        )
+
+    def apply_completion_status(strategy_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        if work_bundles:
+            bundle = work_bundle_by_id[strategy_id]
+            result["work_bundle"] = bundle
+            return apply_work_bundle_status(
+                result,
+                required_fields_for(strategy_id),
+                fail_on_missing=args.fail_on_required_field_missing,
+            )
+        return apply_required_field_status(
+            result,
+            require_benchmark_text=args.require_benchmark_text,
+            fail_on_missing=args.fail_on_required_field_missing,
+        )
 
     def report_progress(strategy_id: str, result: dict[str, Any]) -> dict[str, Any]:
         current_summary = write_run_outputs(
@@ -1613,13 +1866,7 @@ def main() -> None:
         success_total = sum(
             1
             for row in results
-            if is_strategy_complete(
-                row,
-                args.missing_scope,
-                args.skip_history,
-                require_benchmark_text=args.require_benchmark_text,
-                require_current_holding=args.current_holding_fast,
-            )
+            if complete_for_strategy(str(row.get("strategy_id") or ""), row)
         )
         failure_total = max(len(results) - success_total, 0)
         progress.emit(
@@ -1644,23 +1891,24 @@ def main() -> None:
                 existing_results[strategy_id] = existing
 
     for strategy_index, strategy_id in enumerate(strategy_ids):
-        if strategy_id in existing_results and is_strategy_complete(
+        if strategy_id in existing_results and complete_for_strategy(
+            strategy_id,
             existing_results[strategy_id],
-            args.missing_scope,
-            args.skip_history,
-            require_benchmark_text=args.require_benchmark_text,
-            require_current_holding=args.current_holding_fast,
         ):
             reused = dict(existing_results[strategy_id])
             reused["reused_from_existing"] = True
+            reused = apply_completion_status(strategy_id, reused)
             results.append(reused)
             report_progress(strategy_id, reused)
             consecutive_incomplete_detail = 0
             consecutive_device_failures = 0
             continue
 
+        checkpoint_result = existing_results.get(strategy_id)
         best_result: dict[str, Any] | None = None
         for attempt in range(1, max(args.max_attempts, 1) + 1):
+            required_fields = required_fields_for(strategy_id)
+            capture_fields = pending_required_fields(checkpoint_result, required_fields)
             progress.emit(
                 len(results),
                 current=strategy_id,
@@ -1683,11 +1931,20 @@ def main() -> None:
                     "deeplink_mode": args.deeplink_mode,
                     "max_swipes": args.max_swipes,
                     "swipe_wait_ms": args.swipe_wait_ms,
-                    "skip_history": args.skip_history,
+                    "skip_history": not bool(capture_fields.get("rebalance_history")),
                     "keep_run_cache": args.keep_run_cache,
                     "capture_failures": args.capture_failures,
+                    "persist_result": not bool(work_bundles),
                 }
-                if args.current_holding_fast:
+                bundle = work_bundle_by_id.get(strategy_id) or {}
+                needs_deep_detail = bool(bundle.get("deep_detail_refresh")) and bool(
+                    capture_fields.get("detail") or capture_fields.get("benchmark_text")
+                )
+                if (
+                    capture_fields.get("current_holding")
+                    and not capture_fields.get("rebalance_history")
+                    and not needs_deep_detail
+                ):
                     candidate = capture_current_holding_strategy(
                         drive_kwargs=drive_kwargs,
                         detail_scan_swipes=args.detail_scan_swipes,
@@ -1697,7 +1954,11 @@ def main() -> None:
                         **drive_kwargs,
                         detail_scan_swipes=args.detail_scan_swipes,
                     )
-                    candidate["capture_mode"] = "full_detail"
+                    candidate["capture_mode"] = (
+                        "history_bundle"
+                        if capture_fields.get("rebalance_history")
+                        else "detail_bundle"
+                    )
             except Exception as error:
                 candidate = build_failed_result(
                     strategy_id,
@@ -1706,37 +1967,28 @@ def main() -> None:
                 )
                 strategy_result_dir = run_dir / strategy_id
                 strategy_result_dir.mkdir(parents=True, exist_ok=True)
-                with (strategy_result_dir / "result.json").open("w", encoding="utf-8") as handle:
-                    json.dump(candidate, handle, ensure_ascii=False, indent=2)
+                if not work_bundles:
+                    write_json_atomic(strategy_result_dir / "result.json", candidate)
 
+            candidate = merge_checkpoint_result(checkpoint_result, candidate)
             candidate["attempt"] = attempt
-            candidate = apply_required_field_status(
-                candidate,
-                require_benchmark_text=args.require_benchmark_text,
-                fail_on_missing=args.fail_on_required_field_missing,
-            )
+            candidate["checkpoint_pending_fields_before"] = [
+                field for field, required in capture_fields.items() if required
+            ]
+            candidate = apply_completion_status(strategy_id, candidate)
             best_result = candidate
-            if is_strategy_complete(
-                candidate,
-                args.missing_scope,
-                args.skip_history,
-                require_benchmark_text=args.require_benchmark_text,
-                require_current_holding=args.current_holding_fast,
-            ):
+            checkpoint_result = candidate
+            write_json_atomic(run_dir / strategy_id / "result.json", candidate)
+            if complete_for_strategy(strategy_id, candidate):
                 break
             if attempt < max(args.max_attempts, 1):
                 wait_ms(args.retry_wait_ms)
 
         if best_result is not None:
-            best_result = apply_required_field_status(
-                best_result,
-                require_benchmark_text=args.require_benchmark_text,
-                fail_on_missing=args.fail_on_required_field_missing,
-            )
+            best_result = apply_completion_status(strategy_id, best_result)
             strategy_result_dir = run_dir / str(best_result.get("strategy_id") or strategy_id)
             strategy_result_dir.mkdir(parents=True, exist_ok=True)
-            with (strategy_result_dir / "result.json").open("w", encoding="utf-8") as handle:
-                json.dump(best_result, handle, ensure_ascii=False, indent=2)
+            write_json_atomic(strategy_result_dir / "result.json", best_result)
         results.append(
             best_result or {
                 "strategy_id": strategy_id,
@@ -1818,19 +2070,15 @@ def main() -> None:
             "soft_circuit_recovery_errors": soft_circuit_recovery_errors,
             "deferred_strategy_total": len(deferred_strategy_ids),
             "deferred_strategy_ids": deferred_strategy_ids,
+            "work_bundle_mode": bool(work_bundles),
+            "work_bundle_file": str(args.work_bundle_file) if args.work_bundle_file else None,
+            "work_bundle_total": len(work_bundles),
         }
     )
-    (run_dir / "summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomic(run_dir / "summary.json", summary)
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    if (
-        args.fail_on_required_field_missing
-        and args.require_benchmark_text
-        and summary.get("benchmark_text_missing_total", 0) > 0
-    ):
+    if args.fail_on_required_field_missing and summary.get("required_fields_missing_total", 0) > 0:
         raise SystemExit(2)
     if args.fail_on_incomplete_detail and summary.get("detail_ok_total", 0) < summary.get("strategy_total", 0):
         raise SystemExit(3)

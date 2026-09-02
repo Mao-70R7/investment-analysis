@@ -41,6 +41,38 @@ class StrategyDetailCurveCompletenessTests(unittest.TestCase):
         result = MODULE.sample_series(rows, "日期", "数值", max_points=None)
         self.assertEqual([row["日期"] for row in result], ["2026-08-05", "2026-08-06"])
 
+    def test_latest_evaluable_event_skips_newer_unavailable_event(self) -> None:
+        rows = [
+            {
+                "统一策略ID": "ttfund__S1",
+                "调仓事件ID": "event-new-unavailable",
+                "调仓日期": "2026-08-31",
+                "评估状态": "暂不可评估",
+            },
+            {
+                "统一策略ID": "ttfund__S1",
+                "调仓事件ID": "event-latest-evaluable",
+                "调仓日期": "2026-08-20",
+                "评估状态": "可评估",
+            },
+            {
+                "统一策略ID": "ttfund__S1",
+                "调仓事件ID": "event-old-evaluable",
+                "调仓日期": "2026-08-01",
+                "评估状态": "可评估",
+            },
+            {
+                "统一策略ID": "ttfund__S2",
+                "调仓事件ID": "event-s2",
+                "调仓日期": "2026-07-15",
+                "评估状态": "可评估",
+            },
+        ]
+        self.assertEqual(
+            MODULE.latest_evaluable_event_ids(rows),
+            {"event-latest-evaluable", "event-s2"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

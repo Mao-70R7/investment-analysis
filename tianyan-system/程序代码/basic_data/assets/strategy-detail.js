@@ -68,6 +68,7 @@
   }
   function fundLink(row, label) {
     if (!row || (!row.基金代码 && !row.基金名称)) return B.esc(label || "未命名基金");
+    if (window.__MINIMAL_PUBLISH_NO_FUND_DETAIL__) return B.esc(label || row.基金名称 || row.基金代码 || "未命名基金");
     return `<a class="link" href="${B.esc(fundDetailUrl(row))}">${B.esc(label || row.基金名称 || row.基金代码 || "未命名基金")}</a>`;
   }
   function num(value) {
@@ -1059,7 +1060,7 @@
   function contributionEmptyText(snapshot, payload) {
     if (snapshot?.id === "current") return "当前仓位不是一次调仓事件；已优先寻找最近一条可评价历史调仓。若仍为空，说明该策略暂无调仓质量曲线。";
     if (payload && !hasDrawableContributionPayload(payload)) return "该次调仓已有调仓质量记录，但调仓前、调仓后、基准和沪深300曲线在该区间均没有足够可画点。常见原因是区间端点缺少策略净值或基金净值。";
-    return "该次调仓尚无可用于绘制贡献曲线的调仓质量评估数据，通常是缺少调仓质量事件记录、下次调仓锚点或可比净值区间。";
+    return "该次调仓尚无满足准确性门槛的贡献曲线，通常是调前/调后权重不完整、缺少下次调仓锚点，或基金复权净值权重覆盖率不足98%；页面不会生成插值或推测曲线。";
   }
   function renderContribution(snapshot) {
     const target = contributionFor(snapshot);

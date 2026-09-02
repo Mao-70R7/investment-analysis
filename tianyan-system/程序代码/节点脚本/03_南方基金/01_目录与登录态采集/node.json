@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "southern_collect",
+  "name": "南方基金目录与登录态采集",
+  "phase": "03_南方基金",
+  "entrypoint": "run.ps1",
+  "dependencies": ["preflight_database"],
+  "allowFailedOptionalDependencies": true,
+  "criticality": "optional",
+  "failureImpact": "warning",
+  "timeoutSeconds": 14400,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": false,
+  "progressUnit": "个策略",
+  "validator": {"type": "node_result", "requiredStatus": "passed"},
+  "daily": false,
+  "action": "southern_collect"
+}

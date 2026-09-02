@@ -304,6 +304,9 @@ class StrategyCatalogDiscoveryTests(unittest.TestCase):
             connection = sqlite3.connect(":memory:")
             try:
                 connection.execute('CREATE TABLE "策略信息" ("渠道ID" TEXT, "渠道策略ID" TEXT)')
+                connection.execute(
+                    'CREATE TABLE "策略日度业绩" ("渠道ID" TEXT, "渠道策略ID" TEXT, "交易日期" TEXT)'
+                )
                 connection.execute('INSERT INTO "策略信息" VALUES (?, ?)', ("gffunds", "OLD"))
                 with self.assertRaisesRegex(RuntimeError, "missing_catalog"):
                     analysis_loader.validate_strategy_catalog_summaries(
@@ -431,6 +434,62 @@ class DetailCacheFreshnessTests(unittest.TestCase):
         self.assertNotIn("ABC123", inventory["detail_mtime_by_strategy"])
 
 
+class RollingDetailWorkTests(unittest.TestCase):
+    def test_oldest_first_uses_validated_timestamp_not_strategy_id(self) -> None:
+        ordered = plan.oldest_first(
+            ["A", "B", "C"],
+            {
+                "A": "2026-08-10T09:00:00+08:00",
+                "B": "2026-08-01T09:00:00+08:00",
+            },
+        )
+
+        self.assertEqual(ordered, ["C", "B", "A"])
+
+    def test_mandatory_work_is_not_limited_and_piggyback_consumes_routine_budget(self) -> None:
+        selection = plan.select_rolling_detail_work(
+            mandatory_ids=["NEW", "BROKEN"],
+            stale_detail_ids=["A", "B", "C"],
+            benchmark_repair_candidate_ids=["D"],
+            page_open_ids=["B", "D"],
+            detail_mtime_by_strategy={
+                "A": "2026-08-01T09:00:00+08:00",
+                "B": "2026-08-02T09:00:00+08:00",
+                "C": "2026-08-03T09:00:00+08:00",
+                "D": "2026-08-04T09:00:00+08:00",
+            },
+            benchmark_attempt_mtime_by_strategy={},
+            routine_limit=2,
+        )
+
+        self.assertEqual(selection["mandatory_ids"], ["NEW", "BROKEN"])
+        self.assertEqual(selection["selected_piggyback_ids"], ["B", "D"])
+        self.assertEqual(selection["selected_standalone_ids"], [])
+        self.assertEqual(selection["selected_detail_ids"], ["NEW", "BROKEN", "B", "D"])
+        self.assertEqual(selection["deferred_routine_ids"], ["A", "C"])
+
+    def test_work_bundle_uses_one_strongest_profile_per_strategy(self) -> None:
+        bundles = plan.build_strategy_work_bundles(
+            strategy_ids=["A", "B", "C"],
+            mandatory_detail_ids=["A"],
+            selected_routine_detail_ids=["B"],
+            selected_benchmark_ids=["B"],
+            selected_current_holding_ids=["A", "B"],
+            selected_history_ids=["B"],
+            new_strategy_ids=["A"],
+            invalid_detail_ids=[],
+            reactivated_strategy_ids=[],
+            stale_detail_ids=["B"],
+        )
+
+        self.assertEqual([row["strategy_id"] for row in bundles], ["B", "A"])
+        by_id = {row["strategy_id"]: row for row in bundles}
+        self.assertEqual(by_id["B"]["capture_profile"], "history_bundle")
+        self.assertTrue(by_id["B"]["required_fields"]["benchmark_text"])
+        self.assertTrue(by_id["B"]["required_fields"]["current_holding"])
+        self.assertTrue(by_id["B"]["required_fields"]["rebalance_history"])
+        self.assertEqual(by_id["A"]["capture_profile"], "current_holding_bundle")
+
 class PowerShellResultContractTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "Windows PowerShell contract")
     def test_json_array_helper_expands_every_strategy_row(self) -> None:
@@ -513,6 +572,31 @@ $rows = @(Read-JsonArrayStrict -Path '{result_literal}')
         self.assertIn("same_phone_failed_ids_second_pass", script)
         self.assertNotIn("ADVISOR_FALLBACK_DEVICE_ID", script)
         self.assertNotIn("MuMu", script)
+
+    def test_production_uses_bounded_single_strategy_work_bundles(self) -> None:
+        script = (
+            ROOT
+            / "节点脚本"
+            / "_共享组件"
+            / "生产程序"
+            / "run_ttfund_incremental_update.ps1"
+        ).read_text(encoding="utf-8")
+        bridge = (ROOT / "节点脚本" / "00_调度框架" / "bridge_node.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('[int]$DetailRefreshLimit = 70', script)
+        self.assertIn('[int]$StoppedDetailCooldownDays = 30', script)
+        self.assertIn('Write-StrategyWorkBundleFile', script)
+        self.assertIn('"--work-bundle-file", $strategyWorkBundleFile', script)
+        self.assertIn('"--skip-existing-results"', script)
+        self.assertNotIn(
+            '$currentHoldingDriveIds = @($currentHoldingDriveIds | Where-Object { -not $detailDriveSet.ContainsKey',
+            script,
+        )
+        self.assertIn('"-DetailRefreshLimit",\n            "70"', bridge)
+        self.assertIn('"-StoppedDetailCooldownDays",\n            "30"', bridge)
+        self.assertNotIn('"-DetailRefreshLimit",\n            "0"', bridge)
 
 
 if __name__ == "__main__":

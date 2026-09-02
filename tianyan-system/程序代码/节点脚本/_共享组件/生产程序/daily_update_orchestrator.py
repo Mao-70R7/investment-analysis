@@ -56,6 +56,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device-id", default="")
     parser.add_argument("--history-mode", choices=("latest_only", "all_missing", "none"), default="latest_only")
     parser.add_argument("--pages-base-url", default=DEFAULT_PAGES_URL)
+    parser.add_argument("--edgeone-repository-url", default=os.environ.get("ADVISOR_EDGEONE_PUBLISH_REMOTE", ""))
+    parser.add_argument("--edgeone-repository-branch", default=os.environ.get("ADVISOR_EDGEONE_PUBLISH_BRANCH", "main"))
+    parser.add_argument("--edgeone-legacy-branch", default=os.environ.get("ADVISOR_EDGEONE_LEGACY_SNAPSHOT_BRANCH", ""))
     parser.add_argument("--readiness-interval-minutes", type=int, default=30)
     parser.add_argument("--readiness-max-checks", type=int, default=6)
     parser.add_argument("--resume-run-id")
@@ -787,6 +790,12 @@ class Orchestrator:
                     "-AllowDirtyPublishRepo",
                     "-CommitMessage",
                     f"Daily data update {now_local().strftime('%Y-%m-%d')}",
+                    "-EdgeOneRepositoryUrl",
+                    self.args.edgeone_repository_url,
+                    "-EdgeOneRepositoryBranch",
+                    self.args.edgeone_repository_branch,
+                    "-EdgeOneSnapshotBranch",
+                    self.args.edgeone_legacy_branch,
                 ]
                 if self.args.publish_root:
                     publish_command.extend(["-PublishRoot", str(self.args.publish_root)])

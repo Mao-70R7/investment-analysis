@@ -22,8 +22,10 @@ from build_runtime_migration_package import (
     STATIC_REPORT_ASSET_DIR,
     STATIC_REPORT_PAGE,
     clone_sparse_code,
+    copy_qieman_accepted_baseline,
     copy_report_seed,
     database_summary,
+    runtime_file_excluded,
     runtime_path,
     sanitize_baseline_payload,
     write_checksums,
@@ -215,7 +217,7 @@ class RuntimePackageTests(unittest.TestCase):
                 self.assertIn(name, RUNTIME_ROOT_FILES)
                 self.assertIn(f"/{name}", SPARSE_PATTERNS)
 
-    def test_report_seed_only_copies_non_rebuildable_static_report(self) -> None:
+    def test_report_seed_excludes_monthly_content_from_minimal_runtime(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source"
@@ -229,11 +231,55 @@ class RuntimePackageTests(unittest.TestCase):
             (source / "reports").mkdir()
             (source / "reports" / "old.xlsx").write_text("old", encoding="utf-8")
             result = copy_report_seed(source, target)
-            self.assertTrue((target / "basic_data" / STATIC_REPORT_PAGE).is_file())
-            self.assertFalse((target / "basic_data" / "index.html").exists())
-            self.assertFalse((target / ".git").exists())
-            self.assertFalse((target / "reports").exists())
-            self.assertEqual(result["assetFileCount"], 1)
+            self.assertFalse(target.exists())
+            self.assertEqual(result["assetFileCount"], 0)
+            self.assertEqual(result["status"], "rebuild_required")
+            self.assertEqual(result["reason"], "formal_reports_are_rebuilt_from_the_database")
+
+    def test_report_seed_can_be_rebuilt_when_monthly_content_is_absent(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = copy_report_seed(root / "source", root / "target")
+            self.assertEqual(result["status"], "rebuild_required")
+            self.assertEqual(result["assetFileCount"], 0)
+            self.assertFalse((root / "target").exists())
+
+    def test_runtime_snapshot_excludes_qieman_reverse_engineering_artifacts(self) -> None:
+        self.assertTrue(
+            runtime_file_excluded(
+                Path("official_apps/qieman/authenticated_probe/_analysis/apk/index.bundle")
+            )
+        )
+        self.assertFalse(
+            runtime_file_excluded(
+                Path("official_apps/qieman/authenticated_probe/qieman_stargate_sms_session.js")
+            )
+        )
+
+    def test_qieman_accepted_baseline_is_copied_with_relative_state(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            target = root / "target"
+            run_id = "daily__qieman_collect__attempt_01"
+            run_dir = source / "qieman" / "signed_history" / run_id
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text("{}", encoding="utf-8")
+            state = {
+                "run_id": run_id,
+                "history_run_dir": str(run_dir),
+                "summary_path": str(root / "normalized" / "summary.json"),
+            }
+            (source / "qieman" / "accepted_state.json").write_text(
+                json.dumps(state), encoding="utf-8"
+            )
+
+            result = copy_qieman_accepted_baseline(source, target)
+
+            self.assertIsNotNone(result)
+            copied = json.loads((target / "qieman" / "accepted_state.json").read_text(encoding="utf-8"))
+            self.assertEqual(copied["history_run_dir"], f"signed_history/{run_id}")
+            self.assertTrue((target / "qieman" / "signed_history" / run_id / "summary.json").is_file())
 
     def test_checksum_verification_detects_changed_file(self) -> None:
         with TemporaryDirectory() as directory:
@@ -335,6 +381,39 @@ class RuntimePackageTests(unittest.TestCase):
             self.assertTrue(any(error.startswith("normalized_baseline_missing:") for error in result["errors"]))
             self.assertTrue(any(error.startswith("raw_tree_incomplete:") for error in result["errors"]))
 
+    def test_declared_runtime_baselines_allow_empty_optional_entity_only(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_default_config(root)
+            layout = load_workspace(root)
+            optional = layout.normalized_root / "gfsec_fima" / "strategy_rebalance_event" / "run.jsonl"
+            core = layout.normalized_root / "gfsec_fima" / "strategy_performance_daily" / "run.jsonl"
+            optional.parent.mkdir(parents=True)
+            core.parent.mkdir(parents=True)
+            optional.write_bytes(b"")
+            core.write_bytes(b"")
+            layout.baseline_root.mkdir(parents=True)
+            (layout.baseline_root / "migration_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "normalizedBaselines": [
+                            {
+                                "files": [
+                                    "gfsec_fima/strategy_rebalance_event/run.jsonl",
+                                    "gfsec_fima/strategy_performance_daily/run.jsonl",
+                                ]
+                            }
+                        ],
+                        "rawSelection": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = verify_declared_runtime_baselines(layout)
+            self.assertEqual(result["status"], "blocked")
+            self.assertEqual(result["normalizedOptionalEmptyFileCount"], 1)
+            self.assertTrue(any(error.startswith("normalized_core_baseline_empty:") for error in result["errors"]))
+
     def test_database_migration_requires_complete_transactional_chain(self) -> None:
         payload = {
             "minimumDatabaseUserVersion": 3,
@@ -373,6 +452,9 @@ class RuntimePackageTests(unittest.TestCase):
             (layout.code_root / "config" / "runtime" / "runtime_compatibility.json").write_text(json.dumps(compatibility), encoding="utf-8")
             backup = layout.backup_root / "baseline.sqlite"
             sqlite_backup(layout.main_db, backup)
+            self.assertFalse(Path(f"{backup}-shm").exists())
+            self.assertFalse(Path(f"{backup}-wal").exists())
+            self.assertFalse(any(backup.parent.glob(f".{backup.name}.*.tmp*")))
             (layout.backup_root / "analysis_zh_current_baseline.json").write_text(
                 json.dumps({"status": "success", "backup_file": backup.name}), encoding="utf-8"
             )
@@ -405,6 +487,8 @@ class RuntimePackageTests(unittest.TestCase):
                 connection.commit()
             summary = database_summary(path)
             self.assertEqual(summary["latestBusinessDates"]["基金日度净值"], "2026-07-21")
+            cached_summary = database_summary(path, quick_check_result="ok")
+            self.assertEqual(cached_summary["quickCheck"], "ok")
 
     @unittest.skipUnless(shutil.which("git"), "git is required for publish identity setup")
     def test_publish_git_identity_is_configured_without_user_input(self) -> None:
@@ -437,11 +521,16 @@ class RuntimePackageTests(unittest.TestCase):
     def test_migrated_daily_entry_is_zero_argument_and_self_bootstrapping(self) -> None:
         daily_entry = ROOT / "00_每日数据更新并发布_唯一入口.bat"
         raw_content = daily_entry.read_bytes()
-        content = daily_entry.read_text(encoding="utf-8-sig")
+        content = daily_entry.read_text(encoding="ascii")
         self.assertEqual(raw_content.count(b"\n"), raw_content.count(b"\r\n"))
-        self.assertNotIn("pause", content.lower())
-        self.assertIn("节点脚本\\00_调度框架\\启动.ps1", content)
-        self.assertIn("set \"MODE=daily\"", content)
+        self.assertFalse(raw_content.startswith(b"\xef\xbb\xbf"))
+        self.assertTrue(all(byte < 128 for byte in raw_content))
+        self.assertIn("setlocal EnableExtensions DisableDelayedExpansion", content)
+        self.assertIn("pause >nul", content.lower())
+        self.assertIn("daily_update_launcher.ps1", content)
+        self.assertIn("set \"MODE=interactive\"", content)
+        self.assertIn("set \"MODE=resumeLatest\"", content)
+        self.assertIn("-DryRun", content)
         self.assertIn("-NodeId", content)
         self.assertIn("-Standalone", content)
         launcher = (ROOT / "节点脚本" / "00_调度框架" / "启动.ps1").read_text(encoding="utf-8-sig")
@@ -452,6 +541,8 @@ class RuntimePackageTests(unittest.TestCase):
         self.assertIn("$arguments += '--standalone'", launcher)
         self.assertIn("$arguments += @('--from-node', $ResumeFromNode)", launcher)
         self.assertIn("$arguments += @('--to-node', $ResumeToNode)", launcher)
+        self.assertIn("resume_plan.py", launcher)
+        self.assertIn("续作推荐断点", launcher)
         self.assertIn("resume ^<run_id^> --from-node ^<node_id^>", content)
         self.assertIn("--to-node ^<node_id^>", content)
 

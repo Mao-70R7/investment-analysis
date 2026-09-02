@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from analyze_ai_core_exposure import load_assigned_js
-from business_naming import canonical_advisor_institution
+from business_naming import canonical_advisor_institution, canonical_business_channel
 
 
 PROJECT_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "AGENTS.md").is_file())
@@ -565,8 +565,10 @@ def build_period_rows(
         sid = raw(row.get("统一策略ID"))
         row = {**strategy_meta.get(sid, {}), **row}
         source_row = row
-        raw_advisor = raw(row.get("投顾机构")) or "未识别机构"
-        advisor = canonical_advisor_institution(raw_advisor) or "未识别机构"
+        channel_id = raw(row.get("渠道")) or sid.split("__", 1)[0]
+        channel = canonical_business_channel(channel_id, row.get("渠道名称"))
+        raw_advisor = raw(row.get("投顾机构"))
+        advisor = canonical_advisor_institution(raw_advisor, channel_id, channel) or "未识别机构"
         advisor_group = normalize_target_advisor(advisor)
         s_name = normalize_target_series_name(row.get("策略名称"))
         subseries_name = normalize_target_subseries_name(row.get("策略名称"))
@@ -587,7 +589,7 @@ def build_period_rows(
             "投顾机构": advisor,
             "投顾机构原始值": raw_advisor,
             "系列机构": advisor_group,
-            "渠道": raw(row.get("渠道")),
+            "渠道": channel,
             "风险等级": raw(row.get("风险等级")),
             "研报产品类型": raw(row.get("研报产品类型")),
             "成立日期": raw(row.get("成立日期")),

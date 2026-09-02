@@ -222,10 +222,30 @@
     state.advantageProductScope = "all";
     state.selectedId = "";
     state.tableSort = { key: "return", direction: "desc" };
+    Object.keys(B.globalStrategyFilterDefinitions || {}).forEach((key) => {
+      B.setGlobalStrategyFilter?.(key, false, { syncUrl: false });
+    });
     restoreFilterSnapshot = null;
     openMultiKey = "";
     opportunityProfileId = "";
     resetPage();
+    syncFilterUrl();
+  }
+
+  function syncFilterUrl() {
+    const target = new URL(window.location.href);
+    const setOrDelete = (key, value, emptyValue = "") => {
+      if (value === emptyValue || value === null || value === undefined || value === "") target.searchParams.delete(key);
+      else target.searchParams.set(key, String(value));
+    };
+    setOrDelete("productType", state.productType, "all");
+    setOrDelete("channel", state.channel);
+    setOrDelete("institution", state.institution);
+    setOrDelete("riskWeight", selectedValues("broadBuckets").length === 1 ? selectedValues("broadBuckets")[0] : "");
+    Object.entries(B.globalStrategyFilterDefinitions || {}).forEach(([key, config]) => {
+      target.searchParams.set(config.param, B.globalStrategyFilters?.[key] ? "1" : "0");
+    });
+    window.history.replaceState({}, "", `${target.pathname}${target.search}${target.hash}`);
   }
 
   function filterSnapshot() {
@@ -581,9 +601,10 @@
     return "同池资产结构较分散，客户沟通需要先说明比较边界。";
   }
 
-  function valuesFor(field) {
+  function valuesFor(field, { strategyOnly = false } = {}) {
     const set = new Set();
     rows.forEach((row) => {
+      if (strategyOnly && row.productType !== "投顾策略") return;
       const value = clean(row[field]);
       if (value) set.add(value);
     });
@@ -619,7 +640,8 @@
       || state.interval !== "上半年"
       || state.riskMetric !== "maxDrawdown"
       || state.gfOnly
-      || Boolean(state.search.trim());
+      || Boolean(state.search.trim())
+      || Object.keys(B.globalStrategyFilterDefinitions || {}).some((key) => Boolean(B.globalStrategyFilters?.[key]));
   }
 
   function matchesGlobalPackFilters(row) {
@@ -763,6 +785,8 @@
   }
 
   function renderControls() {
+    const channelValues = valuesFor("channel", { strategyOnly: true });
+    const institutionValues = valuesFor("institution", { strategyOnly: true });
     const broadBucketValues = valuesFor("broadEquityBucket");
     const trackValues = valuesFor("comparisonTrack");
     const fundTypeValues = valuesFor("fundMainType");
@@ -782,13 +806,15 @@
         </div>
         <button class="mixed-reset-filters" type="button" data-reset-filters${hasActiveFilters() ? "" : " disabled"}>重置条件</button>
       </div>
-      ${incomingScope.length ? `<div class="mixed-incoming-scope"><b>从机构总览带入</b>${incomingScope.map((item) => `<span>${esc(item)}</span>`).join("")}<small>重置条件会清除渠道、管理人与本页分档条件；全局数据条件可回机构总览调整。</small></div>` : ""}
+      ${incomingScope.length ? `<div class="mixed-incoming-scope"><b>从机构总览带入</b>${incomingScope.map((item) => `<span>${esc(item)}</span>`).join("")}<small>以下条件已按机构总览原值执行，可在本页直接微调；重置会清除全部联动条件。</small></div>` : ""}
       <div class="mixed-filter-grid">
         <label>产品范围<select id="mixedProductType" class="control">
           <option value="all"${state.productType === "all" ? " selected" : ""}>基金 + 投顾</option>
           <option value="公募基金"${state.productType === "公募基金" ? " selected" : ""}>公募基金</option>
           <option value="投顾策略"${state.productType === "投顾策略" ? " selected" : ""}>投顾策略</option>
         </select></label>
+        <label>销售渠道<select id="mixedChannel" class="control">${optionHtml(channelValues, state.channel || "all", "全部销售渠道")}</select></label>
+        <label>投顾管理人<select id="mixedInstitution" class="control">${optionHtml(institutionValues, state.institution || "all", "全部投顾管理人")}</select></label>
         ${multiControlHtml({ id: "mixedBroadBucket", label: "基准风险资产权重", stateKey: "broadBuckets", values: broadBucketValues, allLabel: "全部基准风险资产权重", labels: broadBucketLabels })}
         ${multiControlHtml({ id: "mixedComparisonTrack", label: "比较轨道", stateKey: "comparisonTracks", values: trackValues, allLabel: "全部轨道" })}
         ${multiControlHtml({ id: "mixedFundType", label: "基金类型", stateKey: "fundMainTypes", values: fundTypeValues, allLabel: "全部类型" })}
@@ -797,6 +823,9 @@
         <label>搜索<input id="mixedSearch" class="control" type="search" value="${esc(state.search)}" placeholder="名称、代码、机构、基准"></label>
         <label class="mixed-check"><input id="mixedGfOnly" type="checkbox"${state.gfOnly ? " checked" : ""}> 只看广发</label>
       </div>
+      <fieldset class="mixed-linked-filter-fieldset"><legend>策略数据条件（与机构总览一致）</legend><div class="mixed-linked-filter-grid">
+        ${Object.entries(B.globalStrategyFilterDefinitions || {}).map(([key, config]) => `<label class="mixed-check"><input type="checkbox" data-global-filter="${esc(key)}"${B.globalStrategyFilters?.[key] ? " checked" : ""}> ${esc(config.label)}</label>`).join("")}
+      </div></fieldset>
     </section>`;
   }
 
@@ -2325,11 +2354,15 @@
 
   function bindEvents() {
     const productType = document.getElementById("mixedProductType");
+    const channel = document.getElementById("mixedChannel");
+    const institution = document.getElementById("mixedInstitution");
     const interval = document.getElementById("mixedInterval");
     const riskMetric = document.getElementById("mixedRiskMetric");
     const gfOnly = document.getElementById("mixedGfOnly");
     const search = document.getElementById("mixedSearch");
-    productType?.addEventListener("change", (event) => { state.productType = event.target.value; state.selectedId = ""; restoreFilterSnapshot = null; openMultiKey = ""; opportunityProfileId = ""; resetPage(); render(); });
+    productType?.addEventListener("change", (event) => { state.productType = event.target.value; state.selectedId = ""; restoreFilterSnapshot = null; openMultiKey = ""; opportunityProfileId = ""; resetPage(); syncFilterUrl(); render(); });
+    channel?.addEventListener("change", (event) => { state.channel = event.target.value === "all" ? "" : event.target.value; if (state.channel) state.productType = "投顾策略"; state.selectedId = ""; restoreFilterSnapshot = null; openMultiKey = ""; opportunityProfileId = ""; resetPage(); syncFilterUrl(); render(); });
+    institution?.addEventListener("change", (event) => { state.institution = event.target.value === "all" ? "" : event.target.value; if (state.institution) state.productType = "投顾策略"; state.selectedId = ""; restoreFilterSnapshot = null; openMultiKey = ""; opportunityProfileId = ""; resetPage(); syncFilterUrl(); render(); });
     interval?.addEventListener("change", (event) => { state.interval = event.target.value; state.selectedId = ""; restoreFilterSnapshot = null; openMultiKey = ""; opportunityProfileId = ""; resetPage(); render(); });
     riskMetric?.addEventListener("change", (event) => { state.riskMetric = event.target.value; state.selectedId = ""; restoreFilterSnapshot = null; openMultiKey = ""; opportunityProfileId = ""; resetPage(); render(); });
     gfOnly?.addEventListener("change", (event) => { state.gfOnly = event.target.checked; state.selectedId = ""; restoreFilterSnapshot = null; openMultiKey = ""; opportunityProfileId = ""; resetPage(); render(); });
@@ -2347,6 +2380,18 @@
         restoreFilterSnapshot = null;
         opportunityProfileId = "";
         resetPage();
+        syncFilterUrl();
+        render();
+      });
+    });
+    root.querySelectorAll("[data-global-filter]").forEach((node) => {
+      node.addEventListener("change", (event) => {
+        B.setGlobalStrategyFilter?.(node.getAttribute("data-global-filter"), event.target.checked, { syncUrl: false });
+        state.selectedId = "";
+        restoreFilterSnapshot = null;
+        opportunityProfileId = "";
+        resetPage();
+        syncFilterUrl();
         render();
       });
     });

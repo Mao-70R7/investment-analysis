@@ -1,29 +1,65 @@
 {
   "version": 2,
-  "updatedAt": "2026-08-12",
+  "updatedAt": "2026-08-13",
   "说明": "系统字段检查规则用于约束核心 SQLite 表、页面数据包、字段字典和关键字段覆盖率。阈值分为当前有效下限和后续优化目标；标准化稽核只拦截低于当前有效下限的字段。",
   "pageStrategyScope": {
-    "activeChannelIds": ["ttfund", "gffunds", "gfsec_fima", "gfsec_robot", "qieman"],
-    "disabledChannelIds": ["gfbank_cgb"],
+    "activeChannelIds": [
+      "ttfund",
+      "gffunds",
+      "gfsec_fima",
+      "gfsec_robot",
+      "qieman",
+      "southern"
+    ],
+    "disabledChannelIds": [
+      "gfbank_cgb"
+    ],
     "canonicalChannelBySourceId": {
       "gffunds": "广发基金",
       "gfsec_fima": "广发证券",
       "gfsec_robot": "广发证券",
-      "qieman": "且慢"
+      "qieman": "盈米基金",
+      "southern": "南方基金"
     },
     "canonicalInstitutionAliases": {
       "广发基金-广发投顾": "广发基金",
       "广发基金投顾": "广发基金",
       "广发基金有限公司": "广发基金",
-      "广发基金管理有限公司": "广发基金"
+      "广发基金管理有限公司": "广发基金",
+      "且慢": "盈米基金",
+      "且慢/盈米基金": "盈米基金",
+      "盈米基金/且慢": "盈米基金"
     },
+    "managerFallbackBySourceId": {
+      "ttfund": "天天基金/投顾",
+      "gffunds": "广发基金",
+      "gfsec_fima": "广发证券",
+      "gfsec_robot": "广发证券",
+      "qieman": "盈米基金",
+      "southern": "南方基金"
+    },
+    "missingInstitutionValues": [
+      "",
+      "-",
+      "--",
+      "未披露",
+      "未披露投顾机构",
+      "未披露管理机构",
+      "未知",
+      "未知机构",
+      "未识别",
+      "未识别机构",
+      "待核验",
+      "待确认",
+      "未分类"
+    ],
     "relationshipInstitutionCanonicalization": {
       "enabled": true,
       "candidateKeyUsesCanonicalInstitution": true,
       "downstreamGroupingUsesCanonicalInstitution": true,
       "说明": "策略母子关系候选匹配、目标盈系列聚合和同系列治理稽核必须先使用 canonicalInstitutionAliases 归一投顾机构名称；原始名称只保留在证据中，不得因别名变化把高置信度关系降为review或拆分机构统计。"
     },
-    "说明": "渠道ID继续承担来源血缘；页面和业务统计使用归一名称。广发银行暂停日常采集、入库和页面展示，历史数据不物理删除。"
+    "说明": "渠道ID继续承担来源血缘；页面和业务统计使用归一名称。源端未披露投顾管理人时，以销售渠道的业务名称作为管理人兜底；已披露第三方管理人时保留原值。qieman/且慢在业务页面统一显示为盈米基金。广发银行暂停日常采集、入库和页面展示，历史数据不物理删除。"
   },
   "channelStrategyCoverage": [
     {
@@ -143,6 +179,34 @@
           "minimumRate": 0.99
         }
       ]
+    },
+    {
+      "channelId": "southern",
+      "ruleId": "SOUTHERN_CORE_STRATEGY_COVERAGE_BELOW_THRESHOLD",
+      "severity": "warn",
+      "dailyUpdateMode": "manual_only",
+      "skipWhenChannelAbsent": true,
+      "denominatorTable": "策略信息",
+      "idField": "统一策略ID",
+      "channelField": "渠道ID",
+      "metrics": [
+        {
+          "name": "官方成立以来日度业绩策略覆盖",
+          "table": "策略日度业绩",
+          "minimumRate": 1.0
+        },
+        {
+          "name": "官方当前精确基金仓位策略覆盖",
+          "table": "策略当前持仓",
+          "minimumRate": 1.0
+        },
+        {
+          "name": "官方成立以来历史基金仓位策略覆盖",
+          "table": "策略历史持仓",
+          "minimumRate": 1.0
+        }
+      ],
+      "说明": "南方基金已暂停每日自动更新，主库只保留最近成功历史快照；旧快照的核心事实覆盖不足仅用于披露，不阻断其他启用渠道的稽核、备份和发布。手工恢复南方采集时，候选批次仍必须通过 southern_gate 的全量闭环后才能入库。"
     }
   ],
   "channelPerformanceFreshness": [
@@ -155,9 +219,25 @@
       "channelField": "渠道ID",
       "strategyIdField": "渠道策略ID",
       "dateField": "交易日期",
-      "minimumLatestDateRate": 0.99,
+      "minimumFreshDateRate": 0.98,
+      "maximumStrategyBusinessDayLagFromChannelLatest": 1,
       "maximumBusinessDayLagFromSystemLatest": 1,
-      "说明": "且慢不只要求业绩表非空，还要求渠道最新日期相对系统最新交易日最多滞后 1 个工作日，且至少 99% 的已有业绩策略到达渠道最新日期。批次内另以源端净值日期做更严格的原始文件到主库闭环。"
+      "说明": "且慢不只要求业绩表非空，还要求渠道最新日期相对系统最新交易日最多滞后 1 个工作日；以全部已有业绩策略为分母，至少 98% 的策略达到渠道最新日或仅滞后 1 个工作日。批次内以源端净值日期执行同口径的原始文件到主库闭环。"
+    },
+    {
+      "channelId": "southern",
+      "ruleId": "SOUTHERN_LATEST_NAV_DATE_COVERAGE_LOW",
+      "severity": "warn",
+      "dailyUpdateMode": "manual_only",
+      "skipWhenChannelAbsent": true,
+      "table": "策略日度业绩",
+      "channelField": "渠道ID",
+      "strategyIdField": "渠道策略ID",
+      "dateField": "交易日期",
+      "minimumFreshDateRate": 1.0,
+      "maximumStrategyBusinessDayLagFromChannelLatest": 1,
+      "maximumBusinessDayLagFromSystemLatest": 1,
+      "说明": "南方基金已暂停每日自动更新，主库相对系统最新交易日的滞后仅作为历史快照提示，不阻断其他启用渠道自动发布。手工恢复南方采集时，候选新批次仍由 southern_gate 严格要求全部策略具有业绩且相对渠道最新日最多滞后 1 个工作日。"
     }
   ],
   "channelInventoryExclusionChecks": [
@@ -166,7 +246,11 @@
       "ruleId": "QIEMAN_INTERNAL_TEST_STRATEGY_EXPOSED",
       "severity": "error",
       "sourceFlagPath": "extra.is_test_or_internal",
-      "sourceStatusValues": ["test", "internal", "test_or_internal"],
+      "sourceStatusValues": [
+        "test",
+        "internal",
+        "test_or_internal"
+      ],
       "requiredPartitionInvariant": "catalog_discovered_strategy_total = strategy_total + catalog_excluded_internal_total",
       "requireDisjointIds": true,
       "prohibitMainDatabase": true,
@@ -183,7 +267,10 @@
       "requireNonEmptyWhenChannelPresent": true,
       "requireInstructionEventClosure": true,
       "instructionRatioField": "新增资金分配比例_百分比",
-      "portfolioWeightFields": ["调前权重_百分比", "调后权重_百分比"],
+      "portfolioWeightFields": [
+        "调前权重_百分比",
+        "调后权重_百分比"
+      ],
       "说明": "且慢发车历史必须落独立事件和基金指令实体；新增资金分配比例与组合存量权重分列，且每条指令都必须归属已加载事件。"
     }
   ],
@@ -202,7 +289,9 @@
       "dateField": "交易日期",
       "sectionField": "业绩区段类型",
       "sectionType": "official_strategy_model_yield",
-      "requiredFactFields": ["基准收益率_百分比"],
+      "requiredFactFields": [
+        "基准收益率_百分比"
+      ],
       "minimumDistinctDates": 2,
       "minimumRate": 0.95,
       "说明": "只有至少两个不同日期、且同日同时具备策略累计收益和官方基准收益的点位才算贝塔牛真实双曲线；货币策略专用曲线和单点披露不代替其他策略覆盖。"
@@ -223,7 +312,9 @@
       "dateField": "交易日期",
       "sectionField": "业绩区段类型",
       "sectionType": "gfbank_authenticated_ui_curve_tooltip",
-      "requiredFactFields": ["基准收益率_百分比"],
+      "requiredFactFields": [
+        "基准收益率_百分比"
+      ],
       "minimumDistinctDates": 2,
       "minimumRate": 0.8,
       "说明": "只有成立以来图上至少两个不同日期、且同日同时具备策略累计收益和基准累计收益精确提示框值时才算真实双曲线；单个最新净值点或缺基准值的点不计入曲线覆盖。"
@@ -239,13 +330,89 @@
       "childStrategyNameRegex": "期$",
       "prohibitDailyPerformanceWithoutChildSpecificOfficialEvidence": true,
       "说明": "目标盈子期详情的 spGroupCode 只标识期次；MP8769 使用母策略 groupCode，母策略曲线不得复制为子期独立曲线。"
+    },
+    {
+      "channelId": "ttfund",
+      "enabled": true,
+      "ruleId": "TTFUND_PUBLIC_QUOTE_ADVANCES_OFFICIAL_DATE",
+      "officialPerformanceTables": [
+        "策略产品披露净值"
+      ],
+      "nonOfficialSectionTypes": [
+        "public_quote"
+      ],
+      "officialLatestDateField": "官方最新业绩日期",
+      "说明": "天天公开行情快照只保存当日行情血缘，不得推进 App 官方曲线的最新业绩日期，也不得参与官方区间收益和风险指标。"
     }
   ],
+  "strategyBenchmarkCurveCheckpoints": [
+    {
+      "ruleId": "QIEMAN_EXACT_BENCHMARK_CURVE_CHECKPOINT_MISMATCH",
+      "strategyId": "qieman__ZH044931",
+      "strategyName": "启明睿-低波增强",
+      "curveName": "基准业绩",
+      "date": "2025-11-27",
+      "expectedCumulativeReturnPct": 8.65,
+      "tolerancePctPoints": 0.015,
+      "requiredComponentCodes": [
+        "000300.SH",
+        "CBA00103.CS"
+      ],
+      "requiredMethodContains": "逐日再平衡",
+      "evidence": "且慢 App 业绩基准走势图人工核验点"
+    }
+  ],
+  "strategyContributionCurveRequirements": [
+    {
+      "ruleId": "QIEMAN_OFFICIAL_REBALANCE_CONTRIBUTION_CURVE_MISSING",
+      "strategyId": "qieman__ZH044931",
+      "strategyName": "启明睿-低波增强",
+      "minEventCount": 1,
+      "minPointsPerSide": 2,
+      "requiredEvaluationStatus": "官方权重净值回放",
+      "minimumFundNavWeightCoveragePct": 98.0,
+      "说明": "该策略已有完整官方调前/调后基金权重；至少一个净值覆盖达标事件必须生成双侧贡献曲线。"
+    }
+  ],
+  "rebalanceQualityFreshnessCheck": {
+    "enabled": true,
+    "ruleId": "REBALANCE_QUALITY_FACTS_STALE",
+    "algorithmVersion": "standard_rebalance_asset_dual_nav_v10_all_channels_20260528",
+    "excludedChannelIds": [
+      "qieman"
+    ],
+    "sourceTable": "策略模拟净值区间",
+    "eventFactTable": "调仓质量事件分析",
+    "fundFactTable": "调仓质量基金明细",
+    "buildStatusTable": "调仓质量构建状态",
+    "说明": "除且慢官方权重直接回放外，当前算法下每个策略模拟区间调仓事件必须与调仓质量事件事实按事件ID一一对应；计数、最新日期、父子关系和构建状态必须闭合。"
+  },
+  "rebalanceContributionCurveCoverageCheck": {
+    "enabled": true,
+    "ruleId": "REBALANCE_CONTRIBUTION_CURVE_MISSING",
+    "excludedChannelIds": [
+      "qieman"
+    ],
+    "requiredEvaluationStatus": "可评估",
+    "latestEventOnly": true,
+    "publishedStrategiesOnly": true,
+    "minPointsPerSide": 2,
+    "说明": "除且慢独立官方权重回放外，发布策略列表内每个策略最近一个可评估调仓事件必须在详情包中生成同事件ID的调仓前、调仓后贡献曲线，且两侧各至少有两个不同日期的有效点；绝对最新事件尚无调后区间时回退到前一个可评估事件。"
+  },
   "sqliteTables": [
     {
       "name": "策略信息",
       "grain": "每个统一策略一行",
-      "requiredFields": ["统一策略ID", "渠道ID", "渠道策略ID", "策略名称", "投顾机构", "风险等级", "成立日期", "业绩基准"],
+      "requiredFields": [
+        "统一策略ID",
+        "渠道ID",
+        "渠道策略ID",
+        "策略名称",
+        "投顾机构",
+        "风险等级",
+        "成立日期",
+        "业绩基准"
+      ],
       "minNonNullRate": {
         "统一策略ID": 1.0,
         "渠道ID": 1.0,
@@ -263,6 +430,38 @@
       }
     },
     {
+      "name": "策略业绩基准成分",
+      "grain": "每策略-官方基准指数成分一行",
+      "fieldUnits": {
+        "权重_百分比": "百分点，例如 10 表示 10%"
+      },
+      "requiredFields": [
+        "统一策略ID",
+        "渠道ID",
+        "渠道策略ID",
+        "指数代码",
+        "指数名称",
+        "指数类型",
+        "权重_百分比",
+        "是否精确拆分",
+        "置信度",
+        "原始快照ID",
+        "最近入库时间"
+      ],
+      "minNonNullRate": {
+        "统一策略ID": 1.0,
+        "渠道ID": 1.0,
+        "渠道策略ID": 1.0,
+        "指数代码": 1.0,
+        "指数名称": 1.0,
+        "权重_百分比": 1.0,
+        "是否精确拆分": 1.0,
+        "置信度": 0.99,
+        "原始快照ID": 0.99,
+        "最近入库时间": 0.99
+      }
+    },
+    {
       "name": "策略日度业绩",
       "grain": "每策略-交易日一行",
       "fieldUnits": {
@@ -271,7 +470,15 @@
         "累计收益率_百分比": "百分点，例如 28.96 表示 28.96%",
         "基准收益率_百分比": "百分点，例如 -0.07 表示 -0.07%"
       },
-      "requiredFields": ["统一策略ID", "渠道ID", "交易日期", "单位净值", "日收益率_百分比", "累计收益率_百分比", "原始快照ID"],
+      "requiredFields": [
+        "统一策略ID",
+        "渠道ID",
+        "交易日期",
+        "单位净值",
+        "日收益率_百分比",
+        "累计收益率_百分比",
+        "原始快照ID"
+      ],
       "minNonNullRate": {
         "统一策略ID": 1.0,
         "渠道ID": 1.0,
@@ -285,7 +492,16 @@
     {
       "name": "基金标准分类字典",
       "grain": "每个基金份额代码一行",
-      "requiredFields": ["基金代码", "标准基金名称", "基金公司", "天天基金细分类", "标准资产大类", "标准资产细类", "置信度", "分类来源"],
+      "requiredFields": [
+        "基金代码",
+        "标准基金名称",
+        "基金公司",
+        "天天基金细分类",
+        "标准资产大类",
+        "标准资产细类",
+        "置信度",
+        "分类来源"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "标准基金名称": 1.0,
@@ -300,7 +516,16 @@
     {
       "name": "基金F10基准",
       "grain": "每只非 FOF 公募基金一行",
-      "requiredFields": ["基金代码", "基金名称", "F10基金类型", "业绩比较基准", "F10成立日期", "原始HTML路径", "采集状态", "更新时间"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "F10基金类型",
+        "业绩比较基准",
+        "F10成立日期",
+        "原始HTML路径",
+        "采集状态",
+        "更新时间"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -314,7 +539,23 @@
     {
       "name": "策略治理标签",
       "grain": "每个精细化渠道策略一行",
-      "requiredFields": ["统一策略ID", "策略名称", "治理状态", "分析分组", "是否信号类组合", "是否目标盈期次", "是否已停止", "是否清盘策略", "是否业绩停更", "是否缺官方业绩", "是否业绩异常", "是否纳入常规排名", "官方最新业绩日期", "标准净值截止日期", "规则说明"],
+      "requiredFields": [
+        "统一策略ID",
+        "策略名称",
+        "治理状态",
+        "分析分组",
+        "是否信号类组合",
+        "是否目标盈期次",
+        "是否已停止",
+        "是否清盘策略",
+        "是否业绩停更",
+        "是否缺官方业绩",
+        "是否业绩异常",
+        "是否纳入常规排名",
+        "官方最新业绩日期",
+        "标准净值截止日期",
+        "规则说明"
+      ],
       "minNonNullRate": {
         "统一策略ID": 1.0,
         "策略名称": 1.0,
@@ -334,7 +575,20 @@
     {
       "name": "策略关系",
       "grain": "每个已识别子策略一行，按数据域分别记录母策略来源",
-      "requiredFields": ["子策略ID", "母策略ID", "渠道ID", "关系类型", "置信度", "置信分", "关系状态", "证据JSON", "规则版本", "连续不一致次数", "首次识别时间", "最近复核时间"],
+      "requiredFields": [
+        "子策略ID",
+        "母策略ID",
+        "渠道ID",
+        "关系类型",
+        "置信度",
+        "置信分",
+        "关系状态",
+        "证据JSON",
+        "规则版本",
+        "连续不一致次数",
+        "首次识别时间",
+        "最近复核时间"
+      ],
       "minNonNullRate": {
         "子策略ID": 1.0,
         "母策略ID": 1.0,
@@ -353,7 +607,19 @@
     {
       "name": "基金主份额映射",
       "grain": "每个基金份额代码一行，每个基金家族仅一个主份额",
-      "requiredFields": ["基金代码", "基金家族ID", "主基金代码", "主基金名称", "份额类别", "计价币种", "是否主份额", "合并份额数", "映射来源", "映射置信度", "主份额选择规则"],
+      "requiredFields": [
+        "基金代码",
+        "基金家族ID",
+        "主基金代码",
+        "主基金名称",
+        "份额类别",
+        "计价币种",
+        "是否主份额",
+        "合并份额数",
+        "映射来源",
+        "映射置信度",
+        "主份额选择规则"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金家族ID": 1.0,
@@ -369,7 +635,25 @@
     {
       "name": "公募基金产品绩效快照",
       "grain": "每个基金份额代码一行",
-      "requiredFields": ["基金代码", "基金名称", "业绩比较基准", "基准风险资产权重", "基准权益权重_百分比", "基准债券权重_百分比", "基准货币权重_百分比", "基准商品权重_百分比", "基准另类权重_百分比", "基准未知权重_百分比", "基准港股权益权重_百分比", "基准海外权益权重_百分比", "基准互斥权重合计_百分比", "非权益比较轨道", "正式可比池", "可比池样本资格", "上半年收益率_百分比"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "业绩比较基准",
+        "基准风险资产权重",
+        "基准权益权重_百分比",
+        "基准债券权重_百分比",
+        "基准货币权重_百分比",
+        "基准商品权重_百分比",
+        "基准另类权重_百分比",
+        "基准未知权重_百分比",
+        "基准港股权益权重_百分比",
+        "基准海外权益权重_百分比",
+        "基准互斥权重合计_百分比",
+        "非权益比较轨道",
+        "正式可比池",
+        "可比池样本资格",
+        "上半年收益率_百分比"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -383,7 +667,13 @@
     {
       "name": "策略当前持仓",
       "grain": "每策略-持仓日期-基金一行",
-      "requiredFields": ["统一策略ID", "持仓日期", "基金代码", "基金名称", "基金权重_百分比"],
+      "requiredFields": [
+        "统一策略ID",
+        "持仓日期",
+        "基金代码",
+        "基金名称",
+        "基金权重_百分比"
+      ],
       "minNonNullRate": {
         "统一策略ID": 1.0,
         "持仓日期": 1.0,
@@ -393,9 +683,48 @@
       }
     },
     {
+      "name": "策略历史持仓",
+      "grain": "每策略-历史快照-基金一行",
+      "requiredFields": [
+        "统一策略ID",
+        "渠道ID",
+        "渠道策略ID",
+        "历史快照ID",
+        "持仓日期",
+        "基金代码",
+        "基金名称",
+        "基金权重_百分比",
+        "是否精确权重",
+        "置信度",
+        "访问级别",
+        "原始来源URL",
+        "采集批次ID"
+      ],
+      "minNonNullRate": {
+        "统一策略ID": 1.0,
+        "渠道ID": 1.0,
+        "渠道策略ID": 1.0,
+        "历史快照ID": 1.0,
+        "持仓日期": 1.0,
+        "基金代码": 0.99,
+        "基金名称": 1.0,
+        "基金权重_百分比": 0.995,
+        "是否精确权重": 1.0,
+        "置信度": 0.99,
+        "访问级别": 0.99,
+        "采集批次ID": 1.0
+      }
+    },
+    {
       "name": "策略调仓事件",
       "grain": "每策略-调仓事件一行",
-      "requiredFields": ["调仓事件ID", "统一策略ID", "调仓日期", "调仓标题", "调仓原因"],
+      "requiredFields": [
+        "调仓事件ID",
+        "统一策略ID",
+        "调仓日期",
+        "调仓标题",
+        "调仓原因"
+      ],
       "minNonNullRate": {
         "调仓事件ID": 1.0,
         "统一策略ID": 1.0,
@@ -407,7 +736,13 @@
     {
       "name": "策略调仓明细",
       "grain": "每调仓事件-基金明细一行",
-      "requiredFields": ["调仓事件ID", "基金代码", "基金名称", "调仓动作", "权重变化_百分比"],
+      "requiredFields": [
+        "调仓事件ID",
+        "基金代码",
+        "基金名称",
+        "调仓动作",
+        "权重变化_百分比"
+      ],
       "minNonNullRate": {
         "调仓事件ID": 1.0,
         "基金代码": 0.99,
@@ -419,7 +754,13 @@
     {
       "name": "基金信息",
       "grain": "每基金一行",
-      "requiredFields": ["基金代码", "基金名称", "基金公司", "基金类型", "最新净值日期"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "基金公司",
+        "基金类型",
+        "最新净值日期"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -436,7 +777,15 @@
     {
       "name": "FOF基金F10基准",
       "grain": "每只全市场 FOF 一行",
-      "requiredFields": ["基金代码", "基金名称", "FOF公开分类", "F10基金类型", "业绩比较基准", "F10成立日期", "采集状态"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "FOF公开分类",
+        "F10基金类型",
+        "业绩比较基准",
+        "F10成立日期",
+        "采集状态"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -449,7 +798,14 @@
     {
       "name": "FOF基准细分分类",
       "grain": "每只全市场 FOF 一行",
-      "requiredFields": ["基金代码", "基金名称", "FOF公开分类", "FOF基准细分分类", "解析置信度", "业绩比较基准"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "FOF公开分类",
+        "FOF基准细分分类",
+        "解析置信度",
+        "业绩比较基准"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -462,7 +818,15 @@
     {
       "name": "FOF产品绩效快照",
       "grain": "每只全市场 FOF 一行",
-      "requiredFields": ["基金代码", "基金名称", "FOF公开分类", "FOF基准细分分类", "业绩比较基准", "收益数据状态", "风险数据状态"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "FOF公开分类",
+        "FOF基准细分分类",
+        "业绩比较基准",
+        "收益数据状态",
+        "风险数据状态"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -488,7 +852,29 @@
     {
       "name": "公募基金产品绩效快照",
       "grain": "每只全市场公募基金一行",
-      "requiredFields": ["基金代码", "基金名称", "基金类型", "业绩比较基准", "业绩基准获取状态", "基准权益权重_百分比", "基准债券权重_百分比", "基准货币权重_百分比", "基准商品权重_百分比", "基准另类权重_百分比", "基准未知权重_百分比", "基准权重合计_百分比", "基准风险资产权重来源", "基准映射置信度", "基准解析说明", "是否使用分类兜底", "净值日期", "单位净值", "累计净值", "收益数据状态", "风险数据状态"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "基金类型",
+        "业绩比较基准",
+        "业绩基准获取状态",
+        "基准权益权重_百分比",
+        "基准债券权重_百分比",
+        "基准货币权重_百分比",
+        "基准商品权重_百分比",
+        "基准另类权重_百分比",
+        "基准未知权重_百分比",
+        "基准权重合计_百分比",
+        "基准风险资产权重来源",
+        "基准映射置信度",
+        "基准解析说明",
+        "是否使用分类兜底",
+        "净值日期",
+        "单位净值",
+        "累计净值",
+        "收益数据状态",
+        "风险数据状态"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -522,7 +908,13 @@
     {
       "name": "基金经济暴露快照",
       "grain": "每基金一行",
-      "requiredFields": ["基金代码", "基金名称", "经济资产暴露JSON", "经济行业暴露JSON", "质量状态"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "经济资产暴露JSON",
+        "经济行业暴露JSON",
+        "质量状态"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -534,7 +926,19 @@
     {
       "name": "QD基金限额快照",
       "grain": "每个合并后的底层 QD 基金一行",
-      "requiredFields": ["基金代码", "基金名称", "主基金代码", "合并份额代码", "基金公司", "QD方向", "申购状态", "销售端日限额", "个人日限额", "非个人日限额", "生成时间"],
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "主基金代码",
+        "合并份额代码",
+        "基金公司",
+        "QD方向",
+        "申购状态",
+        "销售端日限额",
+        "个人日限额",
+        "非个人日限额",
+        "生成时间"
+      ],
       "minNonNullRate": {
         "基金代码": 1.0,
         "基金名称": 1.0,
@@ -553,29 +957,82 @@
     {
       "file": "basic_summary_core.js",
       "objectPath": "strategies",
-      "requiredFields": ["统一策略ID", "策略名称", "渠道", "投顾机构", "策略治理状态", "是否已停止", "是否纳入常规排名", "天天当前对客展示", "天天展示状态", "业绩完整", "业绩完整性", "业绩完整性说明", "业绩基准说明", "基准可用状态", "基准风险资产权重", "基准风险资产权重_百分比", "权益中枢", "固收中枢", "风险资产偏离", "配置风格标签", "业绩基准来源策略ID", "业绩基准继承口径", "最新持仓日", "近1年", "最大回撤"]
+      "requiredFields": [
+        "统一策略ID",
+        "策略名称",
+        "渠道",
+        "投顾机构",
+        "策略治理状态",
+        "是否已停止",
+        "是否纳入常规排名",
+        "天天当前对客展示",
+        "天天展示状态",
+        "业绩完整",
+        "业绩完整性",
+        "业绩完整性说明",
+        "业绩基准说明",
+        "基准可用状态",
+        "基准风险资产权重",
+        "基准风险资产权重_百分比",
+        "权益中枢",
+        "固收中枢",
+        "风险资产偏离",
+        "配置风格标签",
+        "业绩基准来源策略ID",
+        "业绩基准继承口径",
+        "最新持仓日",
+        "近1年",
+        "最大回撤"
+      ]
     },
     {
       "file": "mixed_performance_scatter_pack.json",
       "objectPath": "rows",
-      "requiredFields": ["id", "name", "productType", "detailUrl", "peerPoolEligible"]
+      "requiredFields": [
+        "id",
+        "name",
+        "productType",
+        "detailUrl",
+        "peerPoolEligible"
+      ]
     },
     {
       "file": "fund_detail_pack.js",
       "fieldArray": "fundFields",
-      "requiredFields": ["基金代码", "基金名称", "基金类型", "二级分类", "经济资产暴露", "经济行业暴露", "经济暴露质量状态"]
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "基金类型",
+        "二级分类",
+        "经济资产暴露",
+        "经济行业暴露",
+        "经济暴露质量状态"
+      ]
     },
     {
       "file": "ai_semantic_index.js",
       "objectPath": "fundEntities",
       "fieldArray": "fields",
-      "requiredFields": ["基金代码", "基金名称", "实体Key", "实体名称", "实体类型", "暴露比例", "来源字段"]
+      "requiredFields": [
+        "基金代码",
+        "基金名称",
+        "实体Key",
+        "实体名称",
+        "实体类型",
+        "暴露比例",
+        "来源字段"
+      ]
     }
   ],
   "detailPageChecks": {
     "strategyDetails": {
       "directory": "data/details",
-      "currentHoldingRequiredRankPrefixes": ["近一月", "近三月", "近6月", "近1年"],
+      "currentHoldingRequiredRankPrefixes": [
+        "近一月",
+        "近三月",
+        "近6月",
+        "近1年"
+      ],
       "scaleErrorRule": "同一持仓基金四个区间中至少三个收益率不高于-90%时，判定为疑似复权净值量纲断裂并阻断发布。",
       "rankCoverageRule": "正常运行策略的正权重当前持仓缺少任一区间同类排名时阻断最小发布；停止或测试对象告警，并要求页面显示排名覆盖仓位。",
       "singlePointIntervalRule": "结构化曲线不足两个有效日期时不得计算区间收益；仅允许展示渠道明确披露的官方区间值。",
@@ -595,13 +1052,45 @@
       "filePattern": "data/raw/ttfund/incremental_update_runs/*/*/plan.json",
       "detailFreshnessSource": "strategyDetailPageData",
       "layoutCacheCountsAsDetail": false,
-      "counterInvariant": "detail_mtime_strategy_total <= detail_file_strategy_total"
+      "counterInvariant": "detail_mtime_strategy_total <= detail_file_strategy_total",
+      "routineDetailRefreshLimitRange": [
+        60,
+        80
+      ],
+      "stoppedDetailMinimumCooldownDays": 30,
+      "mandatoryDetailBypassesRoutineLimit": true,
+      "routineSelectionOrder": "oldest_success_first",
+      "piggybackCountsTowardRoutineLimit": true,
+      "singleStrategyWorkBundle": true,
+      "fieldLevelCheckpoint": true
     },
     "requiredCounterGroups": {
-      "ttfund": ["selected_current_holding_total", "raw_current_holding_success_total", "raw_current_holding_failed_total"],
-      "gffunds": ["metadata_selected_total", "metadata_success_total", "metadata_failure_total"],
-      "gfsec_fima": ["planned_portfolio_total", "processed_portfolio_total", "success_portfolio_total", "failure_portfolio_total", "planned_product_total", "processed_product_total", "success_product_total", "failure_product_total"],
-      "fund_nav": ["target_fund_total", "successful_fund_total", "empty_response_total", "failed_fund_total"]
+      "ttfund": [
+        "selected_current_holding_total",
+        "raw_current_holding_success_total",
+        "raw_current_holding_failed_total"
+      ],
+      "gffunds": [
+        "metadata_selected_total",
+        "metadata_success_total",
+        "metadata_failure_total"
+      ],
+      "gfsec_fima": [
+        "planned_portfolio_total",
+        "processed_portfolio_total",
+        "success_portfolio_total",
+        "failure_portfolio_total",
+        "planned_product_total",
+        "processed_product_total",
+        "success_product_total",
+        "failure_product_total"
+      ],
+      "fund_nav": [
+        "target_fund_total",
+        "successful_fund_total",
+        "empty_response_total",
+        "failed_fund_total"
+      ]
     },
     "invariants": [
       "ttfund.selected_current_holding_total = ttfund.raw_current_holding_success_total + ttfund.raw_current_holding_failed_total",
@@ -616,12 +1105,29 @@
       "ttfund.planned_strategy_total = sum(ttfund.current_holding_lifecycle_reason_counts)",
       "ttfund.definitively_stopped_skipped_total + ttfund.stopped_but_refreshable_total = ttfund.planned_strategy_total - ttfund.current_holding_lifecycle_reason_counts.active_status"
     ],
-    "requiredExistingPaths": ["ttfund.official_curve_summary_path"],
+    "requiredExistingPaths": [
+      "ttfund.official_curve_summary_path"
+    ],
     "executionStateFields": {
-      "ttfund": ["current_run", "unavailable"],
-      "gffunds": ["current_run", "historical", "unavailable"],
-      "gfsec_fima": ["current_run", "historical", "unavailable"],
-      "fund_nav": ["current_run", "historical", "unavailable"]
+      "ttfund": [
+        "current_run",
+        "unavailable"
+      ],
+      "gffunds": [
+        "current_run",
+        "historical",
+        "unavailable"
+      ],
+      "gfsec_fima": [
+        "current_run",
+        "historical",
+        "unavailable"
+      ],
+      "fund_nav": [
+        "current_run",
+        "historical",
+        "unavailable"
+      ]
     },
     "officialCurveDisclosureFields": [
       "state",
@@ -660,8 +1166,13 @@
       "GFSEC_FIMA_HISTORY_PARSE_ISSUE_LINEAGE"
     ],
     "businessKeys": {
-      "position_snapshots.jsonl": ["state_id", "fund_code"],
-      "transition_audit.jsonl": ["candidate_id"]
+      "position_snapshots.jsonl": [
+        "state_id",
+        "fund_code"
+      ],
+      "transition_audit.jsonl": [
+        "candidate_id"
+      ]
     },
     "invariants": [
       "summary counts equal JSONL row counts",
@@ -749,7 +1260,19 @@
   "fieldDictionary": {
     "file": "field_dictionary_pack.json",
     "minEntityCount": 8,
-    "requiredEntities": ["策略主表", "当前持仓", "调仓事件", "调仓基金明细", "基金分类", "基金经济暴露"],
-    "requiredFieldKeys": ["字段名", "口径", "来源", "来源可用"]
+    "requiredEntities": [
+      "策略主表",
+      "当前持仓",
+      "调仓事件",
+      "调仓基金明细",
+      "基金分类",
+      "基金经济暴露"
+    ],
+    "requiredFieldKeys": [
+      "字段名",
+      "口径",
+      "来源",
+      "来源可用"
+    ]
   }
 }

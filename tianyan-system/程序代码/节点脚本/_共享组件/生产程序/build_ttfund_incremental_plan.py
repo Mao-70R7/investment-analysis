@@ -139,8 +139,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--detail-refresh-limit",
         type=int,
-        default=80,
-        help="Maximum missing or stale detail targets per run. Use 0 for no limit.",
+        default=70,
+        help=(
+            "Maximum routine stale-detail/benchmark targets per run. Missing, invalid, new and "
+            "reactivated strategies are mandatory and never consume this limit. Use 0 for no routine limit."
+        ),
+    )
+    parser.add_argument(
+        "--stopped-detail-cooldown-days",
+        type=int,
+        default=30,
+        help=(
+            "Refresh definitively stopped strategies on this slower cadence. "
+            "Use 0 together with --detail-cooldown-days 0 to disable periodic detail refresh."
+        ),
     )
     parser.add_argument(
         "--current-holding-cooldown-days",
@@ -272,6 +284,178 @@ def ordered_union(*groups: list[str]) -> list[str]:
                 merged.append(item)
                 seen.add(item)
     return merged
+
+
+def parse_timestamp(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def oldest_first(
+    strategy_ids: list[str] | set[str],
+    timestamp_by_strategy: dict[str, Any],
+) -> list[str]:
+    """Order missing timestamps first, then oldest validated success/attempt, then strategy id."""
+
+    def sort_key(strategy_id: str) -> tuple[int, float, str]:
+        timestamp = parse_timestamp(timestamp_by_strategy.get(strategy_id))
+        if timestamp is None:
+            return (0, 0.0, strategy_id)
+        return (1, timestamp, strategy_id)
+
+    return sorted(set(strategy_ids), key=sort_key)
+
+
+def select_rolling_detail_work(
+    *,
+    mandatory_ids: list[str],
+    stale_detail_ids: list[str],
+    benchmark_repair_candidate_ids: list[str],
+    page_open_ids: list[str],
+    detail_mtime_by_strategy: dict[str, Any],
+    benchmark_attempt_mtime_by_strategy: dict[str, Any],
+    routine_limit: int,
+) -> dict[str, Any]:
+    """Build one shared routine budget for stale detail and benchmark repair work.
+
+    Mandatory work is never limited. Routine candidates already opened for holding/history are
+    charged to the budget first, so a second detail-page visit is not scheduled for them.
+    """
+
+    mandatory = dedupe(mandatory_ids)
+    mandatory_set = set(mandatory)
+    stale_set = set(stale_detail_ids)
+    benchmark_set = set(benchmark_repair_candidate_ids)
+    routine_candidates = (stale_set | benchmark_set) - mandatory_set
+
+    effective_timestamp_by_strategy: dict[str, Any] = {}
+    for strategy_id in routine_candidates:
+        timestamps = [
+            parse_timestamp(detail_mtime_by_strategy.get(strategy_id)),
+            parse_timestamp(benchmark_attempt_mtime_by_strategy.get(strategy_id)),
+        ]
+        available = [timestamp for timestamp in timestamps if timestamp is not None]
+        effective_timestamp_by_strategy[strategy_id] = min(available) if available else None
+
+    ordered_candidates = oldest_first(list(routine_candidates), effective_timestamp_by_strategy)
+    page_open_set = set(page_open_ids)
+    piggyback_candidates = [strategy_id for strategy_id in ordered_candidates if strategy_id in page_open_set]
+    standalone_candidates = [strategy_id for strategy_id in ordered_candidates if strategy_id not in page_open_set]
+
+    if routine_limit > 0:
+        selected_piggyback = piggyback_candidates[:routine_limit]
+        remaining = max(routine_limit - len(selected_piggyback), 0)
+        selected_standalone = standalone_candidates[:remaining]
+    else:
+        selected_piggyback = piggyback_candidates
+        selected_standalone = standalone_candidates
+
+    selected_routine = selected_piggyback + selected_standalone
+    selected_detail = ordered_union(mandatory, selected_routine)
+    selected_routine_set = set(selected_routine)
+    selected_detail_set = set(selected_detail)
+    return {
+        "mandatory_ids": mandatory,
+        "routine_candidate_ids": ordered_candidates,
+        "piggyback_candidate_ids": piggyback_candidates,
+        "selected_piggyback_ids": selected_piggyback,
+        "selected_standalone_ids": selected_standalone,
+        "selected_routine_ids": selected_routine,
+        "selected_stale_ids": [strategy_id for strategy_id in selected_routine if strategy_id in stale_set],
+        "selected_benchmark_ids": [
+            strategy_id for strategy_id in selected_detail if strategy_id in benchmark_set
+        ],
+        "selected_detail_ids": selected_detail,
+        "deferred_routine_ids": [
+            strategy_id for strategy_id in ordered_candidates if strategy_id not in selected_routine_set
+        ],
+        "routine_limit": routine_limit,
+        "mandatory_total": len(mandatory),
+        "selected_routine_total": len(selected_routine),
+        "selected_detail_total": len(selected_detail_set),
+    }
+
+
+def build_strategy_work_bundles(
+    *,
+    strategy_ids: list[str],
+    mandatory_detail_ids: list[str],
+    selected_routine_detail_ids: list[str],
+    selected_benchmark_ids: list[str],
+    selected_current_holding_ids: list[str],
+    selected_history_ids: list[str],
+    new_strategy_ids: list[str],
+    invalid_detail_ids: list[str],
+    reactivated_strategy_ids: list[str],
+    stale_detail_ids: list[str],
+) -> list[dict[str, Any]]:
+    mandatory_set = set(mandatory_detail_ids)
+    routine_set = set(selected_routine_detail_ids)
+    benchmark_set = set(selected_benchmark_ids)
+    holding_set = set(selected_current_holding_ids)
+    history_set = set(selected_history_ids)
+    new_set = set(new_strategy_ids)
+    invalid_set = set(invalid_detail_ids)
+    reactivated_set = set(reactivated_strategy_ids)
+    stale_set = set(stale_detail_ids)
+    selected_detail_set = mandatory_set | routine_set
+    bundle_ids = ordered_union(
+        [strategy_id for strategy_id in strategy_ids if strategy_id in history_set],
+        [strategy_id for strategy_id in strategy_ids if strategy_id in holding_set],
+        [strategy_id for strategy_id in strategy_ids if strategy_id in selected_detail_set],
+    )
+    bundles: list[dict[str, Any]] = []
+    for strategy_id in bundle_ids:
+        triggers: list[str] = []
+        if strategy_id in new_set:
+            triggers.append("new_strategy")
+        if strategy_id in mandatory_set:
+            triggers.append("mandatory_detail")
+        if strategy_id in invalid_set:
+            triggers.append("invalid_detail")
+        if strategy_id in reactivated_set:
+            triggers.append("reactivated")
+        if strategy_id in stale_set and strategy_id in routine_set:
+            triggers.append("stale_detail")
+        if strategy_id in benchmark_set:
+            triggers.append("benchmark_missing")
+        if strategy_id in holding_set:
+            triggers.append("current_holding_due")
+        if strategy_id in history_set:
+            triggers.append("rebalance_history_due")
+
+        if strategy_id in history_set:
+            capture_profile = "history_bundle"
+        elif strategy_id in holding_set:
+            capture_profile = "current_holding_bundle"
+        else:
+            capture_profile = "detail_bundle"
+        bundles.append(
+            {
+                "strategy_id": strategy_id,
+                "capture_profile": capture_profile,
+                "mandatory": strategy_id in mandatory_set,
+                "routine_detail": strategy_id in routine_set,
+                "deep_detail_refresh": strategy_id in selected_detail_set,
+                "required_fields": {
+                    "detail": strategy_id in selected_detail_set or strategy_id in holding_set or strategy_id in history_set,
+                    "benchmark_text": strategy_id in benchmark_set,
+                    "current_holding": strategy_id in holding_set,
+                    "rebalance_history": strategy_id in history_set,
+                },
+                "triggers": triggers,
+            }
+        )
+    return bundles
 
 
 def extract_strategy_id(patterns: tuple[Any, ...], filename: str) -> str | None:
@@ -855,6 +1039,11 @@ def main() -> None:
         if is_stopped_strategy_status(strategy_status_by_id.get(strategy_id))
         and lifecycle_class != "definitively_stopped"
     )
+    reactivated_strategy_ids = sorted(
+        strategy_id
+        for strategy_id, lifecycle_class in lifecycle_class_by_strategy.items()
+        if lifecycle_class == "stopped_flag_cleared"
+    )
     current_holding_scope_ids = [
         strategy_id for strategy_id in strategy_ids if lifecycle_class_by_strategy[strategy_id] != "definitively_stopped"
     ]
@@ -864,27 +1053,37 @@ def main() -> None:
     no_valid_detail_ids = sorted(set(strategy_ids) - detail_cache_ids)
     now_ts = datetime.now().astimezone().timestamp()
     detail_cooldown_seconds = max(0, args.detail_cooldown_days) * 86400
+    stopped_detail_cooldown_seconds = max(0, args.stopped_detail_cooldown_days) * 86400
     benchmark_detail_cooldown_seconds = max(0, args.benchmark_detail_cooldown_days) * 86400
     stale_detail_ids: list[str] = []
+    stale_active_detail_ids: list[str] = []
+    stale_stopped_detail_ids: list[str] = []
     if detail_cooldown_seconds:
         for strategy_id in strategy_ids:
             if strategy_id not in detail_cache_ids:
                 continue
+            is_definitively_stopped = lifecycle_class_by_strategy.get(strategy_id) == "definitively_stopped"
+            cooldown_seconds = (
+                stopped_detail_cooldown_seconds if is_definitively_stopped else detail_cooldown_seconds
+            )
+            if cooldown_seconds <= 0:
+                continue
             mtime_text = detail_mtime_by_strategy.get(strategy_id)
+            is_stale = False
             if not mtime_text:
+                is_stale = True
+            else:
+                mtime = parse_timestamp(mtime_text)
+                is_stale = mtime is None or now_ts - mtime >= cooldown_seconds
+            if is_stale:
                 stale_detail_ids.append(strategy_id)
-                continue
-            try:
-                mtime = datetime.fromisoformat(str(mtime_text)).timestamp()
-            except ValueError:
-                stale_detail_ids.append(strategy_id)
-                continue
-            if now_ts - mtime >= detail_cooldown_seconds:
-                stale_detail_ids.append(strategy_id)
-    stale_detail_ids = sorted(set(stale_detail_ids))
-    detail_refresh_ids = ordered_union(detail_missing_ids, stale_detail_ids)
-    if args.detail_refresh_limit > 0:
-        detail_refresh_ids = detail_refresh_ids[: args.detail_refresh_limit]
+                if is_definitively_stopped:
+                    stale_stopped_detail_ids.append(strategy_id)
+                else:
+                    stale_active_detail_ids.append(strategy_id)
+    stale_detail_ids = oldest_first(stale_detail_ids, detail_mtime_by_strategy)
+    stale_active_detail_ids = oldest_first(stale_active_detail_ids, detail_mtime_by_strategy)
+    stale_stopped_detail_ids = oldest_first(stale_stopped_detail_ids, detail_mtime_by_strategy)
     current_holding_cooldown_seconds = max(0, args.current_holding_cooldown_days) * 86400
     stale_current_holding_ids: list[str] = []
     for strategy_id in current_holding_scope_ids:
@@ -901,7 +1100,7 @@ def main() -> None:
             continue
         if current_holding_cooldown_seconds == 0 or now_ts - mtime >= current_holding_cooldown_seconds:
             stale_current_holding_ids.append(strategy_id)
-    stale_current_holding_ids = sorted(set(stale_current_holding_ids))
+    stale_current_holding_ids = oldest_first(stale_current_holding_ids, detail_mtime_by_strategy)
     current_holding_detail_missing_ids = [
         strategy_id for strategy_id in detail_missing_ids if strategy_id in current_holding_scope_id_set
     ]
@@ -909,7 +1108,7 @@ def main() -> None:
     if args.current_holding_refresh_limit > 0:
         current_holding_refresh_ids = current_holding_refresh_ids[: args.current_holding_refresh_limit]
     if args.benchmark_detail_repair_mode == "none":
-        benchmark_detail_repair_ids: list[str] = []
+        benchmark_detail_repair_candidate_ids: list[str] = []
     else:
         benchmark_candidates = (set(benchmark_text_missing_ids) - detail_benchmark_ids)
         if args.benchmark_detail_repair_mode == "missing_detail":
@@ -923,9 +1122,21 @@ def main() -> None:
             benchmark_candidates -= benchmark_recent_attempt_ids
         else:
             benchmark_recent_attempt_ids = set()
-        benchmark_detail_repair_ids = sorted(benchmark_candidates)
+        benchmark_timestamp_by_strategy = {
+            strategy_id: benchmark_attempt_mtime_by_strategy.get(
+                strategy_id,
+                detail_mtime_by_strategy.get(strategy_id),
+            )
+            for strategy_id in benchmark_candidates
+        }
+        benchmark_detail_repair_candidate_ids = oldest_first(
+            list(benchmark_candidates),
+            benchmark_timestamp_by_strategy,
+        )
         if args.benchmark_detail_repair_limit > 0:
-            benchmark_detail_repair_ids = benchmark_detail_repair_ids[: args.benchmark_detail_repair_limit]
+            benchmark_detail_repair_candidate_ids = benchmark_detail_repair_candidate_ids[
+                : args.benchmark_detail_repair_limit
+            ]
     if args.benchmark_detail_repair_mode == "none":
         benchmark_recent_attempt_ids = set()
     missing_history_ids = sorted(set(strategy_ids) - history_complete_ids)
@@ -1011,7 +1222,40 @@ def main() -> None:
     else:
         selected_history_ids = []
 
-    selected_detail_ids = ordered_union(detail_refresh_ids, benchmark_detail_repair_ids)
+    mandatory_detail_ids = ordered_union(
+        new_strategy_ids,
+        detail_missing_ids,
+        sorted(invalid_detail_ids),
+        reactivated_strategy_ids,
+    )
+    rolling_detail_selection = select_rolling_detail_work(
+        mandatory_ids=mandatory_detail_ids,
+        stale_detail_ids=stale_detail_ids,
+        benchmark_repair_candidate_ids=benchmark_detail_repair_candidate_ids,
+        page_open_ids=ordered_union(current_holding_refresh_ids, selected_history_ids),
+        detail_mtime_by_strategy=detail_mtime_by_strategy,
+        benchmark_attempt_mtime_by_strategy=benchmark_attempt_mtime_by_strategy,
+        routine_limit=args.detail_refresh_limit,
+    )
+    detail_refresh_ids = ordered_union(
+        mandatory_detail_ids,
+        rolling_detail_selection["selected_stale_ids"],
+    )
+    benchmark_detail_repair_ids = list(rolling_detail_selection["selected_benchmark_ids"])
+    selected_detail_ids = list(rolling_detail_selection["selected_detail_ids"])
+    selected_routine_detail_ids = list(rolling_detail_selection["selected_routine_ids"])
+    strategy_work_bundles = build_strategy_work_bundles(
+        strategy_ids=strategy_ids,
+        mandatory_detail_ids=mandatory_detail_ids,
+        selected_routine_detail_ids=selected_routine_detail_ids,
+        selected_benchmark_ids=benchmark_detail_repair_ids,
+        selected_current_holding_ids=current_holding_refresh_ids,
+        selected_history_ids=selected_history_ids,
+        new_strategy_ids=new_strategy_ids,
+        invalid_detail_ids=sorted(invalid_detail_ids),
+        reactivated_strategy_ids=reactivated_strategy_ids,
+        stale_detail_ids=stale_detail_ids,
+    )
     detail_missing_total = len(detail_missing_ids)
     strategy_total = len(strategy_ids)
     should_run_detail_drive = len(selected_detail_ids) > 0
@@ -1028,7 +1272,14 @@ def main() -> None:
     )
 
     probe_seconds = 25
-    detail_seconds = len(selected_detail_ids) * 16
+    standalone_detail_ids = list(rolling_detail_selection["selected_standalone_ids"])
+    mandatory_standalone_detail_ids = [
+        strategy_id
+        for strategy_id in mandatory_detail_ids
+        if strategy_id not in set(current_holding_refresh_ids) and strategy_id not in set(selected_history_ids)
+    ]
+    estimated_detail_open_ids = ordered_union(mandatory_standalone_detail_ids, standalone_detail_ids)
+    detail_seconds = len(estimated_detail_open_ids) * 32
     current_holding_seconds = len(current_holding_refresh_ids) * 8
     direct_probe_seconds = len(selected_rebalance_probe_ids) * 2
     selected_rebalance_probe_set = set(selected_rebalance_probe_ids)
@@ -1100,9 +1351,16 @@ def main() -> None:
             "benchmark_detail_recent_attempt_total": len(benchmark_recent_attempt_ids),
             "benchmark_detail_cooldown_days": args.benchmark_detail_cooldown_days,
             "detail_cooldown_days": args.detail_cooldown_days,
+            "stopped_detail_cooldown_days": args.stopped_detail_cooldown_days,
             "stale_detail_total": len(stale_detail_ids),
+            "stale_active_detail_total": len(stale_active_detail_ids),
+            "stale_stopped_detail_total": len(stale_stopped_detail_ids),
             "detail_refresh_limit": args.detail_refresh_limit,
             "detail_refresh_total": len(detail_refresh_ids),
+            "mandatory_detail_total": len(mandatory_detail_ids),
+            "routine_detail_selected_total": len(selected_routine_detail_ids),
+            "routine_detail_deferred_total": len(rolling_detail_selection["deferred_routine_ids"]),
+            "routine_detail_piggyback_total": len(rolling_detail_selection["selected_piggyback_ids"]),
             "current_holding_cooldown_days": args.current_holding_cooldown_days,
             "current_holding_scope_total": len(current_holding_scope_ids),
             "stopped_current_holding_skipped_total": len(stopped_current_holding_skipped_ids),
@@ -1162,9 +1420,26 @@ def main() -> None:
             "detail_missing_total": detail_missing_total,
             "detail_mode": "missing_or_stale_detail_plus_benchmark_repair",
             "detail_cooldown_days": args.detail_cooldown_days,
+            "stopped_detail_cooldown_days": args.stopped_detail_cooldown_days,
             "detail_refresh_limit": args.detail_refresh_limit,
             "stale_detail_total": len(stale_detail_ids),
             "stale_detail_ids": stale_detail_ids[:200],
+            "stale_active_detail_total": len(stale_active_detail_ids),
+            "stale_active_detail_ids": stale_active_detail_ids[:200],
+            "stale_stopped_detail_total": len(stale_stopped_detail_ids),
+            "stale_stopped_detail_ids": stale_stopped_detail_ids[:200],
+            "mandatory_detail_total": len(mandatory_detail_ids),
+            "mandatory_detail_ids": mandatory_detail_ids,
+            "routine_detail_candidate_total": len(rolling_detail_selection["routine_candidate_ids"]),
+            "routine_detail_candidate_ids": rolling_detail_selection["routine_candidate_ids"],
+            "routine_detail_selected_total": len(selected_routine_detail_ids),
+            "routine_detail_selected_ids": selected_routine_detail_ids,
+            "routine_detail_piggyback_total": len(rolling_detail_selection["selected_piggyback_ids"]),
+            "routine_detail_piggyback_ids": rolling_detail_selection["selected_piggyback_ids"],
+            "routine_detail_standalone_total": len(rolling_detail_selection["selected_standalone_ids"]),
+            "routine_detail_standalone_ids": rolling_detail_selection["selected_standalone_ids"],
+            "routine_detail_deferred_total": len(rolling_detail_selection["deferred_routine_ids"]),
+            "routine_detail_deferred_ids": rolling_detail_selection["deferred_routine_ids"],
             "detail_refresh_total": len(detail_refresh_ids),
             "detail_refresh_ids": detail_refresh_ids,
             "selected_detail_total": len(selected_detail_ids),
@@ -1207,6 +1482,8 @@ def main() -> None:
             "estimated_history_after_direct_ids": estimated_history_after_direct_ids,
             "latest_only_ids": latest_only_ids,
             "all_missing_history_ids": missing_history_ids,
+            "strategy_work_bundle_total": len(strategy_work_bundles),
+            "strategy_work_bundles": strategy_work_bundles,
         },
         "actions": {
             "should_run_direct_rebalance_probe": should_run_direct_rebalance_probe,
@@ -1226,8 +1503,12 @@ def main() -> None:
             "low_frequency": {
                 "strategy_detail": {
                     "cooldown_days": args.detail_cooldown_days,
-                    "refresh_limit": args.detail_refresh_limit,
+                    "stopped_cooldown_days": args.stopped_detail_cooldown_days,
+                    "routine_refresh_limit": args.detail_refresh_limit,
                     "missing_or_invalid_detail_always_selected": True,
+                    "new_or_reactivated_always_selected": True,
+                    "oldest_success_first": True,
+                    "piggyback_counts_toward_limit": True,
                 },
                 "benchmark_detail_repair": {
                     "mode": args.benchmark_detail_repair_mode,
@@ -1245,6 +1526,7 @@ def main() -> None:
             "quote_probe_seconds": probe_seconds,
             "direct_rebalance_probe_seconds": direct_probe_seconds,
             "detail_drive_seconds": detail_seconds,
+            "detail_standalone_open_total": len(estimated_detail_open_ids),
             "current_holding_drive_seconds": current_holding_seconds,
             "history_drive_seconds": history_seconds,
             "history_drive_worst_case_seconds": fallback_history_seconds,
@@ -1271,6 +1553,11 @@ def main() -> None:
             "selected_detail_total": len(selected_detail_ids),
             "stale_detail_total": len(stale_detail_ids),
             "detail_cooldown_days": args.detail_cooldown_days,
+            "stopped_detail_cooldown_days": args.stopped_detail_cooldown_days,
+            "mandatory_detail_total": len(mandatory_detail_ids),
+            "routine_detail_selected_total": len(selected_routine_detail_ids),
+            "routine_detail_deferred_total": len(rolling_detail_selection["deferred_routine_ids"]),
+            "routine_detail_piggyback_total": len(rolling_detail_selection["selected_piggyback_ids"]),
             "selected_current_holding_total": len(current_holding_refresh_ids),
             "stale_current_holding_total": len(stale_current_holding_ids),
             "current_holding_cooldown_days": args.current_holding_cooldown_days,

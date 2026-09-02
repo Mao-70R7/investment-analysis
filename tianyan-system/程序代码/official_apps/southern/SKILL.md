@@ -2,45 +2,63 @@
 
 ## 目标
 
-采集南方基金/司南投顾公开入口、登录跳转和可公开落地页信息，并记录登录后数据缺口。
+通过南方基金官方移动 H5 匿名页面采集司南投顾策略主数据、成立以来日度业绩与基准、基金级精确权重、资产大类配置及部分底层基金净值。
 
-## 复跑命令
+## 当前运行入口
+
+完整公开采集器暂存于独立验证包，尚未迁入每日 DAG：
 
 ```powershell
-python .\scripts\collect_official_apps_public.py --apps southern
+Set-Location 'D:\SyncthingShare\天眼系统\工具与归档\渠道采集独立验证\20260812\南方基金投顾数据采集'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_collection.ps1 -Workers 1
 ```
+
+`collect_official_apps_public.py --apps southern` 仍是旧的公开落地页探测器，不能用于刷新本次 35 个策略的完整迁移批次。后续应把独立验证包移入明确责任节点，补齐节点契约后再接入正式入口。
 
 ## 公开来源
 
-- `https://www.nffund.com/new/snzt/index.html`
-- 登录后 `iainvest` 交易系统入口。
+官方 H5：`https://m.nffund.com/new/index.html?tabIndex=RoboHomePage`
 
-## 标准输出
+- `IA049`：场景分类。
+- `IA050`：分类策略清单。
+- `IA028`：全部策略清单。
+- `IA009`：策略详情、基金级精确权重和资产大类配置；必须传 `assetflag=1`。
+- `IA006`：日度净值、收益和基准；`month=0` 为成立以来，`month=60` 为近五年。
+- `IA027`：分期策略每期业绩，部分策略返回空列表。
+- `IA029`：当前账户组合调仓执行进度，匿名请求要求登录；不等同于通用历史调仓。
+- `MSG002(type=7)`：投顾服务消息和调仓说明候选，要求有效登录态。
+- `IA032`：投顾业务公告和附件元数据，匿名可用；抽样为渠道级费率/业务公告，不含基金权重。
+- `FQ004`：部分底层基金详情和最新净值。
 
-- `official_apps/southern/outputs/app_public_entry.csv`
-- `official_apps/southern/outputs/latest_summary.json`
-- `official_apps/southern/outputs/coverage_check.json`
-- `official_apps/southern/outputs/source_inventory.json`
-- `official_apps/southern/outputs/raw_manifest.json`
+## 最新完整批次
 
-## 当前结果
+批次 `20260813T144500+0800_history0_full35` 已同步到天眼采集层，但尚未写入主数据库：
 
-最近一次成功运行：`20260523T224046+0800`。
+- 策略：35。
+- 成立以来日度业绩：48,401 行，35/35 个策略自各自成立日至 2026-08-12 完整。
+- 日度基准曲线：33/35，缺策略 7871、7879。
+- 基金精确持仓：629 行，覆盖 35/35 个策略，披露日 2026-06-30，全部闭合至 100%。
+- 资产大类配置：112 行，35 个策略均闭合至 100%。
+- 基金维度：265 只；本批次没有补采最新净值。
+- 南方公开原生调仓事件及基金变化：0；匿名产品接口未提供历史仓位，`IA029` 仅为账户组合调整进度候选。历史项目中已验证官方网页登录态 `webIAcombFundMarketQuery.ratioinfo` 可返回策略 79 的日度精确仓位；当前保留 1,588 日/24,808 行标准化恢复证据，但旧原始响应已缺失，必须标记为恢复候选而非完整原始证据。
 
-- 公开入口：成功。
-- 登录链接：1 个。
-- 公开策略：0 个。
-- 当前基金级持仓：0 行。
-- 调仓事件：0 个。
+## 口径和限制
 
-## 校验
+- `IA009 assetflag=1` 返回单基金精确权重，`strategy_fund_snapshot` 必须标记 `is_precise_weight=true` 并按策略、披露日、基金代码保存。
+- `strategy_asset_allocation_snapshot` 保存官方资产大类权重。
+- 日度收益字段是小数收益率，加载到主库时乘以 100 转为百分比。
+- 历史全量必须使用 `month=0`；断点缓存必须同时核对功能号与请求参数。
+- 35 个策略的策略业绩已覆盖成立以来；基准曲线仍缺 2 个策略。
+- 当前批次状态必须保持 `partial`，因为官方登录态历史仓位只验证/恢复 1/35，南方原生显式调仓说明和调仓明细仍不完整。
+
+## 验收
 
 ```powershell
 Get-Content -Raw -Encoding UTF8 .\official_apps\southern\outputs\coverage_check.json
 ```
 
-`collection_status` 应为 `success_landing_only`，`holding_penetration_status` 应为 `blocked_login_required`。
+原始独立包位于：
 
-## 已知口径
-
-公开页面是司南投顾入口；策略列表、仓位、业绩和调仓在登录后的 `iainvest` 交易系统内。当前公开采集不使用个人登录态，不做登录后交易系统抓取。
+```text
+工具与归档/渠道采集独立验证/20260812/南方基金投顾数据采集
+```

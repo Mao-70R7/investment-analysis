@@ -4,16 +4,20 @@
   "name": "广发证券历史接口补充采集",
   "phase": "03_广发渠道补充",
   "entrypoint": "run.ps1",
-  "dependencies": ["preflight_database"],
-  "allowFailedOptionalDependencies": true,
+  "dependencies": [
+    "preflight_database"
+  ],
   "criticality": "optional",
-  "failureImpact": "channel",
   "timeoutSeconds": 3600,
   "maxProcessAttempts": 1,
   "resourceLock": null,
   "supportsResume": true,
   "progressUnit": "个渠道",
-  "validator": {"type": "node_result", "requiredStatus": "passed"},
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
   "daily": true,
-  "action": "gf_supplemental_collect"
+  "action": "gf_supplemental_collect",
+  "failureImpact": "channel"
 }

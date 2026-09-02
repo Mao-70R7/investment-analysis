@@ -42,7 +42,8 @@
     [int]$BenchmarkDetailRepairLimit = 80,
     [int]$BenchmarkDetailCooldownDays = 7,
     [int]$DetailCooldownDays = 7,
-    [int]$DetailRefreshLimit = 80,
+    [int]$DetailRefreshLimit = 70,
+    [int]$StoppedDetailCooldownDays = 30,
     [int]$CurrentHoldingCooldownDays = 1,
     [int]$CurrentHoldingRefreshLimit = 0,
     [int]$DetailScanSwipes = 3,
@@ -119,6 +120,8 @@ function Get-StageLabel {
         "01_direct_interface" = "direct interface probe"
         "01_direct_history" = "direct history repair"
         "01_select_rebalance_history_targets" = "select rebalance history targets"
+        "01_strategy_work_bundle" = "collect per-strategy work bundles"
+        "01_strategy_work_bundle_physical_retry" = "retry incomplete work-bundle fields on physical phone"
         "01_detail_drive" = "collect missing detail"
         "01_detail_drive_physical_retry" = "physical phone second pass for failed detail"
         "01_current_holding_drive" = "collect current holding"
@@ -253,7 +256,7 @@ function Invoke-OptionalStage {
 function Get-DriveFailureIds {
     param(
         [string]$ResultsPath,
-        [ValidateSet("detail", "current_holding", "history")]
+        [ValidateSet("detail", "benchmark", "current_holding", "history", "bundle")]
         [string]$Mode,
         [string[]]$ExpectedIds = @()
     )
@@ -274,8 +277,10 @@ function Get-DriveFailureIds {
         $processed[$strategyId] = $true
         $ok = switch ($Mode) {
             "detail" { [bool]$row.detail_ok }
+            "benchmark" { [bool]$row.detail_ok -and [bool]$row.benchmark_text_ok }
             "current_holding" { [bool]$row.detail_ok -and [bool]$row.holding_info_ok }
             "history" { [bool]$row.detail_ok -and ([bool]$row.history_adjustment_ok -or [bool]$row.history_page_seen) }
+            "bundle" { [bool]$row.required_fields_ok }
         }
         if (-not $ok) {
             $failed.Add($strategyId)
@@ -293,7 +298,7 @@ function Get-DriveFailureIds {
 function Get-OptionalDriveFailureIds {
     param(
         [string]$ResultsPath,
-        [ValidateSet("detail", "current_holding", "history")]
+        [ValidateSet("detail", "benchmark", "current_holding", "history", "bundle")]
         [string]$Mode,
         [string[]]$ExpectedIds = @()
     )
@@ -391,6 +396,57 @@ function Write-StrategyFile {
     $StrategyIds | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+function Write-StrategyWorkBundleFile {
+    param(
+        [string]$Path,
+        [string[]]$DetailIds,
+        [string[]]$BenchmarkIds,
+        [string[]]$CurrentHoldingIds,
+        [string[]]$HistoryIds
+    )
+    $detailSet = @{}
+    $benchmarkSet = @{}
+    $holdingSet = @{}
+    $historySet = @{}
+    foreach ($strategyId in $DetailIds) { if ($strategyId) { $detailSet[[string]$strategyId] = $true } }
+    foreach ($strategyId in $BenchmarkIds) { if ($strategyId) { $benchmarkSet[[string]$strategyId] = $true } }
+    foreach ($strategyId in $CurrentHoldingIds) { if ($strategyId) { $holdingSet[[string]$strategyId] = $true } }
+    foreach ($strategyId in $HistoryIds) { if ($strategyId) { $historySet[[string]$strategyId] = $true } }
+    $allIds = Join-UniqueStrings -Groups @($HistoryIds, $CurrentHoldingIds, $DetailIds)
+    $bundles = @(
+        foreach ($strategyIdValue in $allIds) {
+            $strategyId = [string]$strategyIdValue
+            $needsHistory = $historySet.ContainsKey($strategyId)
+            $needsHolding = $holdingSet.ContainsKey($strategyId)
+            $needsDetail = $detailSet.ContainsKey($strategyId) -or $needsHolding -or $needsHistory
+            $profile = if ($needsHistory) { "history_bundle" } elseif ($needsHolding) { "current_holding_bundle" } else { "detail_bundle" }
+            [ordered]@{
+                strategy_id = $strategyId
+                capture_profile = $profile
+                deep_detail_refresh = $detailSet.ContainsKey($strategyId)
+                required_fields = [ordered]@{
+                    detail = $needsDetail
+                    benchmark_text = $benchmarkSet.ContainsKey($strategyId)
+                    current_holding = $needsHolding
+                    rebalance_history = $needsHistory
+                }
+            }
+        }
+    )
+    $parent = Split-Path -Parent $Path
+    if ($parent) {
+        $null = New-Item -ItemType Directory -Path $parent -Force
+    }
+    $temporaryPath = "{0}.{1}.tmp" -f $Path, $PID
+    [ordered]@{
+        schema_version = 1
+        generated_at = (Get-Date).ToString("s")
+        strategy_work_bundles = $bundles
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+    Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+    return @($allIds)
+}
+
 function Find-DirectInterfaceFlow {
     if ($DirectInterfaceFlowPath) {
         if (Test-Path -LiteralPath $DirectInterfaceFlowPath) {
@@ -416,6 +472,8 @@ function Read-DirectInterfaceSuccess {
     param([string]$ResultsPath)
     $success = @{
         detail = @{}
+        benchmark = @{}
+        holding = @{}
         history = @{}
     }
     $rows = @(Read-JsonArrayStrict -Path $ResultsPath)
@@ -426,6 +484,12 @@ function Read-DirectInterfaceSuccess {
         }
         if ([bool]$row.detail_ok) {
             $success.detail[$strategyId] = $true
+        }
+        if ([bool]$row.benchmark_text_ok) {
+            $success.benchmark[$strategyId] = $true
+        }
+        if ([bool]$row.detail_ok -and [bool]$row.holding_info_ok) {
+            $success.holding[$strategyId] = $true
         }
         if ([bool]$row.history_adjustment_ok -or [bool]$row.history_checked_ok) {
             $success.history[$strategyId] = $true
@@ -522,6 +586,7 @@ try {
         "--benchmark-detail-cooldown-days", "$BenchmarkDetailCooldownDays",
         "--detail-cooldown-days", "$DetailCooldownDays",
         "--detail-refresh-limit", "$DetailRefreshLimit",
+        "--stopped-detail-cooldown-days", "$StoppedDetailCooldownDays",
         "--current-holding-cooldown-days", "$CurrentHoldingCooldownDays",
         "--current-holding-refresh-limit", "$CurrentHoldingRefreshLimit",
         "--rebalance-stale-days", "$RebalanceStaleDays",
@@ -607,7 +672,14 @@ try {
             discovery_cache_sync_state = $discoverySyncState
             selected_detail_total = [int]$plan.selection.selected_detail_total
             detail_cooldown_days = [int]$plan.selection.detail_cooldown_days
+            stopped_detail_cooldown_days = [int]$plan.selection.stopped_detail_cooldown_days
             stale_detail_total = [int]$plan.selection.stale_detail_total
+            stale_active_detail_total = [int]$plan.selection.stale_active_detail_total
+            stale_stopped_detail_total = [int]$plan.selection.stale_stopped_detail_total
+            mandatory_detail_total = [int]$plan.selection.mandatory_detail_total
+            routine_detail_selected_total = [int]$plan.selection.routine_detail_selected_total
+            routine_detail_piggyback_total = [int]$plan.selection.routine_detail_piggyback_total
+            routine_detail_deferred_total = [int]$plan.selection.routine_detail_deferred_total
             detail_refresh_total = [int]$plan.selection.detail_refresh_total
             current_holding_cooldown_days = [int]$plan.selection.current_holding_cooldown_days
             stale_current_holding_total = [int]$plan.selection.stale_current_holding_total
@@ -629,6 +701,7 @@ try {
     }
 
     $selectedDetailIds = ConvertTo-StringArray $plan.selection.selected_detail_ids
+    $selectedBenchmarkIds = ConvertTo-StringArray $plan.selection.benchmark_detail_repair_ids
     $selectedCurrentHoldingIds = ConvertTo-StringArray $plan.selection.selected_current_holding_ids
     $selectedHistoryIds = ConvertTo-StringArray $plan.selection.selected_history_ids
     $selectedProbeIds = ConvertTo-StringArray $plan.selection.selected_rebalance_probe_ids
@@ -660,6 +733,10 @@ try {
     $detailDriveSummary = $null
     $currentHoldingDriveSummary = $null
     $historyDriveSummary = $null
+    $strategyWorkBundleSummary = $null
+    $strategyWorkBundleIds = @()
+    $strategyWorkBundlePrimaryFailedIds = @()
+    $strategyWorkBundleFinalFailedIds = @()
 
     $directInterfaceFlow = Find-DirectInterfaceFlow
     $directTargetIds = @($selectedProbeIds)
@@ -692,8 +769,24 @@ try {
             $directRan = $true
             $directInterfaceState = $(if ($directInterfaceFlow) { "completed" } else { "completed_builtin_adjust_templates" })
             $directSuccess = Read-DirectInterfaceSuccess -ResultsPath (Join-Path $directInterfaceRunDir "results.json")
-            $detailDriveIds = @($detailDriveIds | Where-Object { -not $directSuccess.detail.ContainsKey([string]$_) })
-            $currentHoldingDriveIds = @($currentHoldingDriveIds | Where-Object { -not $directSuccess.detail.ContainsKey([string]$_) })
+            $benchmarkRequiredSet = @{}
+            foreach ($strategyId in $selectedBenchmarkIds) {
+                $benchmarkRequiredSet[[string]$strategyId] = $true
+            }
+            $detailDriveIds = @(
+                $detailDriveIds | Where-Object {
+                    $strategyId = [string]$_
+                    $detailSatisfied = $directSuccess.detail.ContainsKey($strategyId)
+                    $benchmarkSatisfied = (-not $benchmarkRequiredSet.ContainsKey($strategyId)) -or $directSuccess.benchmark.ContainsKey($strategyId)
+                    -not ($detailSatisfied -and $benchmarkSatisfied)
+                }
+            )
+            $selectedBenchmarkIds = @(
+                $selectedBenchmarkIds | Where-Object { -not $directSuccess.benchmark.ContainsKey([string]$_) }
+            )
+            $currentHoldingDriveIds = @(
+                $currentHoldingDriveIds | Where-Object { -not $directSuccess.holding.ContainsKey([string]$_) }
+            )
         }
         catch {
             $directInterfaceState = "failed_fallback_to_adb"
@@ -909,13 +1002,105 @@ try {
         $adbFallbackTruncated = $true
     }
 
-    if ($detailDriveIds.Count -gt 0 -and $currentHoldingDriveIds.Count -gt 0) {
-        $detailDriveSet = @{}
-        foreach ($strategyId in $detailDriveIds) {
-            $detailDriveSet[[string]$strategyId] = $true
+    # The device unit of work is one strategy, not one stage. A history visit also
+    # validates detail/benchmark/current holding, and a holding visit validates detail.
+    # Only fields proven complete by the direct interface were removed above.
+    $bundleDetailIds = @($detailDriveIds)
+    $bundleBenchmarkIds = @($selectedBenchmarkIds | Where-Object { $_ -in $bundleDetailIds })
+    $bundleCurrentHoldingIds = @($currentHoldingDriveIds)
+    $bundleHistoryIds = @($historyDriveIds)
+    $strategyWorkBundleRunDir = Join-Path $jobRoot "01_strategy_work_bundle"
+    $strategyWorkBundleFile = Join-Path $strategyWorkBundleRunDir "work_bundles.json"
+    $strategyWorkBundleIds = @(
+        Write-StrategyWorkBundleFile `
+            -Path $strategyWorkBundleFile `
+            -DetailIds $bundleDetailIds `
+            -BenchmarkIds $bundleBenchmarkIds `
+            -CurrentHoldingIds $bundleCurrentHoldingIds `
+            -HistoryIds $bundleHistoryIds
+    )
+    $currentHoldingDriveExecutedTotal = $bundleCurrentHoldingIds.Count
+    if ($strategyWorkBundleIds.Count -gt 0 -and $canSyncDeviceCache) {
+        $bundleArgs = @(
+            ".\节点脚本\_共享组件\生产程序\drive_ttfund_app.py",
+            "--adb-path", $AdbExe,
+            "--device-id", $DeviceId,
+            "--work-bundle-file", $strategyWorkBundleFile,
+            "--run-dir", $strategyWorkBundleRunDir,
+            "--skip-existing-results",
+            "--detail-scan-swipes", "$DetailScanSwipes",
+            "--max-attempts", "2",
+            "--retry-wait-ms", "2500",
+            "--soft-circuit-break-consecutive-incomplete-detail", "$DeviceFailureCircuitBreakThreshold",
+            "--soft-circuit-break-max-recoveries", "$DeviceFailureCircuitRecoveryLimit",
+            "--capture-failures"
+        )
+        Invoke-Stage -StageName "01_strategy_work_bundle" -CommandArgs $bundleArgs
+        $bundleResultsPath = Join-Path $strategyWorkBundleRunDir "results.json"
+        $strategyWorkBundleSummary = Read-JsonObjectOrNull -Path (Join-Path $strategyWorkBundleRunDir "summary.json")
+        $detailOnlyPrimaryFailedIds = @(Get-DriveFailureIds -ResultsPath $bundleResultsPath -Mode "detail" -ExpectedIds $bundleDetailIds)
+        $benchmarkPrimaryFailedIds = @(Get-DriveFailureIds -ResultsPath $bundleResultsPath -Mode "benchmark" -ExpectedIds $bundleBenchmarkIds)
+        $detailPrimaryFailedIds = @(Join-UniqueStrings -Groups @($detailOnlyPrimaryFailedIds, $benchmarkPrimaryFailedIds))
+        $currentHoldingPrimaryFailedIds = @(Get-DriveFailureIds -ResultsPath $bundleResultsPath -Mode "current_holding" -ExpectedIds $bundleCurrentHoldingIds)
+        $historyPrimaryFailedIds = @(Get-DriveFailureIds -ResultsPath $bundleResultsPath -Mode "history" -ExpectedIds $bundleHistoryIds)
+        $strategyWorkBundlePrimaryFailedIds = @(Get-DriveFailureIds -ResultsPath $bundleResultsPath -Mode "bundle" -ExpectedIds $strategyWorkBundleIds)
+        $detailFinalFailedIds = @($detailPrimaryFailedIds)
+        $currentHoldingFinalFailedIds = @($currentHoldingPrimaryFailedIds)
+        $historyFinalFailedIds = @($historyPrimaryFailedIds)
+        $strategyWorkBundleFinalFailedIds = @($strategyWorkBundlePrimaryFailedIds)
+
+        if ($strategyWorkBundlePrimaryFailedIds.Count -gt 0) {
+            $retryControlDir = Join-Path $jobRoot "01_strategy_work_bundle_physical_retry"
+            $retryFile = Join-Path $retryControlDir "strategy_ids.txt"
+            Write-StrategyFile -Path $retryFile -StrategyIds $strategyWorkBundlePrimaryFailedIds
+            $retryArgs = @(
+                ".\节点脚本\_共享组件\生产程序\drive_ttfund_app.py",
+                "--adb-path", $AdbExe,
+                "--device-id", $DeviceId,
+                "--strategy-file", $retryFile,
+                "--work-bundle-file", $strategyWorkBundleFile,
+                "--run-dir", $strategyWorkBundleRunDir,
+                "--skip-existing-results",
+                "--detail-scan-swipes", "$DetailScanSwipes",
+                "--max-attempts", "2",
+                "--retry-wait-ms", "5000",
+                "--soft-circuit-break-consecutive-incomplete-detail", "$DeviceFailureCircuitBreakThreshold",
+                "--soft-circuit-break-max-recoveries", "$DeviceFailureCircuitRecoveryLimit",
+                "--capture-failures",
+                "--keep-run-cache"
+            )
+            Write-Host ("[真机补采] 单策略任务包首轮仍有 {0} 个字段不完整对象，继续使用同一真机 {1} 定向补采。" -f $strategyWorkBundlePrimaryFailedIds.Count, $DeviceId)
+            $detailPhysicalRetryAttempted = $detailPrimaryFailedIds.Count -gt 0
+            $currentHoldingPhysicalRetryAttempted = $currentHoldingPrimaryFailedIds.Count -gt 0
+            $historyPhysicalRetryAttempted = $historyPrimaryFailedIds.Count -gt 0
+            Invoke-OptionalStage -StageName "01_strategy_work_bundle_physical_retry" -CommandArgs $retryArgs
+            $retryResultsPath = Join-Path $strategyWorkBundleRunDir "results.json"
+            $retrySummary = Read-JsonObjectOrNull -Path (Join-Path $strategyWorkBundleRunDir "summary.json")
+            $strategyWorkBundleSummary = $retrySummary
+            $detailPhysicalRetrySummary = $retrySummary
+            $currentHoldingPhysicalRetrySummary = $retrySummary
+            $historyPhysicalRetrySummary = $retrySummary
+            $detailOnlyFinalFailedIds = @(Get-OptionalDriveFailureIds -ResultsPath $retryResultsPath -Mode "detail" -ExpectedIds $detailOnlyPrimaryFailedIds)
+            $benchmarkFinalFailedIds = @(Get-OptionalDriveFailureIds -ResultsPath $retryResultsPath -Mode "benchmark" -ExpectedIds $benchmarkPrimaryFailedIds)
+            $detailFinalFailedIds = @(Join-UniqueStrings -Groups @($detailOnlyFinalFailedIds, $benchmarkFinalFailedIds))
+            $currentHoldingFinalFailedIds = @(Get-OptionalDriveFailureIds -ResultsPath $retryResultsPath -Mode "current_holding" -ExpectedIds $currentHoldingPrimaryFailedIds)
+            $historyFinalFailedIds = @(Get-OptionalDriveFailureIds -ResultsPath $retryResultsPath -Mode "history" -ExpectedIds $historyPrimaryFailedIds)
+            $strategyWorkBundleFinalFailedIds = @(Get-OptionalDriveFailureIds -ResultsPath $retryResultsPath -Mode "bundle" -ExpectedIds $strategyWorkBundlePrimaryFailedIds)
         }
-        $currentHoldingDriveIds = @($currentHoldingDriveIds | Where-Object { -not $detailDriveSet.ContainsKey([string]$_) })
     }
+    elseif ($strategyWorkBundleIds.Count -gt 0) {
+        $skippedDeviceStages += "01_strategy_work_bundle"
+        $detailFinalFailedIds = @($bundleDetailIds)
+        $currentHoldingFinalFailedIds = @($bundleCurrentHoldingIds)
+        $historyFinalFailedIds = @($bundleHistoryIds)
+        $strategyWorkBundleFinalFailedIds = @($strategyWorkBundleIds)
+    }
+
+    # The legacy per-stage blocks below remain as a compatibility boundary, but
+    # receive no ids after the unified bundle stage and therefore cannot reopen a strategy.
+    $detailDriveIds = @()
+    $currentHoldingDriveIds = @()
+    $historyDriveIds = @()
 
     if ($detailDriveIds.Count -gt 0 -and $canSyncDeviceCache) {
         $detailDriveRunDir = Join-Path $jobRoot "01_detail_drive"
@@ -1098,7 +1283,7 @@ try {
         $skippedDeviceStages += "02_history_drive"
     }
 
-    $shouldRunCollect = ([bool]$plan.actions.should_collect -or $directRan -or $directHistoryRan -or $detailDriveIds.Count -gt 0 -or $currentHoldingDriveIds.Count -gt 0 -or $historyDriveIds.Count -gt 0)
+    $shouldRunCollect = ([bool]$plan.actions.should_collect -or $directRan -or $directHistoryRan -or $strategyWorkBundleIds.Count -gt 0 -or $detailDriveIds.Count -gt 0 -or $currentHoldingDriveIds.Count -gt 0 -or $historyDriveIds.Count -gt 0)
     if ($shouldRunCollect) {
         $collectRunId = "${runId}__collect"
         $collectArgs = @(
@@ -1254,9 +1439,7 @@ try {
     }
 
     $softGapTotal = (
-        $detailFinalFailedIds.Count +
-        $currentHoldingFinalFailedIds.Count +
-        $historyFinalFailedIds.Count +
+        $strategyWorkBundleFinalFailedIds.Count +
         [int](Get-JsonIntProperty -Object $officialCurveSummary -Name "missing_strategy_total")
     )
     $summaryState = if ($softGapTotal -gt 0) { "completed_with_warning" } else { "completed" }
@@ -1312,7 +1495,14 @@ try {
         skipped_device_stages = $skippedDeviceStages
         selected_detail_total = [int]$plan.selection.selected_detail_total
         detail_cooldown_days = [int]$plan.selection.detail_cooldown_days
+        stopped_detail_cooldown_days = [int]$plan.selection.stopped_detail_cooldown_days
         stale_detail_total = [int]$plan.selection.stale_detail_total
+        stale_active_detail_total = [int]$plan.selection.stale_active_detail_total
+        stale_stopped_detail_total = [int]$plan.selection.stale_stopped_detail_total
+        mandatory_detail_total = [int]$plan.selection.mandatory_detail_total
+        routine_detail_selected_total = [int]$plan.selection.routine_detail_selected_total
+        routine_detail_piggyback_total = [int]$plan.selection.routine_detail_piggyback_total
+        routine_detail_deferred_total = [int]$plan.selection.routine_detail_deferred_total
         detail_refresh_total = [int]$plan.selection.detail_refresh_total
         current_holding_cooldown_days = [int]$plan.selection.current_holding_cooldown_days
         stale_current_holding_total = [int]$plan.selection.stale_current_holding_total
@@ -1321,28 +1511,32 @@ try {
         stopped_but_refreshable_total = [int]$plan.selection.stopped_but_refreshable_total
         current_holding_lifecycle_reason_counts = $plan.selection.current_holding_lifecycle_reason_counts
         benchmark_detail_repair_total = [int]$plan.selection.benchmark_detail_repair_total
-        adb_detail_drive_total = $detailDriveIds.Count
+        strategy_work_bundle_run_dir = $strategyWorkBundleRunDir
+        strategy_work_bundle_file = $strategyWorkBundleFile
+        strategy_work_bundle_total = $strategyWorkBundleIds.Count
+        strategy_work_bundle_primary_failed_total = $strategyWorkBundlePrimaryFailedIds.Count
+        strategy_work_bundle_primary_failed_ids = $strategyWorkBundlePrimaryFailedIds
+        strategy_work_bundle_final_failed_total = $strategyWorkBundleFinalFailedIds.Count
+        strategy_work_bundle_final_failed_ids = $strategyWorkBundleFinalFailedIds
+        strategy_work_bundle_reused_checkpoint_total = (Get-JsonIntProperty -Object $strategyWorkBundleSummary -Name "reused_checkpoint_total")
+        adb_detail_drive_total = $bundleDetailIds.Count
         adb_current_holding_planned_total = $currentHoldingDrivePlannedTotal
         adb_current_holding_drive_total = $currentHoldingDriveExecutedTotal
         adb_current_holding_device_total = $currentHoldingDevices.Count
         adb_current_holding_device_ids = $currentHoldingDevices
         adb_current_holding_unavailable_device_ids = $currentHoldingUnavailableDevices
-        adb_detail_drive_detail_missing_total = (Get-JsonIntProperty -Object $detailDriveSummary -Name "detail_missing_total")
-        adb_current_holding_detail_missing_total = (Get-JsonIntProperty -Object $currentHoldingDriveSummary -Name "detail_missing_total")
-        adb_history_drive_detail_missing_total = (Get-JsonIntProperty -Object $historyDriveSummary -Name "detail_missing_total")
-        adb_detail_source_unavailable_total = (Get-JsonIntProperty -Object $detailDriveSummary -Name "source_unavailable_total")
-        adb_current_holding_source_unavailable_total = (Get-JsonIntProperty -Object $currentHoldingDriveSummary -Name "source_unavailable_total")
-        adb_history_source_unavailable_total = (Get-JsonIntProperty -Object $historyDriveSummary -Name "source_unavailable_total")
-        adb_source_unavailable_ids = (Join-UniqueStrings -Groups @(
-            (ConvertTo-StringArray $detailDriveSummary.source_unavailable_ids),
-            (ConvertTo-StringArray $currentHoldingDriveSummary.source_unavailable_ids),
-            (ConvertTo-StringArray $historyDriveSummary.source_unavailable_ids)
-        ))
+        adb_detail_drive_detail_missing_total = $detailFinalFailedIds.Count
+        adb_current_holding_detail_missing_total = $currentHoldingFinalFailedIds.Count
+        adb_history_drive_detail_missing_total = $historyFinalFailedIds.Count
+        adb_detail_source_unavailable_total = (Get-JsonIntProperty -Object $strategyWorkBundleSummary -Name "source_unavailable_total")
+        adb_current_holding_source_unavailable_total = (Get-JsonIntProperty -Object $strategyWorkBundleSummary -Name "source_unavailable_total")
+        adb_history_source_unavailable_total = (Get-JsonIntProperty -Object $strategyWorkBundleSummary -Name "source_unavailable_total")
+        adb_source_unavailable_ids = (ConvertTo-StringArray $strategyWorkBundleSummary.source_unavailable_ids)
         selected_history_total = [int]$plan.selection.selected_history_total
         selected_rebalance_probe_total = [int]$plan.selection.selected_rebalance_probe_total
         stale_history_total = [int]$plan.selection.stale_history_total
         stale_history_fallback_total = [int]$plan.selection.stale_history_fallback_total
-        adb_history_drive_total = $historyDriveIds.Count
+        adb_history_drive_total = $bundleHistoryIds.Count
         fallback_device_id = $null
         detail_primary_failed_total = $detailPrimaryFailedIds.Count
         detail_primary_failed_ids = $detailPrimaryFailedIds
@@ -1404,7 +1598,7 @@ catch {
     $failureClass = if ($failedOfficialCurveSummary -and $failedOfficialCurveSummary.failure_class) {
         [string]$failedOfficialCurveSummary.failure_class
     }
-    elseif ($script:CurrentStage -match "device_cache|detail_drive|current_holding_drive|history_drive") {
+    elseif ($script:CurrentStage -match "device_cache|strategy_work_bundle|detail_drive|current_holding_drive|history_drive") {
         "device_or_login"
     }
     elseif ($script:CurrentStage -match "direct_interface|direct_history|03_collect") {

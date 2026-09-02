@@ -116,6 +116,7 @@ class StrategyCatalogFreshnessValidationTest(unittest.TestCase):
                         "catalog_new_strategy_ids": ["Q2"],
                         "source_latest_nav_date": "2026-08-11",
                         "latest_nav_date_strategy_total": 2,
+                        "non_empty_nav_strategy_total": 2,
                     }
                 ),
                 encoding="utf-8",
@@ -137,6 +138,7 @@ class StrategyCatalogFreshnessValidationTest(unittest.TestCase):
                 )["qieman"]
                 self.assertIs(validation["passed"], True)
                 self.assertEqual(validation["loadedLatestNavDate"], "2026-08-11")
+                self.assertEqual(validation["loadedNonEmptyNavStrategyTotal"], 2)
 
                 connection.execute(
                     'UPDATE "策略日度业绩" SET "交易日期"="2026-08-07"'

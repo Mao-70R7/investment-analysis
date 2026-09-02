@@ -772,6 +772,97 @@ def apply_strategy_assets(row: dict[str, Any], assets: dict[str, dict[str, Any]]
     return enriched
 
 
+def apply_strategy_summary_business_facts(
+    row: dict[str, Any],
+    summary_row: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Use the strategy-list business facts as the cross-page filter contract.
+
+    The strategy asset table intentionally records direct benchmark evidence and
+    can therefore remain empty for a child strategy that inherits a verified
+    parent benchmark.  The strategy-list summary is built after relationship and
+    benchmark governance, so it is the canonical source shared by institution
+    overview and mixed ranking.  Asset-table values may enrich that source, but
+    must not overwrite its final bucket with an all-zero placeholder.
+    """
+
+    enriched = dict(row)
+    if not summary_row:
+        return enriched
+
+    text_fields = {
+        "产品名称": "策略名称",
+        "机构": "投顾机构",
+        "渠道": "渠道",
+        "有基准": "有基准",
+        "有业绩走势": "有业绩走势",
+        "有历史仓位": "有历史仓位",
+        "对客未终止": "对客未终止",
+        "基准结构类型": "基准结构类型",
+        "非权益比较轨道": "非权益比较轨道",
+        "正式可比池": "正式可比池",
+        "可比池样本资格": "可比池样本资格",
+        "可比池说明": "可比池说明",
+    }
+    for output_field, summary_field in text_fields.items():
+        if summary_field in summary_row:
+            enriched[output_field] = as_text(summary_row.get(summary_field)).strip()
+
+    if "基准风险资产权重" in summary_row:
+        bucket = as_text(summary_row.get("基准风险资产权重")).strip()
+        enriched["基准风险资产权重"] = bucket
+        enriched["基准风险资产权重说明"] = (
+            as_text(summary_row.get("基准风险资产权重说明")).strip()
+            or bucket_description(bucket)
+        )
+        enriched["基准风险资产权重来源"] = (
+            as_text(summary_row.get("基准风险资产权重来源")).strip()
+            or "策略列表统一业务事实"
+        )
+
+    def first_summary_number(*fields: str) -> float | None:
+        for field in fields:
+            if field in summary_row:
+                value = to_float(summary_row.get(field))
+                if value is not None:
+                    return value
+        return None
+
+    percentage_fields = {
+        "基准风险资产权重_百分比": ("基准风险资产权重_百分比",),
+        "基准权益权重": ("基准权益权重", "基准资产大类-权益"),
+        "基准债券权重": ("基准债券权重", "基准资产大类-债券"),
+        "基准货币权重": ("基准货币权重", "基准资产大类-现金"),
+        "基准商品权重": ("基准商品权重", "基准资产大类-商品"),
+        "基准另类权重": ("基准另类权重", "基准资产大类-另类"),
+        "基准港股权益权重": ("基准港股权益权重", "基准资产类别-港股"),
+        "基准海外权益权重": ("基准海外权益权重", "基准资产类别-海外权益"),
+        "基准海外权重": ("基准海外权重",),
+        "基准未知权重": ("基准未知权重", "基准资产大类-其他"),
+    }
+    for output_field, summary_fields in percentage_fields.items():
+        value = first_summary_number(*summary_fields)
+        if value is not None:
+            enriched[output_field] = pp_to_decimal(value)
+
+    if "基准互斥权重合计_百分比" in summary_row:
+        enriched["基准互斥权重合计_百分比"] = to_float(
+            summary_row.get("基准互斥权重合计_百分比")
+        )
+
+    benchmark = as_text(
+        summary_row.get("业绩基准") or summary_row.get("业绩基准说明")
+    ).strip()
+    if benchmark:
+        enriched["业绩比较基准"] = benchmark
+
+    confidence = as_text(summary_row.get("基准映射置信度")).strip()
+    if confidence:
+        enriched["解析置信度"] = confidence
+        enriched["解析置信度分数"] = confidence_score(confidence)
+    return enriched
+
+
 def strategy_channel_code(row: dict[str, Any]) -> str:
     value = as_text(row.get("产品代码") or row.get("产品ID")).strip().upper()
     return value.split("__", 1)[-1]
@@ -1391,11 +1482,10 @@ def main() -> int:
         excluded_strategy_rows = [*source_excluded_strategy_rows, *visible_nonrankable_rows]
         strategy_rows = [
             {
-                **apply_strategy_assets(flatten_row(row, {}, strategy_info), strategy_assets),
-                **{
-                    field: as_text(summary_strategy_by_id.get(strategy_row_id(row), {}).get(field))
-                    for field in ("有基准", "有业绩走势", "有历史仓位", "对客未终止")
-                },
+                **apply_strategy_summary_business_facts(
+                    apply_strategy_assets(flatten_row(row, {}, strategy_info), strategy_assets),
+                    summary_strategy_by_id.get(strategy_row_id(row)),
+                ),
                 "最新业绩日期": official_performance_dates.get(strategy_row_id(row), ""),
                 "生命周期状态": as_text(strategy_governance.get(strategy_row_id(row), {}).get("治理状态")),
             }

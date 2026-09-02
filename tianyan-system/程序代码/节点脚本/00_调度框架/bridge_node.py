@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -55,6 +55,120 @@ def child_run_id(parent_run_id: str, action: str, node_run_dir: Path) -> str:
 def load_daily_policy(code_root: Path) -> dict[str, Any]:
     path = code_root / "config" / "daily_update_policy.json"
     return read_json(path) if path.is_file() else {}
+
+
+def business_day_lag(older: Any, newer: Any) -> int | None:
+    """Return the weekday distance from an older disclosure date to a newer one."""
+
+    try:
+        start = date.fromisoformat(str(older or "")[:10])
+        end = date.fromisoformat(str(newer or "")[:10])
+    except ValueError:
+        return None
+    if start >= end:
+        return 0
+    lag = 0
+    cursor = start
+    while cursor < end:
+        cursor += timedelta(days=1)
+        if cursor.weekday() < 5:
+            lag += 1
+    return lag
+
+
+def subtract_business_days(value: Any, days: int) -> str | None:
+    try:
+        cursor = date.fromisoformat(str(value or "")[:10])
+    except ValueError:
+        return None
+    remaining = max(0, int(days))
+    while remaining:
+        cursor -= timedelta(days=1)
+        if cursor.weekday() < 5:
+            remaining -= 1
+    return cursor.isoformat()
+
+
+def qieman_nav_latest_date_counts(summary: dict[str, Any]) -> dict[str, int]:
+    """Read per-strategy latest NAV dates, including legacy batches without the compact field."""
+
+    raw_counts = summary.get("nav_latest_date_counts")
+    if isinstance(raw_counts, dict):
+        counts = {
+            str(key).strip(): int(value or 0)
+            for key, value in raw_counts.items()
+            if str(key).strip() and int(value or 0) > 0
+        }
+        if counts:
+            return counts
+
+    history_run_dir = Path(str(summary.get("history_run_dir") or ""))
+    history_summary = history_run_dir / "summary.json"
+    if history_summary.is_file():
+        payload = read_json(history_summary)
+        counts: dict[str, int] = {}
+        for item in payload.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            nav = item.get("nav") if isinstance(item.get("nav"), dict) else {}
+            latest_date = str(nav.get("latestDate") or "").strip()
+            if latest_date:
+                counts[latest_date] = counts.get(latest_date, 0) + 1
+        if counts:
+            return counts
+
+    latest_date = str(summary.get("source_latest_nav_date") or "").strip()
+    latest_total = int(summary.get("latest_nav_date_strategy_total") or 0)
+    return {latest_date: latest_total} if latest_date and latest_total > 0 else {}
+
+
+def assess_qieman_nav_freshness(
+    summary: dict[str, Any],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    """Assess source freshness using a one-business-day per-product disclosure window."""
+
+    source_latest = str(summary.get("source_latest_nav_date") or "").strip()
+    strategy_total = int(summary.get("strategy_total") or 0)
+    raw_maximum_lag = policy.get("maximumNavDateLagBusinessDays", 1)
+    raw_minimum_ratio = policy.get(
+        "minimumFreshNavDateRatio",
+        policy.get("minimumLatestNavDateRatio", 0.98),
+    )
+    maximum_lag = max(0, min(5, int(raw_maximum_lag)))
+    minimum_ratio = max(0.0, min(1.0, float(raw_minimum_ratio)))
+    date_counts = qieman_nav_latest_date_counts(summary)
+    non_empty_total = sum(date_counts.values())
+    exact_total = int(date_counts.get(source_latest) or 0) if source_latest else 0
+    fresh_total = 0
+    if source_latest:
+        fresh_total = sum(
+            count
+            for latest_date, count in date_counts.items()
+            if (lag := business_day_lag(latest_date, source_latest)) is not None
+            and lag <= maximum_lag
+        )
+    fresh_ratio = fresh_total / strategy_total if strategy_total else 0.0
+    return {
+        "sourceLatestNavDate": source_latest or None,
+        "minimumFreshNavDate": subtract_business_days(source_latest, maximum_lag),
+        "maximumNavDateLagBusinessDays": maximum_lag,
+        "minimumFreshNavDateStrategyRatio": minimum_ratio,
+        "strategyTotal": strategy_total,
+        "nonEmptyNavStrategyTotal": non_empty_total,
+        "latestNavDateStrategyTotal": exact_total,
+        "latestNavDateStrategyRatio": (
+            exact_total / strategy_total if strategy_total else 0.0
+        ),
+        "freshNavDateStrategyTotal": fresh_total,
+        "freshNavDateStrategyRatio": fresh_ratio,
+        "navLatestDateCounts": date_counts,
+        "passed": bool(
+            source_latest
+            and strategy_total > 0
+            and fresh_ratio + 1e-9 >= minimum_ratio
+        ),
+    }
 
 
 GF_SUPPLEMENTAL_CHANNEL_IDS = ("gfsec_robot",)
@@ -793,7 +907,9 @@ class Bridge:
             "-DetailCooldownDays",
             "7",
             "-DetailRefreshLimit",
-            "0",
+            "70",
+            "-StoppedDetailCooldownDays",
+            "30",
             "-CurrentHoldingCooldownDays",
             "1",
             "-CurrentHoldingRefreshLimit",
@@ -801,7 +917,7 @@ class Bridge:
             "-BenchmarkDetailRepairMode",
             "all_missing_text",
             "-BenchmarkDetailRepairLimit",
-            "0",
+            "70",
             "-BenchmarkDetailCooldownDays",
             "7",
             "-QuoteProbeTimeoutSec",
@@ -908,6 +1024,12 @@ class Bridge:
                 str(minimum_ratio),
                 "--acceptable-business-lag-days",
                 "1",
+                "--db-path",
+                str(self.database_root / "analysis_zh_current.sqlite"),
+                "--raw-root",
+                str(self.raw_root),
+                "--normalized-root",
+                str(self.normalized_root),
                 "--run-id",
                 self.child_run_id,
                 "--result-summary-path",
@@ -979,6 +1101,8 @@ class Bridge:
                 "--stale-days",
                 "7",
                 "--pdf-on-missing-only",
+                "--db-path",
+                str(self.database_root / "analysis_zh_current.sqlite"),
                 "--run-id",
                 self.child_run_id,
                 "--result-summary-path",
@@ -1643,6 +1767,314 @@ class Bridge:
         )
         return 0
 
+    def southern_collect(self) -> int:
+        result_path = self.node_run_dir / "southern_collect_result.json"
+        collector = (
+            self.code_root
+            / "节点脚本"
+            / "03_南方基金"
+            / "01_目录与登录态采集"
+            / "src"
+            / "southern_daily_update.py"
+        )
+        command = [
+            self.python,
+            "-u",
+            "-X",
+            "utf8",
+            str(collector),
+            "--workspace-root",
+            str(self.workspace_root),
+            "--code-root",
+            str(self.code_root),
+            "--normalized-root",
+            str(self.normalized_root),
+            "--raw-root",
+            str(self.raw_root),
+            "--node-run-dir",
+            str(self.node_run_dir / "collector"),
+            "--run-id",
+            self.child_run_id,
+            "--daily-run-id",
+            self.args.run_id,
+            "--db-path",
+            str(self.database_root / "analysis_zh_current.sqlite"),
+            "--login-wait-seconds",
+            str(
+                max(
+                    15,
+                    min(
+                        720,
+                        int(
+                            (
+                                self.policy.get("channels", {}).get("southern", {})
+                                if isinstance(self.policy.get("channels"), dict)
+                                else {}
+                            ).get("loginWaitSeconds")
+                            or 60
+                        ),
+                    ),
+                )
+            ),
+            "--result-path",
+            str(result_path),
+        ]
+        replay_summary = str(os.environ.get("SOUTHERN_COLLECTOR_SUMMARY") or "").strip()
+        replay_inventory = str(os.environ.get("SOUTHERN_INVENTORY_PATH") or "").strip()
+        if replay_summary:
+            command.extend(["--collector-summary", replay_summary])
+        if replay_inventory:
+            command.extend(["--inventory", replay_inventory])
+        if self.args.dry_run:
+            command.append("--dry-run")
+        code = self.run_command(command)
+        if self.args.dry_run:
+            return code
+        if code != 0 or not result_path.is_file():
+            print(
+                f"[ERROR] 南方基金采集或专项稽核失败，旧渠道数据保持不变：exit={code}",
+                flush=True,
+            )
+            return code or 20
+        result = read_json(result_path)
+        run_id = str(result.get("run_id") or "").strip()
+        summary_path = Path(str(result.get("summary_path") or ""))
+        audit_path = Path(str(result.get("audit_report_path") or ""))
+        if run_id != self.child_run_id or not summary_path.is_file() or not audit_path.is_file():
+            print("[ERROR] 南方基金采集批次血缘或验收产物不完整。", flush=True)
+            return 20
+        self.context_updates.update(
+            {
+                "SOUTHERN_COLLECT_RUN_ID": run_id,
+                "SOUTHERN_COLLECT_SUMMARY_PATH": str(summary_path),
+                "SOUTHERN_COLLECT_AUDIT_PATH": str(audit_path),
+            }
+        )
+        self.artifacts.extend(
+            [
+                {"key": "southern_collect_result", "path": str(result_path), "validationStatus": "passed"},
+                {"key": "southern_collection_summary", "path": str(summary_path), "validationStatus": "passed"},
+                {"key": "southern_isolated_audit", "path": str(audit_path), "validationStatus": "passed"},
+            ]
+        )
+        counts = result.get("counts") if isinstance(result.get("counts"), dict) else {}
+        coverage = result.get("coverage") if isinstance(result.get("coverage"), dict) else {}
+        self.counters.update(
+            {
+                "strategyTotal": int(result.get("strategy_total") or 0),
+                "catalogNewStrategyTotal": int(result.get("catalog_new_strategy_total") or 0),
+                "dailyPerformanceRows": int(counts.get("strategy_performance_daily") or 0),
+                "currentHoldingRows": int(counts.get("strategy_fund_snapshot") or 0),
+                "historicalHoldingRows": int(counts.get("strategy_fund_snapshot_history") or 0),
+                "rebalanceEventTotal": int(counts.get("strategy_rebalance_event") or 0),
+                "exactBenchmarkStrategyTotal": int(coverage.get("benchmark_exact_split") or 0),
+            }
+        )
+        latest_date = str(result.get("source_latest_nav_date") or "").strip()
+        if latest_date:
+            self.watermarks["南方基金源端业绩最新日期"] = latest_date
+        print(
+            f"[DONE] 南方基金完整批次生成：策略={self.counters['strategyTotal']} "
+            f"日度={self.counters['dailyPerformanceRows']} 历史仓位={self.counters['historicalHoldingRows']}",
+            flush=True,
+        )
+        return 0
+
+    def southern_gate(self) -> int:
+        if self.args.dry_run:
+            return 0
+        run_id = str(os.environ.get("SOUTHERN_COLLECT_RUN_ID") or "").strip()
+        summary_path = Path(str(os.environ.get("SOUTHERN_COLLECT_SUMMARY_PATH") or ""))
+        audit_path = Path(str(os.environ.get("SOUTHERN_COLLECT_AUDIT_PATH") or ""))
+        if not run_id or not summary_path.is_file() or not audit_path.is_file():
+            print("[ERROR] 南方基金批次验收缺少精确采集上下文。", flush=True)
+            return 20
+        summary = read_json(summary_path)
+        audit = read_json(audit_path)
+        policy = (
+            self.policy.get("channels", {}).get("southern", {})
+            if isinstance(self.policy.get("channels"), dict)
+            else {}
+        )
+        strategy_total = int(summary.get("strategy_total") or 0)
+        coverage = summary.get("coverage") if isinstance(summary.get("coverage"), dict) else {}
+        ratios = {
+            "performance": int(coverage.get("performance_with_rows") or 0) / strategy_total if strategy_total else 0.0,
+            "currentHolding": int(coverage.get("current_position_complete") or 0) / strategy_total if strategy_total else 0.0,
+            "historicalHolding": int(coverage.get("historical_position_complete") or 0) / strategy_total if strategy_total else 0.0,
+            "benchmark": int(coverage.get("benchmark_exact_split") or 0) / strategy_total if strategy_total else 0.0,
+        }
+        thresholds = {
+            "performance": float(policy.get("minimumPerformanceStrategyRatio") or 1.0),
+            "currentHolding": float(policy.get("minimumCurrentHoldingRatio") or 1.0),
+            "historicalHolding": float(policy.get("minimumHistoricalHoldingRatio") or 1.0),
+            "benchmark": float(policy.get("minimumExactBenchmarkRatio") or 0.94),
+        }
+        failures: list[str] = []
+        if summary.get("catalog_discovery_complete") is not True:
+            failures.append("catalog_discovery_complete")
+        if summary.get("catalog_batch_closed") is not True:
+            failures.append("catalog_batch_closed")
+        if audit.get("status") != "passed" or int(audit.get("error_count") or 0):
+            failures.append("isolated_data_audit")
+        for key, ratio in ratios.items():
+            if ratio + 1e-9 < thresholds[key]:
+                failures.append(f"{key}_coverage")
+        previous_total = 0
+        database = self.database_root / "analysis_zh_current.sqlite"
+        if database.is_file():
+            try:
+                with sqlite3.connect(database, timeout=60) as connection:
+                    previous_total = int(
+                        connection.execute(
+                            'SELECT COUNT(*) FROM "策略信息" WHERE "渠道ID"=?',
+                            ("southern",),
+                        ).fetchone()[0]
+                    )
+            except sqlite3.Error:
+                previous_total = 0
+        retention = float(policy.get("minimumInventoryRetentionRatio") or 0.95)
+        if previous_total and strategy_total < previous_total * retention:
+            failures.append("strategy_inventory_retention")
+        failures = list(dict.fromkeys(failures))
+        gate_path = self.node_run_dir / "southern_gate.json"
+        atomic_json(
+            gate_path,
+            {
+                "runId": run_id,
+                "summaryPath": str(summary_path),
+                "auditPath": str(audit_path),
+                "strategyTotal": strategy_total,
+                "previousStrategyTotal": previous_total,
+                "coverageRatios": ratios,
+                "coverageThresholds": thresholds,
+                "sourceLatestNavDate": summary.get("source_latest_nav_date"),
+                "benchmarkMissingStrategyIds": summary.get("benchmark_missing_strategy_ids") or [],
+                "failedRequiredChecks": failures,
+            },
+        )
+        self.artifacts.append(
+            {"key": "southern_gate", "path": str(gate_path), "validationStatus": "failed" if failures else "passed"}
+        )
+        self.counters.update(
+            {
+                "strategyTotal": strategy_total,
+                "previousStrategyTotal": previous_total,
+                "performanceCoveragePermille": round(ratios["performance"] * 1000),
+                "currentHoldingCoveragePermille": round(ratios["currentHolding"] * 1000),
+                "historicalHoldingCoveragePermille": round(ratios["historicalHolding"] * 1000),
+                "benchmarkCoveragePermille": round(ratios["benchmark"] * 1000),
+            }
+        )
+        if failures:
+            print(f"[ERROR] 南方基金必需验收项失败：{failures}", flush=True)
+            return 20
+        self.context_updates.update({"SOUTHERN_GATE_PASSED": "1", "SOUTHERN_GATE_RUN_ID": run_id})
+        missing_benchmark = summary.get("benchmark_missing_strategy_ids") or []
+        if missing_benchmark:
+            warning = f"南方基金官方源端未披露精确基准的策略保持缺失：{missing_benchmark}。"
+            self.warnings.append(warning)
+            print(f"[WARN] {warning}", flush=True)
+        print("[DONE] 南方基金精确批次、仓位闭合和目录闭合验收通过。", flush=True)
+        return 0
+
+    def southern_load(self) -> int:
+        if self.args.dry_run:
+            return 0
+        if os.environ.get("SOUTHERN_GATE_PASSED") != "1":
+            print("[ERROR] 南方基金入库要求同批次 gate 已通过。", flush=True)
+            return 20
+        collect_run_id = str(os.environ.get("SOUTHERN_COLLECT_RUN_ID") or "").strip()
+        gate_run_id = str(os.environ.get("SOUTHERN_GATE_RUN_ID") or "").strip()
+        summary_path = Path(str(os.environ.get("SOUTHERN_COLLECT_SUMMARY_PATH") or ""))
+        if not collect_run_id or collect_run_id != gate_run_id or not summary_path.is_file():
+            print("[ERROR] 南方基金入库批次血缘不一致。", flush=True)
+            return 20
+        database = self.database_root / "analysis_zh_current.sqlite"
+        environment = dict(os.environ)
+        environment["SOUTHERN_COLLECT_RUN_ID"] = collect_run_id
+        code = self.run_command(
+            self.python_command(
+                "load_analysis_zh_current_sqlite.py",
+                "--db-path",
+                str(database),
+                "--schema-path",
+                str(self.code_root / "schemas" / "analysis_zh_current.sql"),
+                "--keep-existing-db",
+                "--normalized-root",
+                str(self.normalized_root),
+                "--channels",
+                "southern",
+                "--strategy-catalog-summary",
+                str(summary_path),
+            ),
+            env=environment,
+        )
+        if code != 0:
+            print(f"[ERROR] 南方基金事务入库失败，旧渠道数据已由事务回滚保留：exit={code}", flush=True)
+            return code or 20
+        summary = read_json(summary_path)
+        expected_counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+        expected = {
+            "strategyTotal": int(summary.get("strategy_total") or 0),
+            "dailyRows": int(expected_counts.get("strategy_performance_daily") or 0),
+            "currentHoldingRows": int(expected_counts.get("strategy_fund_snapshot") or 0),
+            "historicalHoldingRows": int(expected_counts.get("strategy_fund_snapshot_history") or 0),
+            "rebalanceEventRows": int(expected_counts.get("strategy_rebalance_event") or 0),
+            "benchmarkComponentRows": sum(
+                1
+                for path in (self.normalized_root / "southern" / "strategy_benchmark" / collect_run_id).glob("*.jsonl")
+                for line in path.open("r", encoding="utf-8-sig")
+                if line.strip()
+                for _ in (json.loads(line).get("benchmark_components") or [])
+            ),
+        }
+        with sqlite3.connect(database, timeout=120) as connection:
+            actual = {
+                "strategyTotal": int(connection.execute('SELECT COUNT(*) FROM "策略信息" WHERE "渠道ID"=?', ("southern",)).fetchone()[0]),
+                "dailyRows": int(connection.execute('SELECT COUNT(*) FROM "策略日度业绩" WHERE "渠道ID"=?', ("southern",)).fetchone()[0]),
+                "currentHoldingRows": int(connection.execute('SELECT COUNT(*) FROM "策略当前持仓" WHERE "渠道ID"=?', ("southern",)).fetchone()[0]),
+                "historicalHoldingRows": int(connection.execute('SELECT COUNT(*) FROM "策略历史持仓" WHERE "渠道ID"=?', ("southern",)).fetchone()[0]),
+                "rebalanceEventRows": int(connection.execute('SELECT COUNT(*) FROM "策略调仓事件" WHERE "渠道ID"=?', ("southern",)).fetchone()[0]),
+                "benchmarkComponentRows": int(connection.execute('SELECT COUNT(*) FROM "策略业绩基准成分" WHERE "渠道ID"=?', ("southern",)).fetchone()[0]),
+            }
+            latest_row = connection.execute(
+                'SELECT MAX("交易日期"), COUNT(DISTINCT CASE WHEN "交易日期"=(SELECT MAX("交易日期") FROM "策略日度业绩" WHERE "渠道ID"=?) THEN "渠道策略ID" END) FROM "策略日度业绩" WHERE "渠道ID"=?',
+                ("southern", "southern"),
+            ).fetchone()
+        failures = [key for key, value in expected.items() if actual.get(key) != value]
+        if str(latest_row[0] or "") != str(summary.get("source_latest_nav_date") or ""):
+            failures.append("source_latest_nav_date")
+        result_path = self.node_run_dir / "southern_incremental_load.json"
+        atomic_json(
+            result_path,
+            {
+                "channelId": "southern",
+                "runId": collect_run_id,
+                "database": str(database),
+                "expected": expected,
+                "actual": actual,
+                "latestNavDate": latest_row[0],
+                "latestNavStrategyTotal": int(latest_row[1] or 0),
+                "failedChecks": failures,
+                "loadedAt": now_text(),
+            },
+        )
+        self.artifacts.append(
+            {"key": "southern_incremental_load", "path": str(result_path), "validationStatus": "failed" if failures else "passed"}
+        )
+        self.counters.update(actual)
+        if failures:
+            print(f"[ERROR] 南方基金入库后闭环核对失败：{failures}", flush=True)
+            return 20
+        self.context_updates["SOUTHERN_LOADED"] = "1"
+        print(
+            f"[DONE] 南方基金事务入库完成：策略={actual['strategyTotal']} "
+            f"日度={actual['dailyRows']} 历史仓位={actual['historicalHoldingRows']}",
+            flush=True,
+        )
+        return 0
+
     def qieman_collect(self) -> int:
         result_path = self.node_run_dir / "qieman_collect_result.json"
         collector = (
@@ -1716,6 +2148,10 @@ class Bridge:
             ),
             "--history-request-attempts",
             str(max(1, min(8, int(channel_policy.get("historyRequestAttempts") or 4)))),
+            "--history-process-batch-size",
+            str(max(10, min(200, int(channel_policy.get("historyProcessBatchSize") or 50)))),
+            "--history-process-attempts",
+            str(max(1, min(12, int(channel_policy.get("historyProcessAttempts") or 4)))),
             "--result-path",
             str(result_path),
         ]
@@ -1773,6 +2209,10 @@ class Bridge:
                 "retainedHistoryStrategyTotal": int(
                     result.get("retained_history_strategy_total") or 0
                 ),
+                "historyProcessBatchTotal": int(result.get("history_process_batch_total") or 0),
+                "historyProcessLaunchTotal": int(result.get("history_process_launch_total") or 0),
+                "historyProcessFailureTotal": int(result.get("history_process_failure_total") or 0),
+                "historyProcessRestartTotal": int(result.get("history_process_restart_total") or 0),
                 "dailyPerformanceRows": int(counts.get("strategy_performance_daily") or 0),
                 "currentHoldingRows": int(counts.get("strategy_fund_snapshot") or 0),
                 "rebalanceEventTotal": int(counts.get("strategy_rebalance_event") or 0),
@@ -1841,14 +2281,19 @@ class Bridge:
             "holding": holding_total / strategy_total if strategy_total else 0.0,
             "benchmark": benchmark_total / strategy_total if strategy_total else 0.0,
         }
-        latest_nav_date = str(summary.get("source_latest_nav_date") or "").strip()
-        non_empty_nav_total = int(summary.get("non_empty_nav_strategy_total") or 0)
-        latest_nav_strategy_total = int(summary.get("latest_nav_date_strategy_total") or 0)
-        latest_nav_ratio = (
-            latest_nav_strategy_total / non_empty_nav_total if non_empty_nav_total else 0.0
+        nav_freshness = assess_qieman_nav_freshness(summary, channel_policy)
+        latest_nav_date = str(nav_freshness.get("sourceLatestNavDate") or "")
+        non_empty_nav_total = int(nav_freshness.get("nonEmptyNavStrategyTotal") or 0)
+        latest_nav_strategy_total = int(
+            nav_freshness.get("latestNavDateStrategyTotal") or 0
         )
-        minimum_latest_nav_ratio = float(
-            channel_policy.get("minimumLatestNavDateRatio") or 0.99
+        latest_nav_ratio = float(nav_freshness.get("latestNavDateStrategyRatio") or 0)
+        fresh_nav_strategy_total = int(
+            nav_freshness.get("freshNavDateStrategyTotal") or 0
+        )
+        fresh_nav_ratio = float(nav_freshness.get("freshNavDateStrategyRatio") or 0)
+        minimum_fresh_nav_ratio = float(
+            nav_freshness.get("minimumFreshNavDateStrategyRatio") or 0
         )
         thresholds = {
             "performance": float(channel_policy.get("minimumPerformanceStrategyRatio") or 0.99),
@@ -1862,11 +2307,7 @@ class Bridge:
             failures.append("catalog_batch_closed")
         if int(summary.get("catalog_batch_missing_strategy_total") or 0):
             failures.append("new_strategy_batch_closure")
-        if (
-            not latest_nav_date
-            or non_empty_nav_total <= 0
-            or latest_nav_ratio + 1e-9 < minimum_latest_nav_ratio
-        ):
+        if nav_freshness.get("passed") is not True:
             failures.append("latest_nav_date_coverage")
         if audit.get("status") not in {"passed", "warn"} or int(audit.get("error_count") or 0):
             failures.append("isolated_data_audit")
@@ -1916,10 +2357,17 @@ class Bridge:
                 "coverageRatios": ratios,
                 "coverageThresholds": thresholds,
                 "sourceLatestNavDate": latest_nav_date,
+                "minimumFreshNavDate": nav_freshness.get("minimumFreshNavDate"),
+                "maximumNavDateLagBusinessDays": int(
+                    nav_freshness.get("maximumNavDateLagBusinessDays") or 0
+                ),
                 "nonEmptyNavStrategyTotal": non_empty_nav_total,
                 "latestNavDateStrategyTotal": latest_nav_strategy_total,
                 "latestNavDateStrategyRatio": latest_nav_ratio,
-                "minimumLatestNavDateStrategyRatio": minimum_latest_nav_ratio,
+                "freshNavDateStrategyTotal": fresh_nav_strategy_total,
+                "freshNavDateStrategyRatio": fresh_nav_ratio,
+                "minimumFreshNavDateStrategyRatio": minimum_fresh_nav_ratio,
+                "navLatestDateCounts": nav_freshness.get("navLatestDateCounts") or {},
                 "retainedHistoryStrategyTotal": int(
                     summary.get("retained_history_strategy_total") or 0
                 ),
@@ -1942,6 +2390,8 @@ class Bridge:
                 "performanceCoveragePermille": round(ratios["performance"] * 1000),
                 "holdingCoveragePermille": round(ratios["holding"] * 1000),
                 "benchmarkCoveragePermille": round(ratios["benchmark"] * 1000),
+                "freshNavDateStrategyTotal": fresh_nav_strategy_total,
+                "freshNavDateCoveragePermille": round(fresh_nav_ratio * 1000),
                 "auditWarningCount": int(audit.get("warning_count") or 0),
             }
         )
@@ -1968,6 +2418,16 @@ class Bridge:
             print(f"[WARN] {warning}", flush=True)
         if int(audit.get("warning_count") or 0):
             warning = f"且慢专项稽核保留 {int(audit.get('warning_count') or 0)} 类披露缺口 warning。"
+            self.warnings.append(warning)
+            print(f"[WARN] {warning}", flush=True)
+        lagged_but_accepted_total = max(0, fresh_nav_strategy_total - latest_nav_strategy_total)
+        if lagged_but_accepted_total:
+            warning = (
+                "且慢存在允许窗口内的一工作日披露延迟："
+                f"延迟策略={lagged_but_accepted_total}，"
+                f"时效窗口覆盖={fresh_nav_strategy_total}/{strategy_total} "
+                f"({fresh_nav_ratio:.2%})，门槛={minimum_fresh_nav_ratio:.2%}。"
+            )
             self.warnings.append(warning)
             print(f"[WARN] {warning}", flush=True)
         print("[DONE] 且慢精确批次、覆盖率和新增策略闭环验收通过。", flush=True)
@@ -2023,6 +2483,9 @@ class Bridge:
         expected_latest_nav_strategy_total = int(
             summary.get("latest_nav_date_strategy_total") or 0
         )
+        expected_non_empty_nav_strategy_total = int(
+            summary.get("non_empty_nav_strategy_total") or 0
+        )
         catalog_ids = {str(value) for value in summary.get("catalog_strategy_ids") or [] if str(value)}
         new_ids = {str(value) for value in summary.get("catalog_new_strategy_ids") or [] if str(value)}
         counts: dict[str, int] = {}
@@ -2066,12 +2529,21 @@ class Bridge:
                     ("qieman", source_latest_nav_date),
                 ).fetchone()[0]
             ) if source_latest_nav_date else 0
+            loaded_non_empty_nav_strategy_total = int(
+                connection.execute(
+                    '''SELECT COUNT(DISTINCT "渠道策略ID")
+                       FROM "策略日度业绩"
+                       WHERE "渠道ID"=?''',
+                    ("qieman",),
+                ).fetchone()[0]
+            )
         missing_catalog = sorted(catalog_ids - loaded_ids)
         missing_new = sorted(new_ids - loaded_ids)
         performance_freshness_failed = bool(
             not source_latest_nav_date
             or loaded_latest_nav_date != source_latest_nav_date
             or loaded_latest_nav_strategy_total < expected_latest_nav_strategy_total
+            or loaded_non_empty_nav_strategy_total < expected_non_empty_nav_strategy_total
         )
         if (
             counts["strategyTotal"] != expected_total
@@ -2092,6 +2564,8 @@ class Bridge:
                 f"latest_nav_date={loaded_latest_nav_date or None}/{source_latest_nav_date or None}, "
                 f"latest_nav_strategies="
                 f"{loaded_latest_nav_strategy_total}/{expected_latest_nav_strategy_total}, "
+                f"non_empty_nav_strategies="
+                f"{loaded_non_empty_nav_strategy_total}/{expected_non_empty_nav_strategy_total}, "
                 f"missing_catalog={missing_catalog}, missing_new={missing_new}",
                 flush=True,
             )
@@ -2107,6 +2581,8 @@ class Bridge:
                 "loadedLatestNavDate": loaded_latest_nav_date,
                 "expectedLatestNavStrategyTotal": expected_latest_nav_strategy_total,
                 "loadedLatestNavStrategyTotal": loaded_latest_nav_strategy_total,
+                "expectedNonEmptyNavStrategyTotal": expected_non_empty_nav_strategy_total,
+                "loadedNonEmptyNavStrategyTotal": loaded_non_empty_nav_strategy_total,
                 "loadedNewStrategyTotal": len(new_ids & loaded_ids),
                 "loadedAt": now_text(),
             },
@@ -2662,6 +3138,9 @@ class Bridge:
         if os.environ.get("QIEMAN_LOADED") == "1":
             successful_loads += 1
             self.counters["qiemanPreloaded"] = 1
+        if os.environ.get("SOUTHERN_LOADED") == "1":
+            successful_loads += 1
+            self.counters["southernPreloaded"] = 1
         ttfund_run_id = str(os.environ.get("TTFUND_COLLECT_RUN_ID") or "").strip()
         ttfund_status = str(os.environ.get("ADVISOR_NODE_STATUS_TTFUND_INCREMENTAL") or "")
         if ttfund_run_id:
@@ -3140,6 +3619,8 @@ class Bridge:
                 "export_basic_data_pages.py",
                 "--algorithm-version",
                 "standard_rebalance_asset_dual_nav_v10_all_channels_20260528",
+                "--db-path",
+                str(self.database_root / "analysis_zh_current.sqlite"),
                 "--site-dir",
                 str(staging_root / "basic_data"),
             ),
@@ -3147,13 +3628,18 @@ class Bridge:
                 "build_basic_data_report_packs.py",
                 "--report-root",
                 str(staging_root),
+                "--db-path",
+                str(self.database_root / "analysis_zh_current.sqlite"),
                 "--skip-data-audit",
+                "--skip-fund-enrichment",
                 "--minimal-publish-only",
             ),
             self.python_command(
                 "audit_basic_data_deploy_integrity.py",
                 "--report-root",
                 str(staging_root),
+                "--db-path",
+                str(self.database_root / "analysis_zh_current.sqlite"),
             ),
             self.python_command(
                 "write_analysis_platform_deploy_manifest.py",
@@ -3234,6 +3720,23 @@ class Bridge:
         return code
 
     def publish(self) -> int:
+        runtime_config_path = self.workspace_root / "本机配置" / "runtime.local.json"
+        runtime_config = read_json(runtime_config_path) if runtime_config_path.is_file() else {}
+        edgeone_remote = str(
+            os.environ.get("ADVISOR_EDGEONE_PUBLISH_REMOTE")
+            or runtime_config.get("edgeOnePublishRemote")
+            or ""
+        ).strip()
+        edgeone_branch = str(
+            os.environ.get("ADVISOR_EDGEONE_PUBLISH_BRANCH")
+            or runtime_config.get("edgeOnePublishBranch")
+            or "main"
+        ).strip()
+        legacy_edgeone_branch = str(
+            os.environ.get("ADVISOR_EDGEONE_LEGACY_SNAPSHOT_BRANCH")
+            if os.environ.get("ADVISOR_EDGEONE_LEGACY_SNAPSHOT_BRANCH") is not None
+            else runtime_config.get("edgeOneLegacySnapshotBranch", "")
+        ).strip()
         report_scope = str(
             os.environ.get("ADVISOR_REPORT_SCOPE")
             or configured_report_scope(self.policy)
@@ -3280,6 +3783,12 @@ class Bridge:
             str(self.node_run_dir / "publisher"),
             "-CommitMessage",
             f"Daily data update {datetime.now().strftime('%Y-%m-%d')}",
+            "-EdgeOneRepositoryUrl",
+            edgeone_remote,
+            "-EdgeOneRepositoryBranch",
+            edgeone_branch,
+            "-EdgeOneSnapshotBranch",
+            legacy_edgeone_branch,
         ]
         code = self.run_command(command)
         if code != 0 or self.args.dry_run:
@@ -3444,6 +3953,9 @@ class Bridge:
             "gfsec_fima_collect": self.gfsec_fima_collect,
             "gfsec_fima_gate": self.gfsec_fima_gate,
             "gfsec_fima_load": self.gfsec_fima_load,
+            "southern_collect": self.southern_collect,
+            "southern_gate": self.southern_gate,
+            "southern_load": self.southern_load,
             "qieman_collect": self.qieman_collect,
             "qieman_gate": self.qieman_gate,
             "qieman_load": self.qieman_load,

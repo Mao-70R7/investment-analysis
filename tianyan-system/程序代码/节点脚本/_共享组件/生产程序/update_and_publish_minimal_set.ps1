@@ -6,12 +6,16 @@ param(
     [string]$ReportRoot = "",
     [string]$PublishRoot = "",
     [string]$PagesBaseUrl = "https://mao-70r7.github.io/invest",
+    [string]$EdgeOneRepositoryUrl = "",
+    [string]$EdgeOneRepositoryBranch = "main",
+    [string]$EdgeOneSnapshotBranch = "",
     [string]$CommitMessage = "",
     [string]$ExtraIncrementalArgs = "",
     [int]$SmokeTestPort = 7791,
     [int]$WaitPagesSeconds = 1200,
     [string]$RunDirectory = "",
     [switch]$SkipDataUpdate,
+    [switch]$ReuseExistingValidatedPackage,
     [switch]$SkipAudit,
     [switch]$SkipPagesVerify,
     [switch]$SkipPush,
@@ -24,10 +28,6 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 $script:ProductionProgramRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $script:NodeRoot = (Resolve-Path -LiteralPath (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))).Path
-$script:MonthlyReportDate = (Get-Date -Day 1).AddMonths(-1)
-$script:MonthlyReportCompact = $script:MonthlyReportDate.ToString("yyyyMM")
-$script:MonthlyReportPageName = "monthly-rebalance-report-$($script:MonthlyReportCompact).html"
-$script:MonthlyReportAssetDirectoryName = "monthly-rebalance-report-$($script:MonthlyReportCompact)"
 
 function Join-ArgumentLine {
     param([string[]]$Arguments)
@@ -70,15 +70,6 @@ function Get-DefaultPlatformRoot {
 
 function Get-MinimalPublishLeaf {
     return -join ([char[]](0x6700, 0x5C0F, 0x53D1, 0x5E03, 0x96C6))
-}
-
-function Get-MonthlyReportTitle {
-    # Keep Chinese validation text encoding-safe under Windows PowerShell 5.1.
-    $suffix = -join ([char[]](
-        0x57FA, 0x91D1, 0x6295, 0x987E, 0x4EA7, 0x54C1,
-        0x8C03, 0x4ED3, 0x5206, 0x6790
-    ))
-    return ("{0}{1}{2}{3}{4}" -f $script:MonthlyReportDate.Year, [char]0x5E74, $script:MonthlyReportDate.Month, [char]0x6708, $suffix)
 }
 
 function Write-RunLog {
@@ -169,6 +160,24 @@ function Get-GitOutput {
     }
 }
 
+function Get-NormalizedGitRemoteKey {
+    param([Parameter(Mandatory = $true)][string]$Remote)
+    $text = $Remote.Trim().Replace('\', '/').TrimEnd('/').ToLowerInvariant()
+    if ($text -match '^git@([^:]+):(.+)$') {
+        $text = "{0}/{1}" -f $Matches[1], $Matches[2]
+    }
+    else {
+        $uri = $null
+        if ([Uri]::TryCreate($text, [UriKind]::Absolute, [ref]$uri) -and $uri.Host) {
+            $text = "{0}/{1}" -f $uri.Host.ToLowerInvariant(), $uri.AbsolutePath.Trim('/')
+        }
+    }
+    if ($text.EndsWith('.git')) {
+        $text = $text.Substring(0, $text.Length - 4)
+    }
+    return $text.TrimEnd('/')
+}
+
 function Assert-PublishPackage {
     $validationPath = Join-Path $script:PublishRoot "package_validation.json"
     $manifestPath = Join-Path $script:PublishRoot "deployment_manifest.json"
@@ -215,25 +224,34 @@ function Assert-PublishPackage {
         }
     }
 
-    $monthlyPage = Join-Path $script:PublishRoot ("basic_data\{0}" -f $script:MonthlyReportPageName)
-    $monthlyAssets = Join-Path $script:PublishRoot ("basic_data\assets\{0}" -f $script:MonthlyReportAssetDirectoryName)
+    $basicDataRoot = Join-Path $script:PublishRoot "basic_data"
+    $basicAssetRoot = Join-Path $basicDataRoot "assets"
     $oldInsights = Join-Path $script:PublishRoot "basic_data\insights.html"
     $oldMonthDir = Join-Path $script:PublishRoot "basic_data\data\insight_rebalance_months"
     $oldFundMonthDir = Join-Path $script:PublishRoot "basic_data\data\rebalance_fund_category_months"
-    if (-not (Test-Path -LiteralPath $monthlyPage)) {
-        throw "Static monthly rebalance report is missing: $monthlyPage"
+    $monthlyResiduals = @()
+    if (Test-Path -LiteralPath $basicDataRoot) {
+        $monthlyResiduals += @(
+            Get-ChildItem -LiteralPath $basicDataRoot -File -Filter "monthly-rebalance-report-*.html" -Force
+        )
     }
-    $monthlyPageContent = Get-Content -LiteralPath $monthlyPage -Raw -Encoding UTF8
-    $expectedMonthlyTitle = Get-MonthlyReportTitle
-    if (-not $monthlyPageContent.Contains($expectedMonthlyTitle)) {
-        throw "Static monthly rebalance report content is incomplete: $monthlyPage"
+    if (Test-Path -LiteralPath $basicAssetRoot) {
+        $monthlyResiduals += @(
+            Get-ChildItem -LiteralPath $basicAssetRoot -Directory -Filter "monthly-rebalance-report-*" -Force
+        )
     }
-    if (-not (Test-Path -LiteralPath $monthlyAssets)) {
-        throw "Static monthly rebalance asset directory is missing: $monthlyAssets"
+    $monthlyManifestEntries = @(
+        $manifest.files | Where-Object {
+            ([string]$_.path) -match '(^|/)monthly-rebalance-report-' -or
+            ([string]$_.path) -match '(^|/)insight_rebalance_months/' -or
+            ([string]$_.path) -match '(^|/)rebalance_fund_category_months/'
+        }
+    )
+    if ($monthlyResiduals.Count -ne 0) {
+        throw "Monthly report content is forbidden in the minimal package: $($monthlyResiduals.FullName -join ', ')"
     }
-    $assetCount = (Get-ChildItem -LiteralPath $monthlyAssets -File | Measure-Object).Count
-    if ($assetCount -lt 7) {
-        throw "Static monthly rebalance asset count is too low: $assetCount"
+    if ($monthlyManifestEntries.Count -ne 0) {
+        throw "Monthly report content is still referenced by the deployment manifest: $($monthlyManifestEntries.path -join ', ')"
     }
     if (Test-Path -LiteralPath $oldInsights) {
         throw "Old dynamic insights page still exists in minimal package: $oldInsights"
@@ -246,7 +264,7 @@ function Assert-PublishPackage {
     $script:PackageManifest = $manifest
     $script:PackageVersion = $version
     Write-RunLog ("[PACKAGE] build_id={0} files={1} total_mib={2}" -f $manifest.buildId, $manifest.fileCount, [math]::Round(([double]$manifest.totalBytes) / 1MB, 2))
-    Write-RunLog ("[PACKAGE] strategy_details={0} fund_details={1} monthly_assets={2}" -f $checks.strategyDetailCount, $checks.enhancedFundDetailCount, $assetCount)
+    Write-RunLog ("[PACKAGE] strategy_details={0} fund_details={1} monthly_content=0" -f $checks.strategyDetailCount, $checks.enhancedFundDetailCount)
 }
 
 function Invoke-SmokeTest {
@@ -268,12 +286,11 @@ function Invoke-SmokeTest {
         Start-Sleep -Seconds 3
         $base = "http://127.0.0.1:$SmokeTestPort"
         $urls = @(
+            "$base/basic_data/institutions.html",
             "$base/basic_data/strategies.html",
             "$base/basic_data/compare.html",
             "$base/basic_data/mixed-performance-scatter.html",
             "$base/basic_data/ai-strategy.html",
-            "$base/basic_data/$($script:MonthlyReportPageName)",
-            "$base/basic_data/assets/$($script:MonthlyReportAssetDirectoryName)/type_performance.png",
             "$base/basic_data/data/strategy_list_pack.js.gz",
             "$base/basic_data/data/mixed_performance_scatter_pack.js.gz"
         )
@@ -400,6 +417,176 @@ function Invoke-GitPublish {
     Write-RunLog ("[GIT] pushed branch={0} commit={1}" -f $branch, $script:PublishedCommit)
 }
 
+function Publish-RootSnapshotTarget {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetName,
+        [Parameter(Mandatory = $true)][string]$Remote,
+        [Parameter(Mandatory = $true)][string]$Branch,
+        [switch]$RequireSeparateRepository,
+        [switch]$UseIsolatedGitDirectory
+    )
+    $remoteValue = $Remote.Trim()
+    $branchValue = $Branch.Trim()
+    if ([string]::IsNullOrWhiteSpace($remoteValue)) {
+        throw "$TargetName remote is not configured."
+    }
+    if ([string]::IsNullOrWhiteSpace($branchValue)) {
+        throw "$TargetName branch is not configured."
+    }
+    Invoke-Git -GitArgs @("check-ref-format", "--branch", $branchValue)
+    if ($RequireSeparateRepository) {
+        $originUrl = ((Get-GitOutput -GitArgs @("remote", "get-url", "origin")) -join "").Trim()
+        if ((Get-NormalizedGitRemoteKey -Remote $originUrl) -eq (Get-NormalizedGitRemoteKey -Remote $remoteValue)) {
+            throw "EdgeOne repository must be separate from the normal publish repository."
+        }
+    }
+    $sourceTree = ((Get-GitOutput -GitArgs @("rev-parse", "$($script:PublishedCommit)^{tree}")) -join "").Trim()
+    if ($sourceTree -notmatch '^[0-9a-f]{40}$') {
+        throw "Unable to resolve the published tree for $TargetName."
+    }
+    $snapshotGitPrefix = @()
+    $isolatedGitDirectory = $null
+    if ($UseIsolatedGitDirectory) {
+        $isolatedGitDirectory = Join-Path $script:RunDir "edgeone_snapshot.git"
+        if (Test-Path -LiteralPath $isolatedGitDirectory) {
+            throw "Isolated EdgeOne Git directory already exists: $isolatedGitDirectory"
+        }
+        $sourceObjectDirectory = ((Get-GitOutput -GitArgs @(
+            "rev-parse", "--path-format=absolute", "--git-path", "objects"
+        )) -join "").Trim()
+        if (-not (Test-Path -LiteralPath $sourceObjectDirectory -PathType Container)) {
+            throw "Unable to resolve the normal publish repository object directory."
+        }
+        Invoke-Git -GitArgs @("init", "--bare", $isolatedGitDirectory)
+        $alternateInfoDirectory = Join-Path $isolatedGitDirectory "objects\info"
+        New-Item -ItemType Directory -Path $alternateInfoDirectory -Force | Out-Null
+        $alternatePath = Join-Path $alternateInfoDirectory "alternates"
+        # Git's alternates parser on Windows treats CR as part of the object path.
+        # Write a single LF explicitly so Chinese paths remain both UTF-8 and valid.
+        $alternateValue = $sourceObjectDirectory.Replace('\', '/') + "`n"
+        [System.IO.File]::WriteAllText(
+            $alternatePath,
+            $alternateValue,
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        $snapshotGitPrefix = @("--git-dir=$isolatedGitDirectory")
+        Invoke-Git -GitArgs ($snapshotGitPrefix + @(
+            "config", "user.name", "Tianyan EdgeOne Publisher"
+        ))
+        Invoke-Git -GitArgs ($snapshotGitPrefix + @(
+            "config", "user.email", "tianyan-edgeone@local.invalid"
+        ))
+        Write-RunLog ("[SNAPSHOT] isolated_git={0} alternate_objects={1}" -f $isolatedGitDirectory, $sourceObjectDirectory)
+    }
+    $snapshotMessage = "$TargetName snapshot $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') source=$($script:PublishedCommit)"
+    $snapshotCommit = ((Get-GitOutput -GitArgs ($snapshotGitPrefix + @(
+        "commit-tree", $sourceTree, "-m", $snapshotMessage
+    ))) -join "").Trim()
+    if ($snapshotCommit -notmatch '^[0-9a-f]{40}$') {
+        throw "Unable to create the $TargetName root snapshot commit."
+    }
+
+    $commitLine = ((Get-GitOutput -GitArgs ($snapshotGitPrefix + @(
+        "rev-list", "--parents", "-n", "1", $snapshotCommit
+    ))) -join " ").Trim()
+    $commitTokens = @($commitLine -split "\s+" | Where-Object { $_ })
+    if ($commitTokens.Count -ne 1) {
+        throw "$TargetName snapshot commit must be a root commit without publish history."
+    }
+    $snapshotTree = ((Get-GitOutput -GitArgs ($snapshotGitPrefix + @(
+        "rev-parse", "$($snapshotCommit)^{tree}"
+    ))) -join "").Trim()
+    if ($snapshotTree -ne $sourceTree) {
+        throw "$TargetName snapshot tree does not match the normal publish tree."
+    }
+
+    $oldCommit = ""
+    $maxSnapshotPushAttempts = 3
+    for ($snapshotPushAttempt = 1; $snapshotPushAttempt -le $maxSnapshotPushAttempts; $snapshotPushAttempt++) {
+        $remoteLines = @(Get-GitOutput -GitArgs @("ls-remote", $remoteValue, "refs/heads/$branchValue"))
+        $remoteText = ($remoteLines -join "`n").Trim()
+        $oldCommit = ""
+        if ($remoteText) {
+            $oldCommit = (($remoteText -split "\s+")[0]).Trim()
+            if ($oldCommit -notmatch '^[0-9a-f]{40}$') {
+                throw "Unable to parse the existing $TargetName branch head."
+            }
+        }
+        $lease = if ($oldCommit) {
+            "--force-with-lease=refs/heads/${branchValue}:$oldCommit"
+        }
+        else {
+            "--force-with-lease=refs/heads/${branchValue}:"
+        }
+        try {
+            Invoke-Git -GitArgs ($snapshotGitPrefix + @(
+                "-c", "http.version=HTTP/1.1",
+                "-c", "http.postBuffer=524288000",
+                "push", $remoteValue, $lease, "${snapshotCommit}:refs/heads/$branchValue"
+            ))
+            break
+        }
+        catch {
+            if ($snapshotPushAttempt -ge $maxSnapshotPushAttempts) {
+                throw
+            }
+            Write-RunLog ("[WARN] {0} push attempt {1}/{2} failed; refreshing the remote watermark before retry." -f $TargetName, $snapshotPushAttempt, $maxSnapshotPushAttempts)
+            Start-Sleep -Seconds (5 * $snapshotPushAttempt)
+        }
+    }
+
+    $verifiedRemote = ((Get-GitOutput -GitArgs @("ls-remote", $remoteValue, "refs/heads/$branchValue")) -join "`n").Trim()
+    if ($verifiedRemote -notlike "$snapshotCommit*") {
+        throw "Remote $TargetName branch does not match the generated root commit."
+    }
+    Write-RunLog ("[SNAPSHOT] target={0} remote={1} branch={2} commit={3} source={4}" -f $TargetName, $remoteValue, $branchValue, $snapshotCommit, $script:PublishedCommit)
+    return [pscustomobject]@{
+        target = $TargetName
+        remote = $remoteValue
+        branch = $branchValue
+        commit = $snapshotCommit
+        tree = $sourceTree
+        previousCommit = if ($oldCommit) { $oldCommit } else { $null }
+        isolatedGitDirectory = $isolatedGitDirectory
+    }
+}
+
+function Publish-EdgeOneSnapshots {
+    if ($SkipPush) {
+        Write-RunLog "[SKIP] EdgeOne snapshot publication skipped."
+        return
+    }
+    $publishedTargetCount = 0
+    if (-not [string]::IsNullOrWhiteSpace($EdgeOneRepositoryUrl)) {
+        $result = Publish-RootSnapshotTarget `
+            -TargetName "EdgeOne dedicated repository" `
+            -Remote $EdgeOneRepositoryUrl `
+            -Branch $EdgeOneRepositoryBranch `
+            -RequireSeparateRepository `
+            -UseIsolatedGitDirectory
+        $script:PublishedEdgeOneRepositoryUrl = $result.remote
+        $script:PublishedEdgeOneSnapshotBranch = $result.branch
+        $script:PublishedEdgeOneSnapshotCommit = $result.commit
+        $script:PublishedEdgeOneSnapshotTree = $result.tree
+        $publishedTargetCount += 1
+    }
+    if (-not [string]::IsNullOrWhiteSpace($EdgeOneSnapshotBranch)) {
+        if ($EdgeOneSnapshotBranch.Trim() -eq $script:PublishedBranch) {
+            throw "Legacy EdgeOne snapshot branch must differ from the normal publish branch."
+        }
+        $legacyResult = Publish-RootSnapshotTarget `
+            -TargetName "EdgeOne legacy branch" `
+            -Remote "origin" `
+            -Branch $EdgeOneSnapshotBranch
+        $script:PublishedLegacyEdgeOneSnapshotBranch = $legacyResult.branch
+        $script:PublishedLegacyEdgeOneSnapshotCommit = $legacyResult.commit
+        $publishedTargetCount += 1
+    }
+    if ($publishedTargetCount -eq 0) {
+        throw "No EdgeOne snapshot target is configured."
+    }
+}
+
 function Wait-GitHubPages {
     if ($SkipPush -or $SkipPagesVerify -or -not $PagesBaseUrl) {
         Write-RunLog "[SKIP] GitHub Pages verification skipped."
@@ -414,8 +601,11 @@ function Wait-GitHubPages {
         try {
             $versionResp = Invoke-WebRequest -Uri "$base/version.json?ts=$ts" -UseBasicParsing -TimeoutSec 30
             $version = $versionResp.Content | ConvertFrom-Json
-            $monthly = Invoke-WebRequest -Uri "$base/basic_data/$($script:MonthlyReportPageName)?ts=$ts" -UseBasicParsing -TimeoutSec 30
-            $asset = Invoke-WebRequest -Uri "$base/basic_data/assets/$($script:MonthlyReportAssetDirectoryName)/type_performance.png?ts=$ts" -UseBasicParsing -TimeoutSec 30
+            $entryPath = [string]$version.entry
+            if ([string]::IsNullOrWhiteSpace($entryPath)) {
+                $entryPath = "basic_data/institutions.html"
+            }
+            $entry = Invoke-WebRequest -Uri "$base/$($entryPath.TrimStart('/'))?ts=$ts" -UseBasicParsing -TimeoutSec 30
             $oldStatus = "unknown"
             try {
                 $old = Invoke-WebRequest -Uri "$base/basic_data/insights.html?ts=$ts" -UseBasicParsing -TimeoutSec 15
@@ -430,32 +620,28 @@ function Wait-GitHubPages {
                 }
             }
             $buildMatch = ([string]$version.buildId -eq $targetBuild)
-            $monthlyStatusOk = ([int]$monthly.StatusCode -eq 200)
-            $monthlyContentOk = ([string]$monthly.Content).Contains((Get-MonthlyReportTitle))
-            $assetStatusOk = ([int]$asset.StatusCode -eq 200)
+            $entryStatusOk = ([int]$entry.StatusCode -eq 200)
             $oldInsightsRemoved = ($oldStatus -eq "404")
             $script:PagesLastState = [ordered]@{
                 checkedAt = (Get-Date).ToString("s")
                 targetBuild = $targetBuild
                 observedBuild = [string]$version.buildId
                 buildMatch = $buildMatch
-                monthlyStatus = [int]$monthly.StatusCode
-                monthlyStatusOk = $monthlyStatusOk
-                monthlyContentOk = $monthlyContentOk
-                assetStatus = [int]$asset.StatusCode
-                assetStatusOk = $assetStatusOk
+                entry = $entryPath
+                entryStatus = [int]$entry.StatusCode
+                entryStatusOk = $entryStatusOk
                 oldInsightsStatus = $oldStatus
                 oldInsightsRemoved = $oldInsightsRemoved
             }
             if ($buildMatch) {
                 $script:PagesTargetBuildObserved = $true
-                if ($monthlyStatusOk -and $assetStatusOk) {
+                if ($entryStatusOk) {
                     $script:PagesTargetBuildReachable = $true
                 }
             }
-            $last = "build=$($version.buildId) buildMatch=$buildMatch monthly=$($monthly.StatusCode) monthlyContent=$monthlyContentOk asset=$($asset.StatusCode) oldInsights=$oldStatus"
+            $last = "build=$($version.buildId) buildMatch=$buildMatch entry=$($entry.StatusCode) oldInsights=$oldStatus"
             Write-RunLog ("[PAGES] {0}" -f $last)
-            if ($buildMatch -and $monthlyStatusOk -and $monthlyContentOk -and $assetStatusOk -and $oldInsightsRemoved) {
+            if ($buildMatch -and $entryStatusOk -and $oldInsightsRemoved) {
                 $script:PagesVerified = $true
                 return
             }
@@ -504,6 +690,12 @@ $script:PackageWarnings = [ordered]@{}
 $script:AuditSummary = $null
 $script:PublishedCommit = $null
 $script:PublishedBranch = $null
+$script:PublishedEdgeOneRepositoryUrl = $null
+$script:PublishedEdgeOneSnapshotBranch = $null
+$script:PublishedEdgeOneSnapshotCommit = $null
+$script:PublishedEdgeOneSnapshotTree = $null
+$script:PublishedLegacyEdgeOneSnapshotBranch = $null
+$script:PublishedLegacyEdgeOneSnapshotCommit = $null
 $script:PagesVerified = $false
 $script:PagesVerificationPending = $false
 $script:PagesTargetBuildObserved = $false
@@ -518,6 +710,9 @@ try {
     Write-RunLog ("ReportRoot  : {0}" -f $script:ReportRoot)
     Write-RunLog ("PublishRoot : {0}" -f $script:PublishRoot)
     Write-RunLog ("PagesBaseUrl: {0}" -f $PagesBaseUrl)
+    Write-RunLog ("EdgeOneRemote: {0}" -f $EdgeOneRepositoryUrl)
+    Write-RunLog ("EdgeOneRemoteBranch: {0}" -f $EdgeOneRepositoryBranch)
+    Write-RunLog ("EdgeOneLegacyBranch: {0}" -f $EdgeOneSnapshotBranch)
     Write-RunLog ("RunDir      : {0}" -f $script:RunDir)
 
     if (-not $AllowDirtyPublishRepo) {
@@ -553,6 +748,13 @@ try {
     }
 
     Invoke-Step -Name "2. Build Minimal Publish Package" -Body {
+        if ($ReuseExistingValidatedPackage) {
+            if (-not $SkipDataUpdate) {
+                throw "ReuseExistingValidatedPackage requires SkipDataUpdate."
+            }
+            Write-RunLog "[SKIP] Reusing the existing package; package validation and smoke test remain mandatory."
+            return
+        }
         Invoke-ExternalCommand `
             -Name "build_minimal_publish_set" `
             -FilePath "python" `
@@ -580,6 +782,7 @@ try {
 
     Invoke-Step -Name "6. Commit And Push Minimal Package" -Body {
         Invoke-GitPublish
+        Publish-EdgeOneSnapshots
     }
 
     Invoke-Step -Name "7. Verify GitHub Pages" -Body {
@@ -617,11 +820,25 @@ finally {
         auditReportPath = if ($script:AuditSummary) { $script:AuditSummary.auditReportPath } else { $null }
         publishedBranch = $script:PublishedBranch
         publishedCommit = $script:PublishedCommit
+        edgeOneRepositoryUrl = $script:PublishedEdgeOneRepositoryUrl
+        edgeOneSnapshotBranch = $script:PublishedEdgeOneSnapshotBranch
+        edgeOneSnapshotCommit = $script:PublishedEdgeOneSnapshotCommit
+        edgeOneSnapshotTree = $script:PublishedEdgeOneSnapshotTree
+        edgeOneLegacySnapshotBranch = $script:PublishedLegacyEdgeOneSnapshotBranch
+        edgeOneLegacySnapshotCommit = $script:PublishedLegacyEdgeOneSnapshotCommit
         pagesVerified = $script:PagesVerified
         pagesVerificationSkipped = [bool]$SkipPagesVerify
         pagesVerificationPending = $script:PagesVerificationPending
         pagesLastState = $script:PagesLastState
-        pagesUrl = if ($PagesBaseUrl) { $PagesBaseUrl.TrimEnd("/") + "/basic_data/" + $script:MonthlyReportPageName } else { $null }
+        pagesUrl = if ($PagesBaseUrl) {
+            $entryPath = if ($script:PackageVersion -and $script:PackageVersion.entry) {
+                [string]$script:PackageVersion.entry
+            }
+            else {
+                "basic_data/institutions.html"
+            }
+            $PagesBaseUrl.TrimEnd("/") + "/" + $entryPath.TrimStart("/")
+        } else { $null }
     }
     $summaryPath = Join-Path $script:RunDir "summary.json"
     $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding UTF8

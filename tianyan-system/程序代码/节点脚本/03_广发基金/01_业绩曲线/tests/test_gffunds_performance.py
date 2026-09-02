@@ -101,6 +101,36 @@ class GFFundsPerformanceTest(unittest.TestCase):
             ["GFJJ000001", "ZY00000001", "GFJJ000002", "ZY00000002"],
         )
 
+    def test_explicit_runtime_roots_precede_legacy_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime_root = Path(temporary) / "runtime-raw"
+            roots = MODULE.candidate_raw_roots(runtime_root)
+        self.assertEqual(roots[0], runtime_root.resolve())
+        self.assertIn((MODULE.PROJECT_ROOT / "data" / "raw").resolve(), roots)
+
+    def test_database_inventory_accepts_standard_and_highend_strategy_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            db_path = Path(temporary) / "analysis.sqlite"
+            import sqlite3
+
+            connection = sqlite3.connect(db_path)
+            connection.execute('CREATE TABLE "策略信息" ("渠道ID" TEXT, "渠道策略ID" TEXT)')
+            connection.executemany(
+                'INSERT INTO "策略信息" VALUES (?,?)',
+                [
+                    (MODULE.CHANNEL_ID, "GFJJ000001"),
+                    (MODULE.CHANNEL_ID, "ZY00000001"),
+                    (MODULE.CHANNEL_ID, "BAD"),
+                    ("ttfund", "GFJJ000002"),
+                ],
+            )
+            connection.commit()
+            connection.close()
+            self.assertEqual(
+                MODULE.load_gffunds_strategy_ids_from_database(db_path),
+                ["GFJJ000001", "ZY00000001"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

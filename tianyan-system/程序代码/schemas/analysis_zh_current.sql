@@ -44,6 +44,27 @@ CREATE TABLE IF NOT EXISTS "策略信息" (
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_策略信息_渠道_策略"
 ON "策略信息"("渠道ID", "渠道策略ID");
 
+-- 渠道直接披露的结构化业绩基准成分。指数代码和权重必须保留，不能只把
+-- 基准降级成文本后再做模糊匹配，否则同名/近似名称会映射到错误指数。
+CREATE TABLE IF NOT EXISTS "策略业绩基准成分" (
+    "统一策略ID" TEXT NOT NULL,
+    "渠道ID" TEXT NOT NULL,
+    "渠道策略ID" TEXT NOT NULL,
+    "指数代码" TEXT NOT NULL,
+    "指数名称" TEXT,
+    "指数类型" TEXT,
+    "权重_百分比" REAL NOT NULL,
+    "是否精确拆分" INTEGER NOT NULL DEFAULT 0,
+    "置信度" TEXT,
+    "原始快照ID" TEXT,
+    "最近入库时间" TEXT,
+    PRIMARY KEY ("统一策略ID", "指数代码"),
+    FOREIGN KEY ("统一策略ID") REFERENCES "策略信息"("统一策略ID")
+);
+
+CREATE INDEX IF NOT EXISTS "idx_策略业绩基准成分_渠道_策略"
+ON "策略业绩基准成分"("渠道ID", "渠道策略ID");
+
 CREATE TABLE IF NOT EXISTS "策略关系" (
     "子策略ID" TEXT PRIMARY KEY,
     "母策略ID" TEXT NOT NULL,
@@ -766,6 +787,123 @@ CREATE TABLE IF NOT EXISTS "策略模拟净值区间" (
 
 CREATE INDEX IF NOT EXISTS "idx_策略模拟净值区间_质量"
 ON "策略模拟净值区间"("算法版本", "是否纳入模拟", "区间是否有效", "质量等级");
+
+-- 调仓质量事实必须在每次策略模拟净值重建后原子重建。
+-- 严格以当前调仓事件 ID 为主键，避免增量入库后继续引用旧事件 ID。
+CREATE TABLE IF NOT EXISTS "调仓质量事件分析" (
+    "调仓事件ID" TEXT PRIMARY KEY,
+    "统一策略ID" TEXT NOT NULL,
+    "策略名称" TEXT,
+    "投顾机构" TEXT,
+    "渠道ID" TEXT NOT NULL,
+    "调仓日期" TEXT,
+    "下次调仓日期" TEXT,
+    "区间结束锚点日期" TEXT,
+    "区间结束是否封闭" INTEGER NOT NULL DEFAULT 0,
+    "评估层级" TEXT NOT NULL,
+    "评估状态" TEXT NOT NULL,
+    "评估说明" TEXT,
+    "调仓明细行数" INTEGER NOT NULL DEFAULT 0,
+    "已补码行数" INTEGER NOT NULL DEFAULT 0,
+    "未补码行数" INTEGER NOT NULL DEFAULT 0,
+    "有净值覆盖行数" INTEGER NOT NULL DEFAULT 0,
+    "调前权重和_百分比" REAL,
+    "调后权重和_百分比" REAL,
+    "调前仓位收益率_百分比" REAL,
+    "调后仓位收益率_百分比" REAL,
+    "调仓超额_百分比" REAL,
+    "胜负" TEXT,
+    "结果评价" TEXT,
+    "买入加仓收益率_百分比" REAL,
+    "卖出减仓收益率_百分比" REAL,
+    "方向性超额_百分比" REAL,
+    "策略区间收益率_百分比" REAL,
+    "最优贡献基金" TEXT,
+    "最差贡献基金" TEXT,
+    "调仓标题" TEXT,
+    "调仓原因" TEXT
+);
+
+CREATE INDEX IF NOT EXISTS "idx_调仓质量事件分析_策略日期"
+ON "调仓质量事件分析"("统一策略ID", "调仓日期");
+
+CREATE TABLE IF NOT EXISTS "调仓质量基金明细" (
+    "调仓明细分析ID" TEXT PRIMARY KEY,
+    "调仓事件ID" TEXT NOT NULL,
+    "统一策略ID" TEXT NOT NULL,
+    "策略名称" TEXT,
+    "渠道ID" TEXT NOT NULL,
+    "调仓日期" TEXT,
+    "基金代码_原始" TEXT,
+    "基金代码_分析" TEXT,
+    "基金代码解析状态" TEXT NOT NULL,
+    "基金名称" TEXT,
+    "调仓动作_分析" TEXT,
+    "调前权重_百分比" REAL,
+    "调后权重_百分比" REAL,
+    "基金区间收益率_百分比" REAL,
+    "调前收益贡献_百分比" REAL,
+    "调后收益贡献_百分比" REAL,
+    "调仓贡献变化_百分比" REAL,
+    "评估层级" TEXT NOT NULL,
+    "基金收益起始日期" TEXT,
+    "基金收益结束日期" TEXT
+);
+
+CREATE INDEX IF NOT EXISTS "idx_调仓质量基金明细_事件"
+ON "调仓质量基金明细"("调仓事件ID");
+
+CREATE TABLE IF NOT EXISTS "调仓质量策略汇总" (
+    "统一策略ID" TEXT PRIMARY KEY,
+    "策略名称" TEXT,
+    "投顾机构" TEXT,
+    "渠道ID" TEXT NOT NULL,
+    "历史调仓事件数" INTEGER NOT NULL DEFAULT 0,
+    "有效调仓事件数" INTEGER NOT NULL DEFAULT 0,
+    "全组合有效事件数" INTEGER NOT NULL DEFAULT 0,
+    "调仓子集有效事件数" INTEGER NOT NULL DEFAULT 0,
+    "不可评估事件数" INTEGER NOT NULL DEFAULT 0,
+    "胜事件数" INTEGER NOT NULL DEFAULT 0,
+    "负事件数" INTEGER NOT NULL DEFAULT 0,
+    "平事件数" INTEGER NOT NULL DEFAULT 0,
+    "胜率_有效事件_百分比" REAL,
+    "胜率_全组合事件_百分比" REAL,
+    "平均调仓超额_百分比" REAL,
+    "中位数调仓超额_百分比" REAL,
+    "累计调仓超额_百分比" REAL,
+    "平均正超额_百分比" REAL,
+    "平均负超额_百分比" REAL,
+    "赔率" REAL,
+    "最近一次调仓日期" TEXT,
+    "最近一次调仓评价" TEXT,
+    "完整性说明" TEXT,
+    "历史评价" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS "调仓质量完整性概览" (
+    "对象类型" TEXT NOT NULL,
+    "对象ID" TEXT NOT NULL,
+    "渠道ID" TEXT,
+    "策略名称" TEXT,
+    "指标名称" TEXT NOT NULL,
+    "指标值" REAL,
+    "指标文本" TEXT,
+    PRIMARY KEY ("对象类型", "对象ID", "指标名称")
+);
+
+CREATE TABLE IF NOT EXISTS "调仓质量构建状态" (
+    "构建ID" TEXT PRIMARY KEY,
+    "算法版本" TEXT NOT NULL,
+    "生成时间" TEXT NOT NULL,
+    "排除渠道JSON" TEXT NOT NULL,
+    "源事件数" INTEGER NOT NULL,
+    "质量事件数" INTEGER NOT NULL,
+    "源最新调仓日期" TEXT,
+    "质量最新调仓日期" TEXT,
+    "基金净值最新日期" TEXT,
+    "缺失事件数" INTEGER NOT NULL,
+    "孤立事件数" INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS "策略模拟净值质量" (
     "统一策略ID" TEXT NOT NULL,

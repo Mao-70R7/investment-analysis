@@ -53,6 +53,7 @@ LATEST_RUN_ONLY_CHANNELS = {
     "gfbank_cgb",
 }
 EXACT_RUN_ENV_BY_CHANNEL = {
+    "southern": "SOUTHERN_COLLECT_RUN_ID",
     "qieman": "QIEMAN_COLLECT_RUN_ID",
     "gfsec_fima": "GFSEC_FIMA_COLLECT_RUN_ID",
     "gfsec_robot": "GF_SUPPLEMENTAL_COLLECT_RUN_ID",
@@ -64,7 +65,7 @@ WEIGHT_SUM_TARGET = 100.0
 WEIGHT_SUM_TOLERANCE = 1.0
 WEIGHT_NORMALIZE_EPSILON = 0.0001
 DAILY_RETURN_CONSISTENCY_TOLERANCE_PCT = 0.05
-ANALYSIS_SCHEMA_USER_VERSION = 20260811
+ANALYSIS_SCHEMA_USER_VERSION = 20260813
 
 TTFUND_FUND_GROUP_LABELS = {
     "0": "其他",
@@ -86,12 +87,18 @@ ANALYSIS_TABLES_TO_RESET = [
     "信号策略事件",
     "策略调仓明细",
     "策略调仓事件",
+    "调仓质量基金明细",
+    "调仓质量事件分析",
+    "调仓质量策略汇总",
+    "调仓质量完整性概览",
+    "调仓质量构建状态",
     "策略历史持仓",
     "策略当前持仓分组",
     "策略当前持仓",
     "策略披露风险指标",
     "策略区间业绩",
     "策略日度业绩",
+    "策略业绩基准成分",
     "策略信息",
     "渠道信息",
 ]
@@ -224,9 +231,9 @@ CHANNEL_METADATA: dict[str, dict[str, str | None]] = {
         "渠道ID": "southern",
         "渠道名称": "南方基金/司南投顾",
         "渠道类型": "fund_company",
-        "官方站点": "https://www.nffund.com/new/snzt/index.html",
-        "登录要求": "required",
-        "备注": "当前公开入口仅为司南投顾介绍页，策略和交易数据在登录后系统。",
+        "官方站点": "https://m.nffund.com/new/index.html?tabIndex=RoboHomePage",
+        "登录要求": "partial",
+        "备注": "匿名 H5 可获取策略、最长60个月业绩、基金代码名称和资产大类配置；单基金精确权重与历史调仓仍需登录。",
     },
     "cmfchina": {
         "渠道ID": "cmfchina",
@@ -453,13 +460,52 @@ def json_text(value: Any) -> str | None:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def to_percent(channel_id: str, value: Any) -> float | None:
+DECIMAL_RETURN_CHANNELS = {"zocaifu", "huaxia_tougu", "qieman", "southern"}
+DECIMAL_WEIGHT_CHANNELS = {"huaxia_tougu", "qieman"}
+
+
+def to_return_percent(
+    channel_id: str,
+    value: Any,
+    return_unit: Any = None,
+) -> float | None:
+    """Return percentage points, preferring an explicit normalized unit.
+
+    Southern has official feeds with different units, so a channel-only rule
+    cannot safely distinguish authenticated market rows from legacy IA006 rows.
+    """
     if value is None or value == "":
         return None
     number = float(value)
-    if channel_id in {"zocaifu", "huaxia_tougu", "qieman"}:
+    normalized_unit = str(return_unit or "").strip().lower()
+    if normalized_unit in {"decimal", "ratio", "fraction", "0_1"}:
+        return round(number * 100, 6)
+    if normalized_unit in {"percent", "percent_point", "percentage_point", "0_100"}:
+        return number
+    if channel_id in DECIMAL_RETURN_CHANNELS:
         return round(number * 100, 6)
     return number
+
+
+def to_weight_percent(channel_id: str, value: Any, weight_unit: Any = None) -> float | None:
+    """Return display percent points, preferring an explicit normalized weight unit."""
+
+    if value is None or value == "":
+        return None
+    number = float(value)
+    normalized_unit = str(weight_unit or "").strip().lower()
+    if normalized_unit in {"decimal", "ratio", "fraction", "0_1"}:
+        return round(number * 100, 6)
+    if normalized_unit in {"percent", "percent_point", "percentage_point", "0_100"}:
+        return number
+    if channel_id in DECIMAL_WEIGHT_CHANNELS:
+        return round(number * 100, 6)
+    return number
+
+
+def to_percent(channel_id: str, value: Any, return_unit: Any = None) -> float | None:
+    """Backward-compatible alias for return fields used by incremental loaders."""
+    return to_return_percent(channel_id, value, return_unit)
 
 
 def to_display_percent(value: Any, *, absolute: bool = False) -> float | None:
@@ -870,11 +916,21 @@ def collect_daily_performance_rows(
                 "渠道策略ID": strategy_id,
                 "交易日期": trade_date,
                 "单位净值": to_float(row.get("nav")),
-                "日收益率_百分比": to_percent(channel_id, row.get("daily_return")),
-                "累计收益率_百分比": to_percent(channel_id, row.get("cumulative_return")),
-                "基准收益率_百分比": to_percent(channel_id, row.get("benchmark_return")),
-                "指数收益率_百分比": to_percent(channel_id, row.get("index_return")),
-                "最大回撤_百分比": to_percent(channel_id, row.get("max_drawdown")),
+                "日收益率_百分比": to_return_percent(
+                    channel_id, row.get("daily_return"), row.get("return_unit")
+                ),
+                "累计收益率_百分比": to_return_percent(
+                    channel_id, row.get("cumulative_return"), row.get("return_unit")
+                ),
+                "基准收益率_百分比": to_return_percent(
+                    channel_id, row.get("benchmark_return"), row.get("return_unit")
+                ),
+                "指数收益率_百分比": to_return_percent(
+                    channel_id, row.get("index_return"), row.get("return_unit")
+                ),
+                "最大回撤_百分比": to_return_percent(
+                    channel_id, row.get("max_drawdown"), row.get("return_unit")
+                ),
                 "业绩区段名称": row.get("section_name"),
                 "业绩区段类型": row.get("section_type") or row.get("source_type"),
                 "原始快照ID": row.get("source_snapshot_id"),
@@ -1383,6 +1439,81 @@ def upsert_strategy(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
     )
 
 
+def upsert_strategy_benchmark_component(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
+    conn.execute(
+        """
+        INSERT INTO "策略业绩基准成分" (
+            "统一策略ID", "渠道ID", "渠道策略ID", "指数代码", "指数名称",
+            "指数类型", "权重_百分比", "是否精确拆分", "置信度",
+            "原始快照ID", "最近入库时间"
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT("统一策略ID", "指数代码") DO UPDATE SET
+            "指数名称"=COALESCE(excluded."指数名称", "策略业绩基准成分"."指数名称"),
+            "指数类型"=COALESCE(excluded."指数类型", "策略业绩基准成分"."指数类型"),
+            "权重_百分比"=excluded."权重_百分比",
+            "是否精确拆分"=MAX(excluded."是否精确拆分", "策略业绩基准成分"."是否精确拆分"),
+            "置信度"=COALESCE(excluded."置信度", "策略业绩基准成分"."置信度"),
+            "原始快照ID"=COALESCE(excluded."原始快照ID", "策略业绩基准成分"."原始快照ID"),
+            "最近入库时间"=COALESCE(excluded."最近入库时间", "策略业绩基准成分"."最近入库时间")
+        """,
+        [
+            row["统一策略ID"],
+            row["渠道ID"],
+            row["渠道策略ID"],
+            row["指数代码"],
+            row.get("指数名称"),
+            row.get("指数类型"),
+            row["权重_百分比"],
+            row.get("是否精确拆分", 0),
+            row.get("置信度"),
+            row.get("原始快照ID"),
+            row.get("最近入库时间"),
+        ],
+    )
+
+
+def load_strategy_benchmark_components(
+    conn: sqlite3.Connection,
+    channel_id: str,
+    unified_id: str,
+    strategy_id: str,
+    components: Any,
+    *,
+    is_exact_split: Any,
+    confidence_level: Any,
+    source_snapshot_id: Any,
+    captured_at: Any,
+) -> int:
+    if not isinstance(components, list):
+        return 0
+    loaded = 0
+    for component in components:
+        if not isinstance(component, dict):
+            continue
+        index_code = normalize_text(component.get("index_code"))
+        weight = to_weight_percent(channel_id, component.get("weight"))
+        if not index_code or weight is None or weight < 0:
+            continue
+        upsert_strategy_benchmark_component(
+            conn,
+            {
+                "统一策略ID": unified_id,
+                "渠道ID": channel_id,
+                "渠道策略ID": strategy_id,
+                "指数代码": index_code,
+                "指数名称": normalize_text(component.get("index_name")),
+                "指数类型": normalize_text(component.get("index_type")),
+                "权重_百分比": weight,
+                "是否精确拆分": normalize_bool(is_exact_split) or 0,
+                "置信度": normalize_text(confidence_level),
+                "原始快照ID": normalize_text(source_snapshot_id),
+                "最近入库时间": normalize_text(captured_at),
+            },
+        )
+        loaded += 1
+    return loaded
+
+
 def upsert_daily_performance(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
     conn.execute(
         """
@@ -1787,6 +1918,17 @@ def import_channel_historical_holdings(
             (channel_id,),
         )
     }
+    fund_dimension: dict[str, tuple[str | None, str | None]] = {}
+    try:
+        fund_dimension = {
+            str(code): (normalize_text(name), normalize_text(fund_type))
+            for code, name, fund_type in conn.execute(
+                'SELECT "基金代码", "基金名称", "基金类型" FROM "基金信息"'
+            )
+            if code
+        }
+    except sqlite3.OperationalError:
+        fund_dimension = {}
     for path in entity_files(channel_id, "strategy_fund_snapshot_history"):
         run_id = path.stem
         captured_at = summaries.get(run_id, {}).get("captured_at")
@@ -1799,10 +1941,14 @@ def import_channel_historical_holdings(
                 continue
             snapshot_id = str(row.get("snapshot_id") or "").strip()
             position_date = normalize_date_text(row.get("position_date"))
-            fund_name = normalize_text(row.get("fund_name"))
+            fund_code = sanitize_fund_code(row.get("fund_code"))
+            dimension_name, dimension_type = fund_dimension.get(fund_code or "", (None, None))
+            fund_name = normalize_text(row.get("fund_name")) or dimension_name
             if not snapshot_id or not position_date or not fund_name:
                 counters["策略历史持仓_业务键缺失跳过"] += 1
                 continue
+            if not normalize_text(row.get("fund_name")) and dimension_name:
+                counters["策略历史持仓_基金维表补名"] += 1
             upsert_historical_holding(
                 conn,
                 {
@@ -1814,10 +1960,14 @@ def import_channel_historical_holdings(
                     "披露日期": normalize_date_text(row.get("disclosure_date")),
                     "快照阶段": normalize_text(row.get("snapshot_phase")),
                     "来源事件ID": normalize_text(row.get("source_event_id")),
-                    "基金代码": sanitize_fund_code(row.get("fund_code")),
+                    "基金代码": fund_code,
                     "基金名称": fund_name,
-                    "资产类型": normalize_fund_group_name(row.get("fund_asset_type")),
-                    "基金权重_百分比": to_percent(channel_id, row.get("fund_weight")),
+                    "资产类型": normalize_fund_group_name(
+                        row.get("fund_asset_type") or dimension_type
+                    ),
+                    "基金权重_百分比": to_weight_percent(
+                        channel_id, row.get("fund_weight"), row.get("weight_unit")
+                    ),
                     "是否精确权重": normalize_bool(row.get("is_precise_weight")) or 0,
                     "置信度": normalize_text(row.get("confidence_level")),
                     "访问级别": normalize_text(row.get("access_level")),
@@ -2332,9 +2482,10 @@ def collect_rebalance_delta_rows(
                 elif resolved_match_status.startswith("local_canonical"):
                     counters["策略调仓明细_本地标准名补码命中"] += 1
 
-            before_weight = to_percent(channel_id, row.get("before_weight"))
-            after_weight = to_percent(channel_id, row.get("after_weight"))
-            weight_delta = to_percent(channel_id, row.get("weight_delta"))
+            weight_unit = row.get("weight_unit")
+            before_weight = to_weight_percent(channel_id, row.get("before_weight"), weight_unit)
+            after_weight = to_weight_percent(channel_id, row.get("after_weight"), weight_unit)
+            weight_delta = to_weight_percent(channel_id, row.get("weight_delta"), weight_unit)
             group_name = normalize_fund_group_name(row.get("fund_group_name"))
             action_type = normalize_text(row.get("action_type"))
             fund_identity = (
@@ -2369,8 +2520,12 @@ def collect_rebalance_delta_rows(
                 "权重变化_百分比": weight_delta,
                 "调仓动作": action_type,
                 "基金代码匹配状态": resolved_match_status,
-                "分组调前权重_百分比": to_percent(channel_id, row.get("fund_group_weight_before")),
-                "分组调后权重_百分比": to_percent(channel_id, row.get("fund_group_weight_after")),
+                "分组调前权重_百分比": to_weight_percent(
+                    channel_id, row.get("fund_group_weight_before"), weight_unit
+                ),
+                "分组调后权重_百分比": to_weight_percent(
+                    channel_id, row.get("fund_group_weight_after"), weight_unit
+                ),
                 "原始快照ID": row.get("source_snapshot_id") or context.get("原始快照ID"),
             }
             existing = rows_by_delta_id.get(delta_id)
@@ -2461,11 +2616,15 @@ def collect_current_holdings(
                 "基金名称": resolved_fund_name or row.get("fund_name"),
                 "资产类型": normalize_fund_group_name(row.get("fund_asset_type")),
                 "分组名称": normalize_fund_group_name(row.get("fund_group_name")),
-                "基金权重_百分比": to_percent(channel_id, row.get("fund_weight")),
-                "分组权重_百分比": to_percent(channel_id, row.get("group_weight")),
+                "基金权重_百分比": to_weight_percent(
+                    channel_id, row.get("fund_weight"), row.get("weight_unit")
+                ),
+                "分组权重_百分比": to_weight_percent(
+                    channel_id, row.get("group_weight"), row.get("weight_unit")
+                ),
                 "基金净值": row.get("fund_nav"),
                 "基金净值日期": normalize_date_text(row.get("fund_nav_date")),
-                "最新日涨幅_百分比": to_percent(
+                "最新日涨幅_百分比": to_return_percent(
                     channel_id,
                     row.get("latest_fund_daily_rate")
                     if row.get("latest_fund_daily_rate") is not None
@@ -2605,7 +2764,11 @@ def import_channels(conn: sqlite3.Connection, channels: list[str]) -> dict[str, 
                         "渠道ID": channel_id,
                         "渠道策略ID": strategy_id,
                         "策略名称": row["strategy_name"],
-                        "投顾机构": canonical_advisor_institution(row.get("advisor_name")),
+                        "投顾机构": canonical_advisor_institution(
+                            row.get("advisor_name"),
+                            channel_id,
+                            metadata.get("渠道名称"),
+                        ),
                         "策略类型": row.get("strategy_type"),
                         "风险等级": row.get("risk_level"),
                         "成立日期": normalize_date_text(row.get("launch_date")),
@@ -2621,6 +2784,18 @@ def import_channels(conn: sqlite3.Connection, channels: list[str]) -> dict[str, 
                         "首次入库时间": row.get("first_seen_at"),
                         "最近入库时间": row.get("last_seen_at"),
                     },
+                )
+                extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
+                counters["策略业绩基准成分"] += load_strategy_benchmark_components(
+                    conn,
+                    channel_id,
+                    unified_id,
+                    strategy_id,
+                    extra.get("benchmark_components"),
+                    is_exact_split=extra.get("benchmark_is_exact_split"),
+                    confidence_level=row.get("confidence_level"),
+                    source_snapshot_id=row.get("source_snapshot_id"),
+                    captured_at=captured_at or row.get("last_seen_at"),
                 )
                 upsert_source(
                     conn,
@@ -2647,6 +2822,27 @@ def import_channels(conn: sqlite3.Connection, channels: list[str]) -> dict[str, 
                     else:
                         counters["策略披露风险指标_策略缺失跳过"] += 1
 
+        # Some collectors publish the exact benchmark split as a dedicated
+        # entity. Load it after strategy_master so the direct channel fact wins
+        # over any enrichment carried by the master row.
+        for path in entity_files(channel_id, "strategy_benchmark"):
+            run_id = path.stem
+            captured_at = summaries.get(run_id, {}).get("captured_at")
+            for row in load_jsonl(path):
+                strategy_id = row["source_strategy_id"]
+                unified_id = unified_strategy_id(channel_id, strategy_id)
+                counters["策略业绩基准成分"] += load_strategy_benchmark_components(
+                    conn,
+                    channel_id,
+                    unified_id,
+                    strategy_id,
+                    row.get("benchmark_components"),
+                    is_exact_split=row.get("is_exact_split"),
+                    confidence_level=row.get("confidence_level"),
+                    source_snapshot_id=row.get("source_snapshot_id") or run_id,
+                    captured_at=captured_at,
+                )
+
         daily_rows = repair_daily_performance_rows(
             collect_daily_performance_rows(conn, channel_id, summaries, counters),
             counters,
@@ -2670,8 +2866,8 @@ def import_channels(conn: sqlite3.Connection, channels: list[str]) -> dict[str, 
                         "统计日期": normalize_date_text(row["as_of_date"]),
                         "区间代码": row["interval_code"],
                         "区间名称": row["interval_label"],
-                        "策略收益率_百分比": to_percent(channel_id, row.get("return_value")),
-                        "基准收益率_百分比": to_percent(channel_id, row.get("benchmark_return")),
+                        "策略收益率_百分比": to_return_percent(channel_id, row.get("return_value")),
+                        "基准收益率_百分比": to_return_percent(channel_id, row.get("benchmark_return")),
                         "原始快照ID": row.get("source_snapshot_id"),
                     },
                 )
@@ -2864,6 +3060,9 @@ def validate_strategy_catalog_summaries(
         expected_latest_nav_strategy_total = int(
             summary.get("latest_nav_date_strategy_total") or 0
         )
+        source_non_empty_nav_strategy_total = int(
+            summary.get("non_empty_nav_strategy_total") or 0
+        )
         loaded_latest_nav_date = str(
             conn.execute(
                 'SELECT COALESCE(MAX("交易日期"), \'\') FROM "策略日度业绩" WHERE "渠道ID"=?',
@@ -2872,6 +3071,16 @@ def validate_strategy_catalog_summaries(
             or ""
         ).strip()
         loaded_latest_nav_strategy_total = 0
+        loaded_non_empty_nav_strategy_total = 0
+        if source_latest_nav_date:
+            loaded_non_empty_nav_strategy_total = int(
+                conn.execute(
+                    '''SELECT COUNT(DISTINCT "渠道策略ID")
+                       FROM "策略日度业绩"
+                       WHERE "渠道ID"=?''',
+                    (channel_id,),
+                ).fetchone()[0]
+            )
         if source_latest_nav_date:
             loaded_latest_nav_strategy_total = int(
                 conn.execute(
@@ -2886,6 +3095,7 @@ def validate_strategy_catalog_summaries(
             or (
                 loaded_latest_nav_date == source_latest_nav_date
                 and loaded_latest_nav_strategy_total >= expected_latest_nav_strategy_total
+                and loaded_non_empty_nav_strategy_total >= source_non_empty_nav_strategy_total
             )
         )
         validations[channel_id] = {
@@ -2900,6 +3110,8 @@ def validate_strategy_catalog_summaries(
             "loadedLatestNavDate": loaded_latest_nav_date or None,
             "expectedLatestNavStrategyTotal": expected_latest_nav_strategy_total,
             "loadedLatestNavStrategyTotal": loaded_latest_nav_strategy_total,
+            "sourceNonEmptyNavStrategyTotal": source_non_empty_nav_strategy_total,
+            "loadedNonEmptyNavStrategyTotal": loaded_non_empty_nav_strategy_total,
             "performanceFreshnessPassed": performance_freshness_passed,
             "passed": not missing_catalog_ids
             and not missing_new_ids
@@ -2912,7 +3124,9 @@ def validate_strategy_catalog_summaries(
                 f"source_latest_nav_date={source_latest_nav_date or None}, "
                 f"loaded_latest_nav_date={loaded_latest_nav_date or None}, "
                 f"latest_nav_strategy_total="
-                f"{loaded_latest_nav_strategy_total}/{expected_latest_nav_strategy_total}"
+                f"{loaded_latest_nav_strategy_total}/{expected_latest_nav_strategy_total}, "
+                f"non_empty_nav_strategy_total="
+                f"{loaded_non_empty_nav_strategy_total}/{source_non_empty_nav_strategy_total}"
             )
     return validations
 
@@ -2966,6 +3180,7 @@ def main() -> None:
         table_names = [
             "渠道信息",
             "策略信息",
+            "策略业绩基准成分",
             "策略日度业绩",
             "策略区间业绩",
             "策略披露风险指标",

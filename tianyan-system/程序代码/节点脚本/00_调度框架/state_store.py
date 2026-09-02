@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import statistics
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -188,6 +189,43 @@ class StateStore:
             "WHERE run_id=? AND node_id=? ORDER BY attempt DESC",
             (run_id, node_id),
         ).fetchall()
+
+    def recent_node_duration_seconds(
+        self,
+        node_id: str,
+        *,
+        limit: int = 8,
+    ) -> float | None:
+        """Median duration from recent real successful attempts for ETA display."""
+
+        rows = self.connection.execute(
+            "SELECT a.started_at,a.finished_at,r.metadata_json "
+            "FROM daily_update_node_attempt a "
+            "JOIN daily_update_run r ON r.run_id=a.run_id "
+            "WHERE a.node_id=? AND a.status IN ('success','warn') "
+            "AND a.finished_at IS NOT NULL "
+            "ORDER BY a.finished_at DESC LIMIT ?",
+            (node_id, max(1, int(limit) * 3)),
+        ).fetchall()
+        durations: list[float] = []
+        for row in rows:
+            try:
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+            except json.JSONDecodeError:
+                metadata = {}
+            if bool(metadata.get("dryRun")):
+                continue
+            try:
+                started = datetime.fromisoformat(str(row["started_at"]))
+                finished = datetime.fromisoformat(str(row["finished_at"]))
+            except (TypeError, ValueError):
+                continue
+            duration = (finished - started).total_seconds()
+            if duration > 0:
+                durations.append(duration)
+            if len(durations) >= max(1, int(limit)):
+                break
+        return float(statistics.median(durations)) if durations else None
 
     def start_node(
         self,

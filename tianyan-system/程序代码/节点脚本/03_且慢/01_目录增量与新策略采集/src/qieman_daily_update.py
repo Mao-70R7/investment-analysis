@@ -55,6 +55,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--history-request-idle-timeout-seconds", type=int, default=120)
     parser.add_argument("--history-request-total-timeout-seconds", type=int, default=600)
     parser.add_argument("--history-request-attempts", type=int, default=4)
+    parser.add_argument("--history-process-batch-size", type=int, default=50)
+    parser.add_argument("--history-process-attempts", type=int, default=4)
     parser.add_argument("--result-path", type=Path, required=True)
     return parser.parse_args()
 
@@ -345,6 +347,132 @@ def valid_optional(path: Path | None) -> Path | None:
     return path.resolve() if path is not None and path.is_file() else None
 
 
+def history_batch_targets(strategy_total: int, batch_size: int) -> list[int]:
+    if strategy_total <= 0:
+        return []
+    size = max(1, batch_size)
+    targets = list(range(min(size, strategy_total), strategy_total + 1, size))
+    if not targets or targets[-1] != strategy_total:
+        targets.append(strategy_total)
+    return targets
+
+
+def history_checkpoint_progress(history_run_dir: Path) -> dict[str, int | str | None]:
+    checkpoint_path = history_run_dir / "checkpoint.json"
+    if not checkpoint_path.is_file():
+        return {
+            "state": None,
+            "requested": 0,
+            "result_total": 0,
+            "complete_total": 0,
+        }
+    try:
+        checkpoint = read_json(checkpoint_path)
+    except (OSError, json.JSONDecodeError):
+        return {
+            "state": "unreadable",
+            "requested": 0,
+            "result_total": 0,
+            "complete_total": 0,
+        }
+    results = checkpoint.get("results") if isinstance(checkpoint.get("results"), list) else []
+    return {
+        "state": str(checkpoint.get("state") or "") or None,
+        "requested": int(checkpoint.get("requestedStrategyCount") or 0),
+        "result_total": len(results),
+        "complete_total": sum(bool(item.get("complete")) for item in results if isinstance(item, dict)),
+    }
+
+
+def run_history_in_process_batches(
+    base_command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    history_run_dir: Path,
+    strategy_total: int,
+    batch_size: int,
+    max_process_attempts: int,
+) -> dict[str, Any]:
+    targets = history_batch_targets(strategy_total, batch_size)
+    metrics: dict[str, Any] = {
+        "batch_size": max(1, batch_size),
+        "batch_total": len(targets),
+        "process_launch_total": 0,
+        "process_failure_total": 0,
+        "process_restart_total": 0,
+        "batches": [],
+    }
+    for batch_index, target in enumerate(targets, start=1):
+        attempt = 0
+        while True:
+            attempt += 1
+            metrics["process_launch_total"] += 1
+            before = history_checkpoint_progress(history_run_dir)
+            print(
+                "[QIEMAN_HISTORY_BATCH] "
+                f"batch={batch_index}/{len(targets)} target={target}/{strategy_total} "
+                f"attempt={attempt}/{max_process_attempts} "
+                f"checkpoint_complete={before['complete_total']}",
+                flush=True,
+            )
+            try:
+                run_command([*base_command, "--limit", str(target)], cwd=cwd, env=env)
+                summary_path = history_run_dir / "summary.json"
+                summary = read_json(summary_path) if summary_path.is_file() else {}
+                batch_valid = (
+                    summary.get("state") == "signed_history_catalog_complete"
+                    and int(summary.get("requestedStrategyCount") or 0) == target
+                    and int(summary.get("resultStrategyCount") or 0) == target
+                    and int(summary.get("completeStrategyCount") or 0) == target
+                    and int(summary.get("failedStrategyCount") or 0) == 0
+                )
+                if not batch_valid:
+                    raise RuntimeError(
+                        "Qieman history process returned without a closed batch: "
+                        f"target={target}, state={summary.get('state')}, "
+                        f"results={summary.get('resultStrategyCount')}, "
+                        f"complete={summary.get('completeStrategyCount')}, "
+                        f"failed={summary.get('failedStrategyCount')}"
+                    )
+            except (OSError, RuntimeError, json.JSONDecodeError) as error:
+                metrics["process_failure_total"] += 1
+                after = history_checkpoint_progress(history_run_dir)
+                if attempt >= max_process_attempts:
+                    raise RuntimeError(
+                        "Qieman history process batch exhausted restart attempts: "
+                        f"target={target}, checkpoint_complete={after['complete_total']}, error={error}"
+                    ) from error
+                metrics["process_restart_total"] += 1
+                print(
+                    "[QIEMAN_HISTORY_PROCESS_RESTART] "
+                    f"target={target}/{strategy_total} attempt={attempt}/{max_process_attempts} "
+                    f"checkpoint_complete={after['complete_total']} error={error}",
+                    flush=True,
+                )
+                time.sleep(min(5, attempt))
+                continue
+            metrics["batches"].append(
+                {
+                    "batch_index": batch_index,
+                    "target_strategy_total": target,
+                    "process_attempts": attempt,
+                    "resumed_completed_strategy_total": int(
+                        summary.get("resumedCompletedStrategyCount") or 0
+                    ),
+                    "processed_strategy_total": int(summary.get("processedStrategyCount") or 0),
+                }
+            )
+            print(
+                "[QIEMAN_HISTORY_BATCH_DONE] "
+                f"batch={batch_index}/{len(targets)} complete={target}/{strategy_total} "
+                f"process_attempts={attempt}",
+                flush=True,
+            )
+            break
+    return metrics
+
+
 def main() -> None:
     args = parse_args()
     workspace_root = args.workspace_root.resolve()
@@ -400,9 +528,13 @@ def main() -> None:
     baseline_run_dir: Path | None = None
     accepted_state = raw_root / "qieman" / "accepted_state.json"
     if accepted_state.is_file():
-        candidate = Path(str(read_json(accepted_state).get("history_run_dir") or ""))
-        if candidate.is_dir():
-            baseline_run_dir = candidate.resolve()
+        candidate_text = str(read_json(accepted_state).get("history_run_dir") or "").strip()
+        if candidate_text:
+            candidate = Path(candidate_text)
+            if not candidate.is_absolute():
+                candidate = raw_root / "qieman" / candidate
+            if candidate.is_dir():
+                baseline_run_dir = candidate.resolve()
     if baseline_run_dir is None and args.bootstrap_history_run_dir and args.bootstrap_history_run_dir.is_dir():
         baseline_run_dir = args.bootstrap_history_run_dir.resolve()
 
@@ -542,7 +674,15 @@ def main() -> None:
                 f"[QIEMAN_HISTORY_RESUME] reusing completed raw history files from {resume_history_run_dir}",
                 flush=True,
             )
-        run_command(history_command, cwd=probe_root, env=child_env)
+        history_process_metrics = run_history_in_process_batches(
+            history_command,
+            cwd=probe_root,
+            env=child_env,
+            history_run_dir=history_run_dir,
+            strategy_total=len(eligible_master_rows),
+            batch_size=max(10, min(200, args.history_process_batch_size)),
+            max_process_attempts=max(1, min(12, args.history_process_attempts)),
+        )
         history_summary_path = history_run_dir / "summary.json"
         if not history_summary_path.is_file():
             raise RuntimeError(
@@ -630,6 +770,15 @@ def main() -> None:
             f"discovery_complete={discovery_complete}, batch_closed={batch_closed}, missing_new={missing_new_ids}"
         )
 
+    nav_latest_date_counts: dict[str, int] = {}
+    for row in history.get("results") or []:
+        if not isinstance(row, dict):
+            continue
+        nav = row.get("nav") if isinstance(row.get("nav"), dict) else {}
+        latest_date = str(nav.get("latestDate") or "").strip()
+        if latest_date:
+            nav_latest_date_counts[latest_date] = nav_latest_date_counts.get(latest_date, 0) + 1
+
     published: dict[str, str] = {}
     for entity in PUBLISHED_ENTITIES:
         source = history_run_dir / "normalized" / f"{entity}.jsonl"
@@ -676,6 +825,7 @@ def main() -> None:
         "latest_nav_date_strategy_ratio": float(
             history.get("navAtSourceLatestDateRatio") or 0
         ),
+        "nav_latest_date_counts": dict(sorted(nav_latest_date_counts.items())),
         "retained_history_strategy_total": int(
             history.get("retainedHistoryStrategyCount") or 0
         ),
@@ -684,6 +834,12 @@ def main() -> None:
             for value in history.get("retainedHistoryStrategyIds") or []
             if str(value)
         ),
+        "history_process_batch_size": int(history_process_metrics.get("batch_size") or 0),
+        "history_process_batch_total": int(history_process_metrics.get("batch_total") or 0),
+        "history_process_launch_total": int(history_process_metrics.get("process_launch_total") or 0),
+        "history_process_failure_total": int(history_process_metrics.get("process_failure_total") or 0),
+        "history_process_restart_total": int(history_process_metrics.get("process_restart_total") or 0),
+        "history_process_batches": history_process_metrics.get("batches") or [],
         "counts": quality.get("counts") or {},
         "coverage": quality.get("coverage") or {},
         "master_field_coverage": strategy_master_field_coverage(masters),

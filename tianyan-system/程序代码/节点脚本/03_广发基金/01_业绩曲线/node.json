@@ -8,7 +8,6 @@
     "preflight_database"
   ],
   "criticality": "optional",
-  "failureImpact": "warning",
   "timeoutSeconds": 7200,
   "maxProcessAttempts": 2,
   "resourceLock": null,
@@ -19,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "gffunds_performance"
+  "action": "gffunds_performance",
+  "failureImpact": "warning"
 }

@@ -14,6 +14,7 @@ from build_minimal_publish_set import (
     PUBLIC_PAGES,
     entry_html,
     file_manifest,
+    minimal_nav,
     rewrite_page,
     write_text,
 )
@@ -22,6 +23,7 @@ from build_minimal_publish_set import (
 def presentation_build_id(
     publish_root: Path,
     presentation_assets: list[Path],
+    presentation_fragments: list[str] | None = None,
 ) -> tuple[str, str]:
     manifest = json.loads((publish_root / "deployment_manifest.json").read_text(encoding="utf-8-sig"))
     data_build_id = str(manifest.get("dataBuildId") or manifest.get("buildId") or "minimal-data")
@@ -32,6 +34,8 @@ def presentation_build_id(
         with path.open("rb") as handle:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
+    for fragment in presentation_fragments or []:
+        digest.update(fragment.encode("utf-8"))
     return f"minimal-{digest.hexdigest()[:12]}", data_build_id
 
 
@@ -75,6 +79,7 @@ def refresh(source_basic_data: Path, publish_root: Path) -> dict[str, object]:
     version, data_build_id = presentation_build_id(
         target,
         [basic_target / "assets" / name for name in refresh_asset_names],
+        [minimal_nav(page) for page in PUBLIC_PAGES],
     )
     for page in PUBLIC_PAGES:
         rewrite_page(source / page, basic_target / page, page, version)
@@ -118,6 +123,10 @@ def refresh(source_basic_data: Path, publish_root: Path) -> dict[str, object]:
             )
             text = text.replace("策略列表、调仓月报、策略对比", "策略列表、机构总览、策略对比")
             text = text.replace("策略列表、机构总览、策略对比", "机构总览、策略列表、策略对比")
+            text = text.replace(
+                "本目录包含机构总览、策略列表、策略对比、全市场产品排名、AI选策略，以及策略/基金详情下钻。策略对比既可从一级菜单进入，也可从策略列表勾选产品后进入。",
+                "本目录包含机构总览、策略列表、全市场产品排名、AI选策略，以及策略/基金详情下钻。策略对比保留为策略列表和 AI 选策略的下钻功能，不在一级菜单单独展示。",
+            )
             text = text.replace("/basic_data/strategies.html", "/basic_data/institutions.html")
             write_text(readme_path, text)
 

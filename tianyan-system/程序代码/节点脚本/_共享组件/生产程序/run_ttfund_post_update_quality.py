@@ -22,6 +22,7 @@ STEP_ALIASES = {
     "06_backfill_overseas_nav": "07_backfill_overseas_nav",
     "07_backfill_dividends_from_nav_hints": "08_backfill_dividends_from_nav_hints",
     "08_reconstruct_strategy_nav": "10_reconstruct_strategy_nav",
+    "08b_build_rebalance_quality_analysis": "10b_build_rebalance_quality_analysis",
     "09_analyze_official_deviation": "11_analyze_official_deviation",
     "10_govern_performance_data": "12_govern_performance_data",
     "11_audit_current_holding_projection": "13_audit_current_holding_projection",
@@ -573,6 +574,16 @@ def main() -> None:
                     args.algorithm_version,
                     "--output-dir",
                     str(output_dir / "strategy_nav_reconstruction"),
+                ],
+            ),
+            (
+                "10b_build_rebalance_quality_analysis",
+                [
+                    str(SCRIPT_DIR / "build_rebalance_quality_analysis.py"),
+                    "--algorithm-version",
+                    args.algorithm_version,
+                    "--output-json",
+                    str(output_dir / "rebalance_quality_analysis" / "summary.json"),
                 ],
             ),
             (

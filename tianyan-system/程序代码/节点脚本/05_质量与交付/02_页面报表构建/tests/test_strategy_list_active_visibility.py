@@ -29,8 +29,12 @@ class StrategyListActiveVisibilityTests(unittest.TestCase):
             self.assertIn(f'<option value="{scope}"', self.source)
 
     def test_default_conditions_are_page_initial_state_not_cross_page_base_pool(self) -> None:
-        self.assertIn("const defaultEnabled = isInstitutionOverviewPage();", self.common)
-        self.assertIn(": defaultEnabled,", self.common)
+        self.assertIn("const INSTITUTION_OVERVIEW_DEFAULT_FILTERS", self.common)
+        self.assertIn("benchmark: true", self.common)
+        self.assertIn("performance: true", self.common)
+        self.assertIn("history: false", self.common)
+        self.assertIn("active: true", self.common)
+        self.assertIn("isInstitutionOverviewPage() && Boolean(INSTITUTION_OVERVIEW_DEFAULT_FILTERS[key])", self.common)
         self.assertIn("Boolean(B.hasExplicitGlobalStrategyFilters)", self.source)
         self.assertIn("state.incomingGlobalFiltersActive && !B.matchesGlobalStrategyFilters(row)", self.source)
         self.assertIn('B.byId("productStatusSelect").value = "recommended";', self.source)

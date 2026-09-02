@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "southern_gate",
+  "name": "南方基金批次验收",
+  "phase": "03_南方基金",
+  "entrypoint": "run.ps1",
+  "dependencies": ["southern_collect"],
+  "allowFailedOptionalDependencies": false,
+  "criticality": "optional",
+  "failureImpact": "warning",
+  "timeoutSeconds": 600,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": false,
+  "progressUnit": "项",
+  "validator": {"type": "node_result", "requiredStatus": "passed"},
+  "daily": false,
+  "action": "southern_gate"
+}

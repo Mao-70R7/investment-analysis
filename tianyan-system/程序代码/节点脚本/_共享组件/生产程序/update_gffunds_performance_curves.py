@@ -24,6 +24,20 @@ def resolve_project_root() -> Path:
 PROJECT_ROOT = resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT / "节点脚本" / "_共享组件" / "python_src"))
 
+
+def configured_root(environment_key: str, fallback: Path) -> Path:
+    configured = str(os.environ.get(environment_key) or "").strip()
+    return Path(configured).resolve() if configured else fallback.resolve()
+
+
+RAW_ROOT = configured_root("ADVISOR_RAW_ROOT", PROJECT_ROOT / "data" / "raw")
+NORMALIZED_ROOT = configured_root(
+    "ADVISOR_NORMALIZED_ROOT",
+    PROJECT_ROOT / "data" / "normalized",
+)
+DATABASE_ROOT = configured_root("ADVISOR_DATABASE_ROOT", PROJECT_ROOT / "data")
+DEFAULT_DB_PATH = DATABASE_ROOT / "analysis_zh_current.sqlite"
+
 from advisor_monitor.collectors.gffunds_public import CHANNEL_ID  # noqa: E402
 from advisor_monitor.gffunds_public_jobs import (  # noqa: E402
     find_latest_discovered_strategy_file,
@@ -49,6 +63,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-backoff-seconds", type=float, default=5.0)
     parser.add_argument("--min-usable-ratio", type=float, default=0.95)
     parser.add_argument("--acceptable-business-lag-days", type=int, default=1)
+    parser.add_argument("--db-path", type=Path, default=DEFAULT_DB_PATH)
+    parser.add_argument("--raw-root", type=Path, default=RAW_ROOT)
+    parser.add_argument("--normalized-root", type=Path, default=NORMALIZED_ROOT)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--result-summary-path", type=Path, default=None)
     return parser.parse_args()
@@ -58,7 +75,10 @@ def load_strategy_ids(args: argparse.Namespace) -> list[str]:
     if args.strategy_id:
         ids = [str(item).strip().upper() for item in args.strategy_id if str(item).strip()]
     else:
-        ids = load_gffunds_strategy_ids_from_analysis_db(PROJECT_ROOT)
+        db_path = getattr(args, "db_path", None)
+        ids = load_gffunds_strategy_ids_from_database(Path(db_path)) if db_path else []
+        if not ids:
+            ids = load_gffunds_strategy_ids_from_analysis_db(PROJECT_ROOT)
         discovered_path = find_latest_discovered_strategy_file(PROJECT_ROOT)
         if discovered_path:
             ids.extend(load_discovered_strategy_ids(discovered_path))
@@ -73,6 +93,35 @@ def load_strategy_ids(args: argparse.Namespace) -> list[str]:
     if args.limit and args.limit > 0:
         ids = ids[: args.limit]
     return ids
+
+
+def load_gffunds_strategy_ids_from_database(db_path: Path) -> list[str]:
+    if not db_path.is_file():
+        return []
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(
+            f"file:{db_path.resolve().as_posix()}?mode=ro",
+            uri=True,
+            timeout=30,
+        )
+        rows = connection.execute(
+            'SELECT DISTINCT "渠道策略ID" FROM "策略信息" '
+            'WHERE "渠道ID"=? AND "渠道策略ID" IS NOT NULL',
+            (CHANNEL_ID,),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        if connection is not None:
+            connection.close()
+    return sorted(
+        {
+            str(row[0]).strip().upper()
+            for row in rows
+            if re.fullmatch(r"(?:GFJJ\d{6}|ZY\d{8})", str(row[0] or "").strip().upper())
+        }
+    )
 
 
 def snapshot_id(strategy_id: str, payload: dict[str, Any]) -> str:
@@ -169,8 +218,8 @@ def business_day_lag(older: str, newer: str) -> int | None:
     return result
 
 
-def candidate_raw_roots() -> list[Path]:
-    roots: list[Path] = []
+def candidate_raw_roots(primary_root: Path | None = None) -> list[Path]:
+    roots: list[Path] = [primary_root.resolve()] if primary_root else []
     configured = os.environ.get("ADVISOR_RAW_ROOT")
     if configured:
         roots.append(Path(configured).resolve())
@@ -211,8 +260,7 @@ def find_last_good_payload(strategy_id: str, roots: list[Path]) -> tuple[dict[st
     return None, None
 
 
-def load_stopped_strategy_ids() -> set[str]:
-    database_path = PROJECT_ROOT / "data" / "analysis_zh_current.sqlite"
+def load_stopped_strategy_ids(database_path: Path = DEFAULT_DB_PATH) -> set[str]:
     if not database_path.is_file():
         return set()
     try:
@@ -277,21 +325,18 @@ def main() -> None:
     run_id = args.run_id or run_at.strftime("%Y%m%dT%H%M%S%z")
     captured_at = run_at.isoformat(timespec="seconds")
 
-    canonical_raw_root = PROJECT_ROOT / "data" / "raw"
+    canonical_raw_root = args.raw_root.resolve()
+    normalized_root = args.normalized_root.resolve()
     raw_dir = canonical_raw_root / CHANNEL_ID / "performance_curve" / day / run_id
     normalized_path = (
-        PROJECT_ROOT
-        / "data"
-        / "normalized"
+        normalized_root
         / CHANNEL_ID
         / "strategy_performance_daily"
         / day
         / f"{run_id}.jsonl"
     )
     summary_path = (
-        PROJECT_ROOT
-        / "data"
-        / "normalized"
+        normalized_root
         / CHANNEL_ID
         / "collection_summary"
         / day
@@ -366,7 +411,7 @@ def main() -> None:
     ]
     reused_last_good: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
-    raw_roots = candidate_raw_roots()
+    raw_roots = candidate_raw_roots(canonical_raw_root)
     for strategy_id, error in sorted(remaining.items()):
         payload, source_path = find_last_good_payload(strategy_id, raw_roots)
         if payload is None or source_path is None:
@@ -400,7 +445,7 @@ def main() -> None:
     write_jsonl(normalized_path, all_rows)
 
     reference_latest_date = max((value for value in latest_dates.values() if value), default=None)
-    stopped_ids = load_stopped_strategy_ids()
+    stopped_ids = load_stopped_strategy_ids(args.db_path.resolve())
     active_lagging_one_day: list[str] = []
     active_lagging_more: list[dict[str, Any]] = []
     if reference_latest_date:

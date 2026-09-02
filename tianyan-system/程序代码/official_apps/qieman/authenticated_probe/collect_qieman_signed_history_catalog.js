@@ -436,6 +436,28 @@ function resultFromFile(filePath, entity) {
   }
 }
 
+function historyTypeForCode(code) {
+  return String(code || "").startsWith("SI") ? "signal_adjustments" : "regular_adjustments";
+}
+
+function isReusableCompletedResult(result, runDir) {
+  if (!result?.complete || !result.strategyCode) return false;
+  const code = String(result.strategyCode);
+  const navPath = path.join(runDir, "raw", "nav", `${code}.json`);
+  const historyPath = path.join(runDir, "raw", historyTypeForCode(code), `${code}.json`);
+  if (!fs.existsSync(navPath) || !fs.existsSync(historyPath)) return false;
+  try {
+    const nav = readJson(navPath);
+    const history = readJson(historyPath);
+    return Array.isArray(nav)
+      && history
+      && history.complete !== false
+      && Array.isArray(history.content);
+  } catch {
+    return false;
+  }
+}
+
 async function collectStrategy({
   code,
   name,
@@ -450,7 +472,7 @@ async function collectStrategy({
   ensureNoProductionLock(fetcher.lockDir);
   const encoded = encodeURIComponent(code);
   const navPath = path.join(runDir, "raw", "nav", `${code}.json`);
-  const historyType = code.startsWith("SI") ? "signal_adjustments" : "regular_adjustments";
+  const historyType = historyTypeForCode(code);
   const historyPath = path.join(runDir, "raw", historyType, `${code}.json`);
   const baselineNavPath = baselineRunDir ? path.join(baselineRunDir, "raw", "nav", `${code}.json`) : null;
   const baselineHistoryPath = baselineRunDir ? path.join(baselineRunDir, "raw", historyType, `${code}.json`) : null;
@@ -725,10 +747,16 @@ async function main() {
     const checkpoint = readJson(checkpointPath);
     for (const result of checkpoint.results || []) resultByCode.set(result.strategyCode, result);
   }
-  let completed = 0;
+  const reusableCompletedCodes = new Set(
+    strategies
+      .filter((strategy) => isReusableCompletedResult(resultByCode.get(strategy.code), runDir))
+      .map((strategy) => strategy.code),
+  );
+  const pendingStrategies = strategies.filter((strategy) => !reusableCompletedCodes.has(strategy.code));
+  let completed = reusableCompletedCodes.size;
   const startedAt = new Date().toISOString();
   await runPool(
-    strategies,
+    pendingStrategies,
     concurrency,
     (strategy) => collectStrategy({
       code: strategy.code,
@@ -794,6 +822,8 @@ async function main() {
     resultStrategyCount: results.length,
     completeStrategyCount: results.filter((item) => item.complete).length,
     failedStrategyCount: results.filter((item) => !item.complete).length,
+    resumedCompletedStrategyCount: reusableCompletedCodes.size,
+    processedStrategyCount: pendingStrategies.length,
     signalStrategyCount: strategies.filter((item) => item.code.startsWith("SI")).length,
     regularStrategyCount: strategies.filter((item) => !item.code.startsWith("SI")).length,
     authenticationPersisted: false,
@@ -874,5 +904,6 @@ module.exports = {
   collectStrategy,
   latestNavDate,
   resultFromFile,
+  isReusableCompletedResult,
   boundedInteger,
 };

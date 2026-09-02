@@ -28,6 +28,8 @@
 
   const count = (value) => Number(value || 0).toLocaleString("zh-CN");
   const clean = (value) => String(value || "").trim();
+  const isIgnoredSalesChannel = (row) => /^南方基金(?:[\/／-]|$)/.test(clean(row?.渠道));
+  const salesChannelStrategies = strategies.filter((row) => !isIgnoredSalesChannel(row));
   const dateValue = (value) => {
     const text = clean(value).slice(0, 10);
     const parsed = /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T00:00:00`) : null;
@@ -40,25 +42,26 @@
   const entityName = (row) => clean(row[dimensionField()]) || "未披露";
   const riskBucket = (row) => clean(row.基准风险资产权重) || "未分档";
 
-  function summarize(field) {
+  function summarize(field, rows = strategies) {
     const groups = new Map();
-    strategies.forEach((row) => {
+    rows.forEach((row) => {
       const name = clean(row[field]) || "未披露";
       groups.set(name, (groups.get(name) || 0) + 1);
     });
     return { total: [...groups.values()].reduce((sum, value) => sum + value, 0), groups };
   }
 
-  const channelTotals = summarize("渠道");
-  const managerTotals = summarize("投顾机构");
-  if (channelTotals.total !== strategies.length || managerTotals.total !== strategies.length) {
-    root.innerHTML = '<section class="panel"><div class="empty">销售渠道、投顾管理人和策略清单未对账，机构总览已停止渲染。</div></section>';
+  const channelTotals = summarize("渠道", salesChannelStrategies);
+  const managerTotals = summarize("投顾机构", strategies);
+  if (channelTotals.total !== salesChannelStrategies.length || managerTotals.total !== strategies.length) {
+    root.innerHTML = '<section class="panel"><div class="empty">销售渠道口径、投顾管理人和策略清单未对账，机构总览已停止渲染。</div></section>';
     B.hidePageLoading();
     return;
   }
 
   function filteredStrategies() {
-    return strategies.filter((row) => B.matchesGlobalStrategyFilters(row, state.filters));
+    const dimensionStrategies = state.dimension === "channel" ? salesChannelStrategies : strategies;
+    return dimensionStrategies.filter((row) => B.matchesGlobalStrategyFilters(row, state.filters));
   }
 
   function bucketCounts(rows) {
@@ -253,7 +256,7 @@
         </article>
       </section>
 
-      <details class="panel institution-method"><summary>统计口径与数据边界</summary><div><p><b>基准风险资产权重：</b>按业绩基准中的权益、商品和另类风险资产合计权重划分 L0—L10；缺基准或无法可靠拆分时保留“未分档”。</p><p><b>有历史仓位：</b>只认基金权重全部精确且合计 99%—101% 的官方历史快照或完整调仓后仓位；发车新增资金分配比例不是存量仓位。</p><p><b>走势：</b>普通调仓与发车信号合并，按日期和策略去重；区间总数为窗口内去重策略数，不是折线点位求和。</p><p><b>投顾管理人缺失：</b>源端未披露时归入“未披露”，不根据策略名称、持仓或销售渠道推断。</p></div></details>`;
+      <details class="panel institution-method"><summary>统计口径与数据边界</summary><div><p><b>默认范围：</b>默认要求有基准、有业绩走势且对客未终止；有历史仓位作为可选条件，默认不勾选。</p><p><b>销售渠道：</b>暂停更新的南方基金不进入销售渠道数量、策略数量、调仓走势和分档统计；切换到投顾管理人后，仍可按既有历史数据查询相关管理人。</p><p><b>基准风险资产权重：</b>按业绩基准中的权益、商品和另类风险资产合计权重划分 L0—L10；缺基准或无法可靠拆分时保留“未分档”。</p><p><b>有历史仓位：</b>只认基金权重全部精确且合计 99%—101% 的官方历史快照或完整调仓后仓位；发车新增资金分配比例不是存量仓位。</p><p><b>走势：</b>普通调仓与发车信号合并，按日期和策略去重；区间总数为窗口内去重策略数，不是折线点位求和。</p><p><b>投顾管理人缺失：</b>源端明确披露管理人时保留披露值；为空或明确标记未披露时，以销售渠道的业务名称兜底。qieman/且慢渠道统一显示为“盈米基金”。</p></div></details>`;
 
     root.querySelectorAll("[data-days]").forEach((button) => button.addEventListener("click", () => { state.days = Number(button.dataset.days); state.selectedDate = ""; render(); }));
     root.querySelectorAll("[data-dimension]").forEach((button) => button.addEventListener("click", () => { state.dimension = button.dataset.dimension; state.selectedDate = ""; render(); }));

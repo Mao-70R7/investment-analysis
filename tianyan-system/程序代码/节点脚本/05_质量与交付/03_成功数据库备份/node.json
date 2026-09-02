@@ -8,7 +8,6 @@
     "data_audit"
   ],
   "criticality": "optional",
-  "failureImpact": "warning",
   "timeoutSeconds": 14400,
   "maxProcessAttempts": 1,
   "resourceLock": "main_db_write",
@@ -19,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "database_backup"
+  "action": "database_backup",
+  "failureImpact": "warning"
 }

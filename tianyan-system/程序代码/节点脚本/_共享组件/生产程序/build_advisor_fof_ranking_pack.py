@@ -20,6 +20,12 @@ DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "analysis_zh_current.sqlite"
 DEFAULT_SITE_DIR = PROJECT_ROOT / "site" / "basic_data"
 OUTPUT_BASENAME = "advisor_fof_ranking_pack"
 SUPPLEMENTAL_STRATEGY_CHANNELS = ("gfsec_fima",)
+NO_COMPARISON_BENCHMARK_PHRASES = (
+    "不设置业绩比较基准",
+    "未设置业绩比较基准",
+    "不设业绩比较基准",
+    "无业绩比较基准",
+)
 
 
 INTERVAL_DEFINITIONS = [
@@ -37,6 +43,11 @@ def clean_text(value: Any, fallback: str = "") -> str:
         return fallback
     text = str(value).strip()
     return text if text else fallback
+
+
+def explicitly_has_no_comparison_benchmark(value: Any) -> bool:
+    text = clean_text(value).replace(" ", "")
+    return any(phrase in text for phrase in NO_COMPARISON_BENCHMARK_PHRASES)
 
 
 def as_float(value: Any) -> float | None:
@@ -482,15 +493,18 @@ def build_strategy_row(
     )
     risk_metrics = build_risk_metrics(series, windows)
     source_channel_id = strategy_id.split("__", 1)[0]
-    institution = canonical_advisor_institution(row.get("投顾机构"))
     channel = canonical_business_channel(source_channel_id, row.get("渠道"))
+    institution = canonical_advisor_institution(row.get("投顾机构"), source_channel_id, channel)
     name = clean_text(row.get("策略名称"), strategy_id)
+    benchmark_text = clean_text(row.get("业绩基准"))
     benchmark_bucket = first_present(
         row.get("策略基准风险资产权重"),
         row.get("基准风险资产权重"),
         benchmark_equity_bucket(row.get("策略基准权益权重_百分比")),
         fallback="未分档",
     )
+    if explicitly_has_no_comparison_benchmark(benchmark_text):
+        benchmark_bucket = "未分档"
     risk_profile = build_risk_profile(row, prefix="策略基准")
     risk_profile["benchmarkEquityBucket"] = benchmark_bucket
     broad_weight, broad_bucket, broad_note = benchmark_broad_equity_bucket(
@@ -499,6 +513,10 @@ def build_strategy_row(
         risk_profile.get("benchmarkAlternativeWeight"),
         risk_profile.get("benchmarkUnknownWeight"),
     )
+    if explicitly_has_no_comparison_benchmark(benchmark_text):
+        broad_weight = None
+        broad_bucket = ""
+        broad_note = "策略明确披露不设置业绩比较基准，不按0%占位值分档。"
     risk_profile["broadEquityWeight"] = broad_weight
     risk_profile["broadEquityBucket"] = broad_bucket
     risk_profile["broadEquityNote"] = broad_note
@@ -512,6 +530,10 @@ def build_strategy_row(
         "manager": "",
         "isCustomer": clean_text(row.get("是否对客"), "未披露"),
         "displayStatus": clean_text(row.get("天天展示状态")),
+        "hasBenchmark": clean_text(row.get("有基准")) == "是",
+        "hasPerformance": clean_text(row.get("有业绩走势")) == "是",
+        "hasHistoryPosition": clean_text(row.get("有历史仓位")) == "是",
+        "clientActive": clean_text(row.get("对客未终止")) == "是",
         "isGuangfa": is_guangfa(institution, channel, name),
         "rankingCategory": benchmark_bucket,
         "rankingCategoryBasis": "基准风险资产权重",
@@ -525,7 +547,7 @@ def build_strategy_row(
         "parseConfidenceScore": round_or_none(row.get("策略基准解析置信度分数")),
         "riskLevel": clean_text(row.get("风险等级")),
         "businessCategory": clean_text(row.get("业务分类")),
-        "benchmark": clean_text(row.get("业绩基准")),
+        "benchmark": benchmark_text,
         "returns": returns,
         "riskMetrics": risk_metrics,
         "riskProfile": risk_profile,

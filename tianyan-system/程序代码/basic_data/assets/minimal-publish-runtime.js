@@ -1,4 +1,5 @@
 (() => {
+  window.__MINIMAL_PUBLISH_NO_FUND_DETAIL__ = true;
   const B = window.BasicData;
   if (!B || typeof B.loadScript !== "function") {
     throw new Error("Minimal publish runtime requires basic-common.js");
@@ -31,7 +32,7 @@
   }
 
   document.addEventListener("click", (event) => {
-    const anchor = event.target?.closest?.('a[href*="strategy.html"], a[href*="fund.html"]');
+    const anchor = event.target?.closest?.('a[href*="strategy.html"]');
     if (!anchor || !buildId || anchor.target === "_blank") return;
     const url = new URL(anchor.getAttribute("href") || anchor.href, document.baseURI);
     if (url.origin !== window.location.origin) return;
@@ -78,7 +79,8 @@
   }
 
   function detailPath(kind, id) {
-    const cleanKind = kind === "details" ? "details" : "fund_details";
+    if (kind !== "details") throw new Error("最小发布集不包含基金详情文件");
+    const cleanKind = "details";
     const cleanId = String(id || "").trim();
     const path = `./data/${cleanKind}/${shardKey(cleanId)}/${encodeURIComponent(cleanId)}.js`;
     return buildId ? `${path}?v=${encodeURIComponent(buildId)}` : path;

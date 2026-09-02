@@ -39,11 +39,18 @@ ALLOWED_STRATEGY_CHANNELS = {
     "天天基金/投顾",
     "广发基金",
     "广发证券",
-    "且慢",
+    "盈米基金",
+    "南方基金",
 }
 TOLERANCE_PP = 0.05
 CN_TZ = timezone(timedelta(hours=8))
 LEGACY_PUBLIC_BUCKET = "".join(("基准", "权益分档"))
+NO_COMPARISON_BENCHMARK_PHRASES = (
+    "不设置业绩比较基准",
+    "未设置业绩比较基准",
+    "不设业绩比较基准",
+    "无业绩比较基准",
+)
 
 
 def now_cn() -> str:
@@ -78,6 +85,11 @@ def as_text(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return str(value)
+
+
+def explicitly_has_no_comparison_benchmark(value: Any) -> bool:
+    text = as_text(value).strip().replace(" ", "")
+    return any(phrase in text for phrase in NO_COMPARISON_BENCHMARK_PHRASES)
 
 
 def yes_no(value: Any) -> str:
@@ -314,6 +326,8 @@ def flatten_row(
     fof = fof_snapshot.get(code)
     strategy = strategy_info.get(sid)
     risk_profile = row.get("riskProfile") or {}
+    source_channel_id = sid.split("__", 1)[0]
+    channel = canonical_business_channel(source_channel_id, row.get("channel"))
 
     def profile_percent(key: str, fof_col: str | None = None) -> float | None:
         value = risk_profile.get(key)
@@ -326,7 +340,11 @@ def flatten_row(
         institution = as_text(fof["基金公司"]).strip() or institution
     elif etype == "投顾策略" and strategy is not None:
         institution = as_text(strategy["投顾机构"]).strip() or institution
-    institution = canonical_advisor_institution(institution)
+    institution = canonical_advisor_institution(
+        institution,
+        source_channel_id if etype == "投顾策略" else None,
+        channel if etype == "投顾策略" else None,
+    )
     if not institution:
         institution = "未知机构"
 
@@ -345,11 +363,20 @@ def flatten_row(
         benchmark = fof["业绩比较基准"]
     elif etype == "投顾策略" and not benchmark and strategy is not None:
         benchmark = strategy["业绩基准"]
+    benchmark_text = as_text(benchmark).strip()
 
+    has_benchmark = yes_no(row.get("hasBenchmark"))
     bucket = as_text(row.get("benchmarkEquityBucket") or risk_profile.get("benchmarkEquityBucket")).strip()
     if etype == "FOF基金" and not bucket and fof is not None:
         fof_fields = dict(fof)
         bucket = as_text(fof_fields.get("基准风险资产权重") or fof_fields.get(LEGACY_PUBLIC_BUCKET)).strip()
+    elif etype == "投顾策略" and (
+        has_benchmark != "是" or explicitly_has_no_comparison_benchmark(benchmark_text)
+    ):
+        # A zero placeholder is not evidence of a disclosed benchmark.  Keep
+        # the strategy unbucketed so institution-overview and ranking links
+        # operate on the same audited business fact.
+        bucket = ""
 
     flat: dict[str, Any] = {
         "排名": None,
@@ -358,16 +385,20 @@ def flatten_row(
         "产品代码": code,
         "产品名称": as_text(strategy["策略名称"]) if etype == "投顾策略" and strategy is not None else as_text(row.get("name")),
         "机构": institution,
-        "渠道": canonical_business_channel(sid.split("__", 1)[0], row.get("channel")),
+        "渠道": channel,
         "管理人/经理": manager,
         "是否对客": as_text(row.get("isCustomer")),
         "是否广发": yes_no(
             yes_no(row.get("isGuangfa")) == "是"
             or "广发" in institution
-            or "广发" in canonical_business_channel(sid.split("__", 1)[0], row.get("channel"))
+            or "广发" in channel
         ),
         "展示状态": as_text(row.get("displayStatus")),
         "数据状态": as_text(row.get("dataStatus")),
+        "有基准": has_benchmark,
+        "有业绩走势": yes_no(row.get("hasPerformance")),
+        "有历史仓位": yes_no(row.get("hasHistoryPosition")),
+        "对客未终止": yes_no(row.get("clientActive")),
         "成立日期": foundation_date,
         "基准风险资产权重": bucket,
         "基准风险资产权重说明": bucket_description(bucket),
@@ -382,7 +413,7 @@ def flatten_row(
         "基准商品权重": profile_percent("benchmarkCommodityWeight", "基准商品权重_百分比"),
         "基准海外权重": profile_percent("benchmarkOverseasWeight", "基准海外权重_百分比"),
         "基准未知权重": profile_percent("benchmarkUnknownWeight", "基准未知权重_百分比"),
-        "业绩比较基准": as_text(benchmark),
+        "业绩比较基准": benchmark_text,
         "解析置信度": as_text(row.get("parseConfidence") or (fof["解析置信度"] if fof is not None else "")),
         "解析置信度分数": to_float(row.get("parseConfidenceScore") or (fof["解析置信度分数"] if fof is not None else None)),
         "详情链接": as_text(row.get("detailUrl")),

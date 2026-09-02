@@ -116,6 +116,38 @@ class MinimalPublishPromotionTests(unittest.TestCase):
 
             self.assertFalse(staging.exists())
 
+    def test_minimal_publish_contract_excludes_fund_detail_page(self) -> None:
+        self.assertNotIn("fund.html", MODULE.PUBLIC_PAGES)
+        self.assertNotIn("fund-detail.js", MODULE.ASSET_FILES)
+        self.assertNotIn("fund_economic_exposure_pack.js", MODULE.DATA_FILES)
+        self.assertIn("forbiddenFundDetailPageCount", MODULE.BLOCKING_ZERO_CHECKS)
+        self.assertIn("forbiddenFundDetailFileCount", MODULE.BLOCKING_ZERO_CHECKS)
+
+    def test_mixed_ranking_fund_links_are_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "mixed.js"
+            target = root / "out.js"
+            source.write_text(
+                'window.__MIXED_PERFORMANCE_SCATTER_PACK__ = '
+                + json.dumps(
+                    {
+                        "rows": [
+                            {"id": "fund", "detailUrl": "./fund.html?code=000001"},
+                            {"id": "strategy", "detailUrl": "./strategy.html?id=s1"},
+                        ]
+                    }
+                )
+                + ";\n",
+                encoding="utf-8",
+            )
+
+            MODULE.write_mixed_pack_without_fund_detail(source, target)
+            payload = MODULE.assignment_payload(target, "window.__MIXED_PERFORMANCE_SCATTER_PACK__")
+
+            self.assertEqual(payload["rows"][0]["detailUrl"], "")
+            self.assertEqual(payload["rows"][1]["detailUrl"], "./strategy.html?id=s1")
+
 
 if __name__ == "__main__":
     unittest.main()

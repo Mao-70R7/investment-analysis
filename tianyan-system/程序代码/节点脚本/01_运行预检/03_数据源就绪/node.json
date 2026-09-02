@@ -8,7 +8,6 @@
     "preflight_database"
   ],
   "criticality": "optional",
-  "failureImpact": "channel",
   "timeoutSeconds": 12600,
   "maxProcessAttempts": 1,
   "resourceLock": null,
@@ -19,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "source_readiness"
+  "action": "source_readiness",
+  "failureImpact": "channel"
 }

@@ -26,6 +26,7 @@ KEEP_SCRIPTS = {
     "backfill_fund_history_analysis_sqlite.py",
     "backfill_sina_fund_nav_analysis_sqlite.py",
     "backfill_ttfund_overseas_nav.py",
+    "build_rebalance_quality_analysis.py",
     "build_ttfund_incremental_plan.py",
     "cleanup_current_project_state.py",
     "collect_official_apps_public.py",

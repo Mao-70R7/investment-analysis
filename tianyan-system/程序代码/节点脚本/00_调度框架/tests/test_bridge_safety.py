@@ -21,6 +21,7 @@ from bridge_node import (  # noqa: E402
     Bridge,
     assess_gf_supplemental_channel,
     assess_gffunds_core_coverage,
+    assess_qieman_nav_freshness,
     assess_strategy_catalog_batch,
     cleanup_daily_logs,
     cleanup_minimal_report_sources,
@@ -35,6 +36,21 @@ from bridge_node import (  # noqa: E402
 
 
 class BridgeSafetyTests(unittest.TestCase):
+    def test_unique_entry_keeps_window_open_with_automation_opt_out(self) -> None:
+        entry_path = CODE_ROOT.parent / "00_每日数据更新并发布_唯一入口.bat"
+        entry = entry_path.read_text(encoding="utf-8-sig")
+        self.assertIn('set "KEEP_WINDOW_OPEN=1"', entry)
+        self.assertIn('if /I "%ADVISOR_KEEP_WINDOW_OPEN%"=="0"', entry)
+        self.assertIn("pause >nul", entry)
+        self.assertIn("The task has ended.", entry)
+
+        raw = entry_path.read_bytes()
+        self.assertNotIn(
+            b"\n",
+            raw.replace(b"\r\n", b""),
+            "Windows batch entry must use CRLF consistently",
+        )
+
     def test_console_relay_does_not_fail_a_node_when_stdout_is_detached(self) -> None:
         original_stdout = sys.stdout
 
@@ -55,8 +71,9 @@ class BridgeSafetyTests(unittest.TestCase):
             if replacement is not original_stdout and hasattr(replacement, "close"):
                 replacement.close()
 
-    def test_daily_pipeline_covers_all_enabled_channels_and_new_strategy_discovery(self) -> None:
+    def test_daily_pipeline_covers_enabled_channels_and_keeps_southern_manual_only(self) -> None:
         pipeline = json.loads((CODE_ROOT / "节点脚本" / "pipeline.json").read_text(encoding="utf-8"))
+        pipeline_nodes = {row["id"]: row for row in pipeline["nodes"]}
         daily_nodes = {
             row["id"]: row
             for row in pipeline["nodes"]
@@ -91,6 +108,32 @@ class BridgeSafetyTests(unittest.TestCase):
             {"ttfund_incremental", "gffunds_gate", "gfsec_fima_load", "gf_supplemental_load", "qieman_load"}
             <= set(daily_nodes["process_load"]["dependencies"])
         )
+        self.assertNotIn("southern_load", daily_nodes["process_load"]["dependencies"])
+        for node_id in ("southern_collect", "southern_gate", "southern_load"):
+            self.assertIs((pipeline_nodes[node_id].get("enabledWhen") or {}).get("daily"), False)
+            manifest_path = (
+                CODE_ROOT / "节点脚本" / pipeline_nodes[node_id]["directory"] / "node.json"
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertIs(manifest["daily"], False)
+            self.assertEqual(manifest["criticality"], "optional")
+            self.assertEqual(manifest["failureImpact"], "warning")
+        process_manifest_path = (
+            CODE_ROOT
+            / "节点脚本"
+            / daily_nodes["process_load"]["directory"]
+            / "node.json"
+        )
+        process_manifest = json.loads(process_manifest_path.read_text(encoding="utf-8"))
+        self.assertIs(process_manifest["allowFailedOptionalDependencies"], True)
+        declared_order = {row["id"]: index for index, row in enumerate(pipeline["nodes"])}
+        for row in pipeline["nodes"]:
+            for dependency in row["dependencies"]:
+                self.assertLess(
+                    declared_order[dependency],
+                    declared_order[row["id"]],
+                    f"{row['id']} must be declared after dependency {dependency}",
+                )
 
         policy = json.loads((CODE_ROOT / "config" / "daily_update_policy.json").read_text(encoding="utf-8"))
         for channel_id in ("gffunds", "gfsec_fima", "gfsec_robot"):
@@ -106,7 +149,74 @@ class BridgeSafetyTests(unittest.TestCase):
             qieman_policy["historyRequestIdleTimeoutSeconds"],
         )
         self.assertGreaterEqual(qieman_policy["historyRequestAttempts"], 4)
-        self.assertGreaterEqual(qieman_policy["minimumLatestNavDateRatio"], 0.99)
+        self.assertEqual(qieman_policy["maximumNavDateLagBusinessDays"], 1)
+        self.assertGreaterEqual(qieman_policy["minimumFreshNavDateRatio"], 0.98)
+        southern_policy = policy["channels"]["southern"]
+        self.assertIs(southern_policy["dailyUpdateEnabled"], False)
+        self.assertEqual(southern_policy["updateMode"], "manual_only")
+        self.assertIs(southern_policy["preserveExistingDatabaseRows"], True)
+        self.assertEqual(southern_policy["minimumPerformanceStrategyRatio"], 1.0)
+        self.assertEqual(southern_policy["minimumHistoricalHoldingRatio"], 1.0)
+        self.assertGreaterEqual(southern_policy["minimumExactBenchmarkRatio"], 0.94)
+        field_rules = json.loads(
+            (CODE_ROOT / "config" / "系统字段检查规则.json").read_text(encoding="utf-8")
+        )
+        southern_freshness = next(
+            row
+            for row in field_rules["channelPerformanceFreshness"]
+            if row.get("channelId") == "southern"
+        )
+        southern_coverage = next(
+            row
+            for row in field_rules["channelStrategyCoverage"]
+            if row.get("channelId") == "southern"
+        )
+        self.assertEqual(southern_freshness["severity"], "warn")
+        self.assertEqual(southern_freshness["dailyUpdateMode"], "manual_only")
+        self.assertEqual(southern_coverage["severity"], "warn")
+        self.assertEqual(southern_coverage["dailyUpdateMode"], "manual_only")
+
+    def test_qieman_freshness_accepts_one_business_day_lag_at_ninety_eight_percent(self) -> None:
+        result = assess_qieman_nav_freshness(
+            {
+                "strategy_total": 100,
+                "source_latest_nav_date": "2026-08-12",
+                "nav_latest_date_counts": {
+                    "2026-08-12": 70,
+                    "2026-08-11": 28,
+                    "2026-08-10": 2,
+                },
+            },
+            {
+                "maximumNavDateLagBusinessDays": 1,
+                "minimumFreshNavDateRatio": 0.98,
+            },
+        )
+
+        self.assertIs(result["passed"], True)
+        self.assertEqual(result["minimumFreshNavDate"], "2026-08-11")
+        self.assertEqual(result["freshNavDateStrategyTotal"], 98)
+        self.assertEqual(result["freshNavDateStrategyRatio"], 0.98)
+
+    def test_qieman_freshness_rejects_older_or_missing_rows_beyond_two_percent(self) -> None:
+        result = assess_qieman_nav_freshness(
+            {
+                "strategy_total": 100,
+                "source_latest_nav_date": "2026-08-12",
+                "nav_latest_date_counts": {
+                    "2026-08-12": 70,
+                    "2026-08-11": 27,
+                    "2026-08-10": 2,
+                },
+            },
+            {
+                "maximumNavDateLagBusinessDays": 1,
+                "minimumFreshNavDateRatio": 0.98,
+            },
+        )
+
+        self.assertIs(result["passed"], False)
+        self.assertEqual(result["freshNavDateStrategyTotal"], 97)
 
         contracts = {
             "ttfund": (
@@ -121,17 +231,30 @@ class BridgeSafetyTests(unittest.TestCase):
                 CODE_ROOT / "节点脚本" / "03_且慢" / "01_目录增量与新策略采集" / "src" / "qieman_daily_update.py",
                 ("catalog_new_strategy_total", "catalog_new_strategy_collected_total", "catalog_batch_missing_strategy_total"),
             ),
+            "southern": (
+                CODE_ROOT / "节点脚本" / "03_南方基金" / "01_目录与登录态采集" / "src" / "southern_daily_update.py",
+                (
+                    "IA049",
+                    "IA050",
+                    "IA028",
+                    "catalog_new_strategy_total",
+                    "catalog_batch_closed",
+                    "run_southern_live_collect.py",
+                    "southern_login.dpapi",
+                ),
+            ),
         }
         for label, (path, tokens) in contracts.items():
             text = path.read_text(encoding="utf-8-sig")
             for token in tokens:
                 self.assertIn(token, text, f"{label} missing new-strategy contract token {token}")
 
-    def test_guangfa_securities_and_qieman_nodes_use_the_declared_bridge_path(self) -> None:
+    def test_channel_nodes_use_the_declared_bridge_path(self) -> None:
         roots = (
             CODE_ROOT / "节点脚本" / "03_广发证券",
             CODE_ROOT / "节点脚本" / "03_且慢",
             CODE_ROOT / "节点脚本" / "03_广发渠道补充",
+            CODE_ROOT / "节点脚本" / "03_南方基金",
         )
         run_scripts = [path for root in roots for path in root.rglob("run.ps1")]
         self.assertTrue(run_scripts)
@@ -285,6 +408,7 @@ class BridgeSafetyTests(unittest.TestCase):
             bridge = Bridge.__new__(Bridge)
             bridge.args = SimpleNamespace(dry_run=True)
             bridge.report_root = root / "formal_report"
+            bridge.database_root = root / "database"
             bridge.temp_root = root / "temp"
             bridge.child_run_id = "run"
             bridge.node_run_dir = root / "node"
@@ -316,6 +440,11 @@ class BridgeSafetyTests(unittest.TestCase):
             pack_command = next(command for command in commands if "build_basic_data_report_packs.py" in command)
             self.assertIn("--minimal-publish-only", pack_command)
             self.assertIn("--skip-data-audit", pack_command)
+            self.assertIn("--skip-fund-enrichment", pack_command)
+            self.assertEqual(
+                pack_command[pack_command.index("--db-path") + 1],
+                str(bridge.database_root / "analysis_zh_current.sqlite"),
+            )
             manifest_command = next(
                 command for command in commands if "write_analysis_platform_deploy_manifest.py" in command
             )
@@ -448,6 +577,7 @@ class BridgeSafetyTests(unittest.TestCase):
             )
             bridge = Bridge.__new__(Bridge)
             bridge.args = SimpleNamespace(dry_run=False)
+            bridge.workspace_root = root
             bridge.policy = {"reports": {"dailyScope": "minimal_publish"}}
             bridge.temp_root = root / "temp"
             bridge.report_root = root / "formal"

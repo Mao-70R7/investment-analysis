@@ -8,7 +8,6 @@
     "gfsec_fima_gate"
   ],
   "criticality": "optional",
-  "failureImpact": "channel",
   "timeoutSeconds": 1800,
   "maxProcessAttempts": 1,
   "resourceLock": "main_db_write",
@@ -19,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "gfsec_fima_load"
+  "action": "gfsec_fima_load",
+  "failureImpact": "channel"
 }

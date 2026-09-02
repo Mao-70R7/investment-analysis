@@ -23,6 +23,62 @@ SPEC.loader.exec_module(loader)
 
 
 class QiemanSignalEntityLoadTest(unittest.TestCase):
+    def test_exact_benchmark_components_preserve_official_index_codes_and_weights(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            conn = loader.init_db(
+                root / "analysis.sqlite",
+                CODE_ROOT / "schemas" / "analysis_zh_current.sql",
+                keep_existing_db=False,
+            )
+            conn.execute(
+                '''INSERT INTO "渠道信息" ("渠道ID", "渠道名称") VALUES ('qieman', '且慢')'''
+            )
+            conn.execute(
+                '''INSERT INTO "策略信息" (
+                       "统一策略ID", "渠道ID", "渠道策略ID", "策略名称"
+                   ) VALUES ('qieman__ZH044931', 'qieman', 'ZH044931', '启明睿-低波增强')'''
+            )
+            loaded = loader.load_strategy_benchmark_components(
+                conn,
+                "qieman",
+                "qieman__ZH044931",
+                "ZH044931",
+                [
+                    {
+                        "index_code": "000300.SH",
+                        "index_name": "沪深300",
+                        "index_type": "STOCK",
+                        "weight": 0.10,
+                    },
+                    {
+                        "index_code": "CBA00103.CS",
+                        "index_name": "中债新综合全价",
+                        "index_type": "BOND",
+                        "weight": 0.90,
+                    },
+                ],
+                is_exact_split=True,
+                confidence_level="official_stargate_exact_benchmark_split",
+                source_snapshot_id="qieman-benchmark-ZH044931",
+                captured_at="2026-08-12T21:06:16+08:00",
+            )
+            rows = conn.execute(
+                '''SELECT "指数代码", "权重_百分比", "是否精确拆分", "原始快照ID"
+                   FROM "策略业绩基准成分"
+                   WHERE "统一策略ID"='qieman__ZH044931'
+                   ORDER BY "指数代码"'''
+            ).fetchall()
+            self.assertEqual(loaded, 2)
+            self.assertEqual(
+                [tuple(row) for row in rows],
+                [
+                    ("000300.SH", 10.0, 1, "qieman-benchmark-ZH044931"),
+                    ("CBA00103.CS", 90.0, 1, "qieman-benchmark-ZH044931"),
+                ],
+            )
+            conn.close()
+
     def test_official_historical_snapshot_loads_as_separate_position_fact(self) -> None:
         run_id = "20260810T171049+0800__qieman_collect__attempt_01"
         with tempfile.TemporaryDirectory() as temp_dir:

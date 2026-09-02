@@ -8,12 +8,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from runtime_workspace import load_workspace
 
-PROJECT_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "AGENTS.md").is_file())
+
+PROJECT_ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "AGENTS.md").is_file() and (parent / "本机配置" / "runtime.local.json").is_file()
+)
+WORKSPACE = load_workspace(PROJECT_ROOT)
 CHANNEL_ID = "southern"
 CHANNEL_NAME = "南方基金/司南投顾"
-LIVE_DIR = PROJECT_ROOT / "data" / "raw" / CHANNEL_ID / "live_collect"
-NORMALIZED_DIR = PROJECT_ROOT / "data" / "normalized" / CHANNEL_ID
+LIVE_DIR = WORKSPACE.raw_root / CHANNEL_ID / "live_collect"
+NORMALIZED_DIR = WORKSPACE.normalized_root / CHANNEL_ID
 
 
 def now_id() -> str:
@@ -61,6 +68,22 @@ def strip_html(value: str | None) -> str | None:
     if not value:
         return value
     return value.replace("<strong>", "").replace("</strong>", "").replace("<br/>", "\n")
+
+
+def normalize_advisory_fee(trade_rate_result: dict[str, Any]) -> str | None:
+    direct = strip_html(trade_rate_result.get("inIAServiceRate"))
+    if direct:
+        return direct
+    tiers = [
+        (str(item.get("cyje") or "").strip(), str(item.get("rate") or "").strip())
+        for item in (trade_rate_result.get("ratelist") or [])
+        if re.search(r"\d", str(item.get("rate") or ""))
+    ]
+    if not tiers:
+        return None
+    if len(tiers) == 1 and tiers[0][0] in {"", "-"}:
+        return f"费率（年）：{tiers[0][1]}"
+    return "费率（年）：" + "；".join(f"{amount} {rate}".strip() for amount, rate in tiers)
 
 
 def normalize_date(value: Any) -> str | None:
@@ -133,7 +156,9 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
     strategy = comb_info.get("result") or {}
     if not strategy:
         raise ValueError("Missing webIAqueryCombInfo result in live artifact.")
-    market_list = (((market.get("result") or {}).get("info") or {}).get("comblist") or [])
+    market_info = ((market.get("result") or {}).get("info") or {})
+    market_list = market_info.get("comblist") or []
+    benchmark_list = market_info.get("benchmarklist") or []
     if not market_list:
         raise ValueError("Missing webIAcombFundMarketQuery comblist in live artifact.")
 
@@ -171,7 +196,7 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
             "launch_date": dashed_date(strategy.get("setupdate")) or strategy.get("setupdate"),
             "suggested_holding_period": "2年以上",
             "minimum_amount": 500,
-            "advisory_fee_rate": strip_html(trade_rate_result.get("inIAServiceRate")),
+            "advisory_fee_rate": normalize_advisory_fee(trade_rate_result),
             "benchmark": benchmark,
             "tags": [item for item in [strategy.get("scenename"), strategy.get("provider"), strategy.get("manager")] if item],
             "strategy_description": strategy.get("title") or strategy.get("combname"),
@@ -194,6 +219,7 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
             "asset_class": item.get("name"),
             "asset_classify": item.get("classify"),
             "asset_weight": to_number(item.get("cur_ratio")),
+            "weight_unit": "percent_point",
             "source_url": page_url,
             "confidence_level": "official_exact",
             "access_level": "login",
@@ -218,6 +244,7 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
             "fund_asset_type": item.get("name"),
             "fund_group_name": item.get("name"),
             "fund_weight": to_number(item.get("cur_ratio")),
+            "weight_unit": "percent_point",
             "fund_nav": None,
             "fund_nav_date": None,
             "is_precise_weight": True,
@@ -236,6 +263,11 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
     performance_daily: list[dict[str, Any]] = []
     position_daily: list[dict[str, Any]] = []
     daily_weights: dict[str, dict[str, float | None]] = {}
+    benchmark_return_by_date = {
+        trade_date: to_number(item.get("regionRatio"))
+        for item in benchmark_list
+        if (trade_date := dashed_date(str(item.get("date") or "")))
+    }
     for item in market_list:
         raw_trade_date = str(item.get("date") or "")
         trade_date = dashed_date(raw_trade_date)
@@ -249,9 +281,12 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
                 "nav": to_number(item.get("nav")),
                 "daily_return": to_number(item.get("upratio")),
                 "cumulative_return": to_number(item.get("regionRatio")),
-                "benchmark_return": None,
+                "benchmark_return": benchmark_return_by_date.get(trade_date),
                 "index_return": None,
                 "max_drawdown": None,
+                # The authenticated market endpoint already returns percentage
+                # points.  The legacy public IA006 endpoint used decimal ratios.
+                "return_unit": "percent_point",
                 "source_url": page_url,
                 "confidence_level": "official_exact",
                 "access_level": "login",
@@ -276,6 +311,7 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
                     "fund_asset_type": fund_type_map.get(fund_code),
                     "fund_group_name": fund_type_map.get(fund_code),
                     "fund_weight": ratio_item["fund_weight"],
+                    "weight_unit": "percent_point",
                     "fund_nav": None,
                     "fund_nav_date": None,
                     "is_precise_weight": True,
@@ -393,11 +429,14 @@ def normalize(artifact_path: Path, run_id: str, captured_at: str) -> tuple[dict[
 
     normalized = {
         "strategy_master": strategy_master,
-        "strategy_fund_snapshot": current_fund_snapshot + position_daily,
+        # Current and historical facts must remain separate.  The database loader
+        # selects the latest date from strategy_fund_snapshot, while the complete
+        # daily series is loaded only from strategy_fund_snapshot_history.
+        "strategy_fund_snapshot": current_fund_snapshot,
         "strategy_asset_snapshot": asset_snapshot,
         "strategy_fund_snapshot_current": current_fund_snapshot,
         "strategy_performance_daily": performance_daily,
-        "strategy_fund_position_daily": position_daily,
+        "strategy_fund_snapshot_history": position_daily,
         "strategy_rebalance_event": rebalance_events,
         "strategy_rebalance_fund_delta": rebalance_deltas,
         "strategy_notice": notices,
@@ -438,7 +477,7 @@ def main() -> None:
         write_jsonl(NORMALIZED_DIR / entity / run_date / f"{args.run_id}.jsonl", rows)
     write_json(NORMALIZED_DIR / "collection_summary" / run_date / f"{args.run_id}.json", summary)
     write_json(
-        PROJECT_ROOT / "data" / "raw" / CHANNEL_ID / "live_collect" / f"normalized_summary-{args.run_id}.json",
+        LIVE_DIR / f"normalized_summary-{args.run_id}.json",
         summary,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))

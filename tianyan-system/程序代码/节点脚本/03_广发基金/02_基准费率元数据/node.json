@@ -8,7 +8,6 @@
     "process_load"
   ],
   "criticality": "optional",
-  "failureImpact": "warning",
   "timeoutSeconds": 7200,
   "maxProcessAttempts": 2,
   "resourceLock": "main_db_write",
@@ -19,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "gffunds_metadata"
+  "action": "gffunds_metadata",
+  "failureImpact": "warning"
 }

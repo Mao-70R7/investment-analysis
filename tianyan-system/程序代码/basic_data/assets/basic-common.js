@@ -301,6 +301,12 @@ window.BasicData = (() => {
     history: { param: "hasHistory", label: "有历史仓位" },
     active: { param: "clientActive", label: "对客未终止" },
   };
+  const INSTITUTION_OVERVIEW_DEFAULT_FILTERS = Object.freeze({
+    benchmark: true,
+    performance: true,
+    history: false,
+    active: true,
+  });
   function parseFilterFlag(value, fallback = true) {
     if (value === null || value === undefined || value === "") return fallback;
     return !["0", "false", "否", "no", "off"].includes(String(value).toLowerCase());
@@ -310,16 +316,15 @@ window.BasicData = (() => {
   }
   function initialGlobalStrategyFilters() {
     const query = params();
-    // The four completeness filters are the institution overview's initial
-    // business scope. Other pages only inherit them when an institution link
-    // explicitly carries the query parameters; top-navigation visits must
-    // start from their own full data universe.
-    const defaultEnabled = isInstitutionOverviewPage();
+    // Institution overview starts from the business-ready scope while keeping
+    // historical holdings optional. Other pages only inherit filters when an
+    // institution link explicitly carries query parameters; top-navigation
+    // visits must start from their own full data universe.
     return Object.fromEntries(Object.entries(GLOBAL_STRATEGY_FILTERS).map(([key, config]) => [
       key,
       query.has(config.param)
         ? parseFilterFlag(query.get(config.param), true)
-        : defaultEnabled,
+        : isInstitutionOverviewPage() && Boolean(INSTITUTION_OVERVIEW_DEFAULT_FILTERS[key]),
     ]));
   }
   const hasExplicitGlobalStrategyFilters = Object.values(GLOBAL_STRATEGY_FILTERS)

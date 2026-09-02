@@ -672,6 +672,7 @@
 
   function fundLink(row, label = "") {
     if (!row || (!row.基金代码 && !row.基金名称)) return B.esc(label || fundLabel(row));
+    if (window.__MINIMAL_PUBLISH_NO_FUND_DETAIL__) return B.esc(label || fundLabel(row));
     return `<a class="link" href="${B.esc(fundDetailUrl(row))}">${B.esc(label || fundLabel(row))}</a>`;
   }
 

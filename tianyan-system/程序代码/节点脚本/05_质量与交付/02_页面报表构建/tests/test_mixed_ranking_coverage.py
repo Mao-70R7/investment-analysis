@@ -226,6 +226,57 @@ class MixedRankingCoverageTests(unittest.TestCase):
         self.assertEqual(merged["pageRankable"], 0)
         self.assertEqual(reason, "历史接口留档")
 
+    def test_strategy_summary_business_facts_override_stale_zero_asset_placeholder(self) -> None:
+        stale_ranking_row = {
+            "产品ID": "gffunds__ZY00000014",
+            "产品名称": "幸福小列车第0期",
+            "基准风险资产权重": "L0",
+            "基准风险资产权重_百分比": 0.0,
+            "基准权益权重": None,
+            "基准债券权重": None,
+            "基准互斥权重合计_百分比": 0.0,
+            "正式可比池": "",
+        }
+        summary_row = {
+            "统一策略ID": "gffunds__ZY00000014",
+            "策略名称": "幸福小列车第0期",
+            "渠道": "广发基金",
+            "投顾机构": "广发基金",
+            "有基准": "是",
+            "有业绩走势": "是",
+            "有历史仓位": "是",
+            "对客未终止": "是",
+            "基准风险资产权重": "L1",
+            "基准风险资产权重_百分比": 10,
+            "基准权益权重": 10,
+            "基准债券权重": 90,
+            "基准货币权重": 0,
+            "基准资产大类-商品": 0,
+            "基准资产大类-另类": 0,
+            "基准互斥权重合计_百分比": 100,
+            "基准结构类型": "权益+债券主导",
+            "非权益比较轨道": "债券主导",
+            "正式可比池": "L1+债券主导",
+            "可比池样本资格": "是",
+            "可比池说明": "权益分档=L1",
+            "业绩基准": "沪深300指数收益率*10%+中债综合全价指数收益率*90%",
+            "基准映射置信度": "高",
+        }
+
+        merged = MODULE.apply_strategy_summary_business_facts(
+            stale_ranking_row,
+            summary_row,
+        )
+
+        self.assertEqual(merged["基准风险资产权重"], "L1")
+        self.assertEqual(merged["基准风险资产权重_百分比"], 0.1)
+        self.assertEqual(merged["基准权益权重"], 0.1)
+        self.assertEqual(merged["基准债券权重"], 0.9)
+        self.assertEqual(merged["基准互斥权重合计_百分比"], 100)
+        self.assertEqual(merged["正式可比池"], "L1+债券主导")
+        self.assertEqual(merged["基准风险资产权重来源"], "策略列表统一业务事实")
+        self.assertEqual(merged["解析置信度"], "高")
+
 
 if __name__ == "__main__":
     unittest.main()

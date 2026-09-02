@@ -2,57 +2,56 @@
 
 ## 目标
 
-采集中欧财富/中欧钱滚滚公开投顾策略列表、策略详情、日度业绩、当前基金级持仓和官方调仓记录。
+采集中欧财富/中欧钱滚滚公开投顾策略列表、策略详情、日度业绩、当前基金级持仓、官方调仓记录和底层基金最新净值。
 
-## 复跑命令
+## 天眼标准入口
 
-```powershell
-python .\scripts\collect_official_apps_public.py --apps zocaifu --workers 8
-```
-
-如只做快速结构测试，可跳过基金净值补充：
+在 `程序代码` 目录执行：
 
 ```powershell
-python .\scripts\collect_official_apps_public.py --apps zocaifu --workers 8 --zocaifu-skip-fund-nav
+python -X utf8 .\节点脚本\_共享组件\生产程序\collect_official_apps_public.py --apps zocaifu --workers 8
 ```
+
+该渠道尚未进入每日 DAG。执行前必须检查 `运行状态/locks/daily_update.lock`，执行后需先检查渠道 `coverage_check.json`，再决定是否隔离入库验证。
 
 ## 公开来源
 
-- `https://mobile.qiangungun.com/v2/fof/list`
-- `https://mobile.qiangungun.com/v2/product/detail`
-- `https://mobile.qiangungun.com/v1/product/queryFofRebalanceInfo`
-- `https://mobile.qiangungun.com/v1/fof/listDailyRiseAndFall`
+- `/v1/fof/queryAdPageStrategyInfo`：策略清单。
+- `/v2/product/detail`：详情及当前基金持仓。
+- `/v1/fof/listDailyRiseAndFall`：分页日度业绩。
+- `/v1/fof/queryFofNav`：策略净值。
+- `/v1/product/queryFofRebalanceInfo`：历史调仓。
+- `/v1/product/nav/page`：底层基金最新净值。
 
-## 标准输出
+## 最新迁移批次
 
-- `official_apps/zocaifu/outputs/strategy_master.csv`
-- `official_apps/zocaifu/outputs/strategy_performance_daily.csv`
-- `official_apps/zocaifu/outputs/strategy_fund_snapshot.csv`
-- `official_apps/zocaifu/outputs/strategy_rebalance_event.csv`
-- `official_apps/zocaifu/outputs/strategy_rebalance_fund_delta.csv`
-- `official_apps/zocaifu/outputs/fund_public_dim.csv`
-- `official_apps/zocaifu/outputs/latest_summary.json`
-- `official_apps/zocaifu/outputs/coverage_check.json`
+批次 `20260812T234257+0800` 已迁入天眼标准数据目录，但尚未写入主数据库：
 
-## 当前结果
+- 策略：46。
+- 日度业绩：52,166 行。
+- 当前基金持仓：938 行，覆盖 44 个策略。
+- 调仓事件：478 个。
+- 调仓基金变化：9,308 行。
+- 基金维度及最新净值：294 只，净值覆盖率 100%。
 
-最近一次成功运行：`20260523T223717+0800`。
+原始独立包位于：
 
-- 策略：49 个。
-- 日度业绩：49959 行。
-- 当前基金级持仓：906 行。
-- 调仓事件：467 个。
-- 调仓基金级明细：9019 行。
-- 基金维表：278 只。
+```text
+工具与归档/渠道采集独立验证/20260812/中欧基金投顾数据采集
+```
 
-## 校验
+## 口径
+
+- `daily_return`、`cumulative_return` 是小数收益率，加载到主库时乘以 100 转为百分比。
+- `fund_weight`、`before_weight`、`after_weight`、`weight_delta` 是百分数点，不得再次乘以 100。
+- 历史调仓接口不返回基金代码时，只允许按唯一基金名称或主库基金别名解析；未解析记录保留为空。
+
+天眼加载器已将收益率和权重转换拆开，避免中欧权重被放大 100 倍。
+
+## 验收
 
 ```powershell
 Get-Content -Raw -Encoding UTF8 .\official_apps\zocaifu\outputs\coverage_check.json
 ```
 
-`fund_level_position_ok`、`rebalance_event_ok`、`rebalance_fund_delta_ok` 均应为 `true`。当前持仓表有 `fund_code`、`fund_name`、`fund_weight`；调仓明细表有 `fund_name`、`before_weight`、`after_weight`、`weight_delta`。
-
-## 已知口径
-
-公开 API 可获取基金级当前持仓和官方调仓权重。部分历史调仓接口只返回基金名称和权重，不返回基金代码；不对缺失代码做猜测补全。
+最新批次状态为 `success_with_warning`。两个策略的官方详情返回空持仓，5,997 条历史调仓变化没有可确认的基金代码；这些缺口不能通过猜测填补。

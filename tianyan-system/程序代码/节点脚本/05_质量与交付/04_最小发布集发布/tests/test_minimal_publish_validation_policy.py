@@ -20,6 +20,77 @@ SPEC.loader.exec_module(MODULE)
 
 
 class MinimalPublishValidationPolicyTests(unittest.TestCase):
+    def test_publisher_forbids_monthly_content_instead_of_requiring_it(self) -> None:
+        publisher = (SCRIPT_PATH.parent / "update_and_publish_minimal_set.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+
+        self.assertNotIn("MonthlyReportPageName", publisher)
+        self.assertNotIn("Static monthly rebalance report is missing", publisher)
+        self.assertIn("Monthly report content is forbidden", publisher)
+        self.assertIn("Monthly report content is still referenced by the deployment manifest", publisher)
+        self.assertIn('"$base/basic_data/institutions.html"', publisher)
+
+    def test_edgeone_snapshot_branch_is_root_only_and_race_safe(self) -> None:
+        publisher = (SCRIPT_PATH.parent / "update_and_publish_minimal_set.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+
+        self.assertIn('[string]$EdgeOneRepositoryUrl = ""', publisher)
+        self.assertIn('[string]$EdgeOneRepositoryBranch = "main"', publisher)
+        self.assertIn('[string]$EdgeOneSnapshotBranch = ""', publisher)
+        self.assertIn('"commit-tree", $sourceTree', publisher)
+        self.assertIn('"rev-list", "--parents", "-n", "1", $snapshotCommit', publisher)
+        self.assertIn('snapshot commit must be a root commit', publisher)
+        self.assertIn('snapshot tree does not match the normal publish tree', publisher)
+        self.assertIn("--force-with-lease=refs/heads/${branchValue}", publisher)
+        self.assertIn("EdgeOne repository must be separate from the normal publish repository", publisher)
+        self.assertIn('"http.version=HTTP/1.1"', publisher)
+        self.assertIn('"http.postBuffer=524288000"', publisher)
+        self.assertIn('"push", $remoteValue, $lease', publisher)
+        self.assertIn("$maxSnapshotPushAttempts = 3", publisher)
+        self.assertIn("refreshing the remote watermark before retry", publisher)
+        self.assertIn("[switch]$UseIsolatedGitDirectory", publisher)
+        self.assertIn('Join-Path $script:RunDir "edgeone_snapshot.git"', publisher)
+        self.assertIn('"init", "--bare", $isolatedGitDirectory', publisher)
+        self.assertIn('"--git-dir=$isolatedGitDirectory"', publisher)
+        self.assertIn('Join-Path $alternateInfoDirectory "alternates"', publisher)
+        self.assertIn('$sourceObjectDirectory.Replace(\'\\\', \'/\') + "`n"', publisher)
+        self.assertIn("New-Object System.Text.UTF8Encoding($false)", publisher)
+        self.assertIn("-UseIsolatedGitDirectory", publisher)
+        self.assertIn("Publish-EdgeOneSnapshots", publisher)
+        self.assertIn("$script:PublishedEdgeOneSnapshotBranch = $null", publisher)
+        self.assertNotIn("$script:EdgeOneSnapshotBranch = $null", publisher)
+        self.assertNotIn('push", "origin", "--force", "main', publisher)
+
+    def test_existing_package_reuse_cannot_bypass_update_and_validation(self) -> None:
+        publisher = (SCRIPT_PATH.parent / "update_and_publish_minimal_set.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+
+        self.assertIn("[switch]$ReuseExistingValidatedPackage", publisher)
+        self.assertIn("ReuseExistingValidatedPackage requires SkipDataUpdate", publisher)
+        self.assertIn("package validation and smoke test remain mandatory", publisher)
+        self.assertIn('Invoke-Step -Name "3. Validate Minimal Package"', publisher)
+        self.assertIn('Invoke-Step -Name "4. Local HTTP Smoke Test"', publisher)
+
+    def test_daily_dispatch_passes_dedicated_and_legacy_edgeone_targets(self) -> None:
+        node_root = SCRIPT_PATH.parents[2]
+        bridge = (node_root / "00_调度框架" / "bridge_node.py").read_text(encoding="utf-8-sig")
+        compatibility = (SCRIPT_PATH.parent / "daily_update_orchestrator.py").read_text(
+            encoding="utf-8-sig"
+        )
+
+        self.assertIn('runtime_config.get("edgeOnePublishRemote")', bridge)
+        self.assertIn('runtime_config.get("edgeOnePublishBranch")', bridge)
+        self.assertIn('runtime_config.get("edgeOneLegacySnapshotBranch", "")', bridge)
+        self.assertIn('"-EdgeOneRepositoryUrl"', bridge)
+        self.assertIn('"-EdgeOneRepositoryBranch"', bridge)
+        self.assertIn('"-EdgeOneSnapshotBranch"', bridge)
+        self.assertIn('default=os.environ.get("ADVISOR_EDGEONE_LEGACY_SNAPSHOT_BRANCH", "")', compatibility)
+        self.assertIn('"-EdgeOneRepositoryUrl"', compatibility)
+        self.assertIn('"-EdgeOneSnapshotBranch"', compatibility)
+
     def test_strategy_filter_business_facts_require_explicit_yes_no_values(self) -> None:
         valid = {
             "strategies": [
@@ -35,10 +106,16 @@ class MinimalPublishValidationPolicyTests(unittest.TestCase):
 
     def test_strategy_filter_business_facts_reject_silent_empty_default_scope(self) -> None:
         rows = [
-            {"有基准": "是", "有业绩走势": "是", "有历史仓位": "否", "对客未终止": "是"}
+            {"有基准": "否", "有业绩走势": "是", "有历史仓位": "是", "对客未终止": "是"}
         ]
         with self.assertRaisesRegex(RuntimeError, "default scope would be empty"):
             MODULE.validate_strategy_filter_facts({"strategies": rows})
+
+    def test_strategy_filter_default_scope_does_not_require_history_positions(self) -> None:
+        rows = [
+            {"有基准": "是", "有业绩走势": "是", "有历史仓位": "否", "对客未终止": "是"}
+        ]
+        self.assertEqual(MODULE.validate_strategy_filter_facts({"strategies": rows}), 1)
 
     def test_preview_runtime_is_kept_outside_generated_package(self) -> None:
         script_root = SCRIPT_PATH.parent
@@ -95,11 +172,13 @@ class MinimalPublishValidationPolicyTests(unittest.TestCase):
 
             MODULE.validate_compare_workflow(basic_root)
 
-    def test_strategy_compare_is_a_strategy_list_subflow_not_a_primary_menu(self) -> None:
-        nav = MODULE.minimal_nav("strategies.html")
+    def test_strategy_compare_is_not_a_primary_menu_but_route_remains(self) -> None:
+        nav = MODULE.minimal_nav("compare.html")
         self.assertNotIn('href="./compare.html"', nav)
-        self.assertIn('class="nav-link is-active" href="./strategies.html"', nav)
-        self.assertEqual(MODULE.ACTIVE_PAGE["compare.html"], "strategies.html")
+        self.assertIn('href="./strategies.html"', nav)
+        self.assertNotIn('class="nav-link is-active" href="./strategies.html"', nav)
+        self.assertIn("compare.html", MODULE.PUBLIC_PAGES)
+        self.assertNotIn("compare.html", MODULE.ACTIVE_PAGE)
 
     def test_compare_page_uses_dedicated_index_and_lazy_holding_pack(self) -> None:
         self.assertEqual(

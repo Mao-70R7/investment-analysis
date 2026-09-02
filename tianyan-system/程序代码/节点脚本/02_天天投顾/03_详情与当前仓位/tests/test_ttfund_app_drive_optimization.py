@@ -161,6 +161,97 @@ def test_missing_detail_is_not_reported_as_required_fields_ok() -> None:
     assert result["incomplete_reason"] == "detail_missing"
 
 
+def test_work_bundle_completion_tracks_each_required_field() -> None:
+    required = {
+        "detail": True,
+        "benchmark_text": True,
+        "current_holding": True,
+        "rebalance_history": True,
+    }
+    result = driver.apply_work_bundle_status(
+        {
+            "strategy_id": "A",
+            "detail_ok": True,
+            "benchmark_text_ok": True,
+            "holding_info_ok": False,
+            "history_adjustment_ok": True,
+        },
+        required,
+    )
+
+    assert result["required_fields_ok"] is False
+    assert result["pending_fields"] == ["current_holding"]
+    assert driver.pending_required_fields(result, required) == {
+        "detail": False,
+        "benchmark_text": False,
+        "current_holding": True,
+        "rebalance_history": False,
+    }
+
+
+def test_checkpoint_merge_preserves_already_valid_history_when_holding_retry_succeeds() -> None:
+    existing = {
+        "strategy_id": "A",
+        "detail_ok": True,
+        "benchmark_text_ok": True,
+        "benchmark_text": "80%中证全指+20%中债",
+        "holding_info_ok": False,
+        "history_adjustment_ok": True,
+        "history_event_count": 8,
+        "app_open_total": 1,
+    }
+    candidate = {
+        "strategy_id": "A",
+        "detail_ok": True,
+        "benchmark_text_ok": False,
+        "holding_info_ok": True,
+        "holding_fund_count": 6,
+        "history_adjustment_ok": False,
+        "app_open_total": 1,
+    }
+
+    merged = driver.merge_checkpoint_result(existing, candidate)
+
+    assert merged["benchmark_text_ok"] is True
+    assert merged["benchmark_text"] == "80%中证全指+20%中债"
+    assert merged["holding_info_ok"] is True
+    assert merged["holding_fund_count"] == 6
+    assert merged["history_adjustment_ok"] is True
+    assert merged["history_event_count"] == 8
+    assert merged["app_open_total"] == 2
+
+
+def test_completed_checkpoint_bundle_keeps_attempt_error_only_as_diagnostic() -> None:
+    required = {
+        "detail": True,
+        "benchmark_text": True,
+        "current_holding": True,
+        "rebalance_history": True,
+    }
+    existing = {
+        "strategy_id": "A",
+        "detail_ok": True,
+        "benchmark_text_ok": True,
+        "holding_info_ok": False,
+        "history_adjustment_ok": True,
+    }
+    candidate = {
+        "strategy_id": "A",
+        "detail_ok": True,
+        "benchmark_text_ok": False,
+        "holding_info_ok": True,
+        "history_adjustment_ok": False,
+        "error": "history_page_blank",
+    }
+
+    merged = driver.merge_checkpoint_result(existing, candidate)
+    completed = driver.apply_work_bundle_status(merged, required)
+
+    assert completed["required_fields_ok"] is True
+    assert completed["error"] is None
+    assert completed["last_attempt_error"] == "history_page_blank"
+
+
 def test_blank_page_is_classified_as_device_degradation() -> None:
     assert driver.is_blank_page([])
     assert driver.is_device_degradation_failure({"error": "detail_page_blank"})
@@ -339,6 +430,9 @@ if __name__ == "__main__":
         test_current_holding_completion_requires_detail_and_holding,
         test_summary_counts_holding_missing_even_without_exception,
         test_missing_detail_is_not_reported_as_required_fields_ok,
+        test_work_bundle_completion_tracks_each_required_field,
+        test_checkpoint_merge_preserves_already_valid_history_when_holding_retry_succeeds,
+        test_completed_checkpoint_bundle_keeps_attempt_error_only_as_diagnostic,
         test_blank_page_is_classified_as_device_degradation,
         test_soft_circuit_break_requires_positive_threshold,
         test_retained_run_cache_uses_short_name_and_manifest,

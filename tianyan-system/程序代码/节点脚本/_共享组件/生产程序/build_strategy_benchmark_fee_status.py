@@ -1,3 +1,4 @@
+import argparse
 import csv
 import json
 import os
@@ -17,7 +18,8 @@ from benchmark_asset_classification import (
 ROOT = Path(os.environ.get("ADVISOR_CODE_ROOT") or Path.cwd()).resolve()
 if not (ROOT / "AGENTS.md").is_file():
     raise RuntimeError("ADVISOR_CODE_ROOT or current working directory must be the code root containing AGENTS.md")
-DB_PATH = ROOT / "data" / "analysis_zh_current.sqlite"
+DEFAULT_DB_PATH = Path(os.environ.get("ADVISOR_DATABASE_ROOT") or ROOT / "data") / "analysis_zh_current.sqlite"
+DEFAULT_OUTPUT_ROOT = Path(os.environ.get("ADVISOR_OUTPUT_ROOT") or ROOT / "outputs")
 TABLE_NAME = "策略基准费率状态"
 
 
@@ -76,7 +78,14 @@ def init_table(conn: sqlite3.Connection) -> None:
 
 
 def main() -> None:
-    conn = sqlite3.connect(DB_PATH)
+    parser = argparse.ArgumentParser(description="Build strategy benchmark, fee and benchmark-asset status tables.")
+    parser.add_argument("--db-path", type=Path, default=DEFAULT_DB_PATH)
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    args = parser.parse_args()
+    db_path = args.db_path.resolve()
+    if not db_path.is_file():
+        raise SystemExit(f"missing analysis database: {db_path}")
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     init_table(conn)
 
@@ -245,7 +254,7 @@ def main() -> None:
     for row in rows:
         summary["grade_counts"][row["基础数据等级"]] = summary["grade_counts"].get(row["基础数据等级"], 0) + 1
 
-    output_dir = ROOT / "outputs" / "basic_data_readiness"
+    output_dir = args.output_root.resolve() / "basic_data_readiness"
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "strategy_benchmark_fee_status.csv"
     if rows:

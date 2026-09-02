@@ -22,6 +22,12 @@ from report_periods import monthly_rebalance_asset_directory, monthly_rebalance_
 
 
 PROJECT_ROOT = next(parent for parent in Path(__file__).resolve().parents if (parent / "AGENTS.md").is_file())
+WORKSPACE_ROOT = (
+    PROJECT_ROOT.parent
+    if (PROJECT_ROOT.parent / "本机配置" / "runtime.local.json").is_file()
+    else PROJECT_ROOT
+)
+SOURCE_RUNTIME_CONFIG = WORKSPACE_ROOT / "本机配置" / "runtime.local.json"
 CODE_BRANCH_DEFAULT = "code"
 PUBLISH_REMOTE_DEFAULT = "https://github.com/Mao-70R7/invest.git"
 PUBLISH_BRANCH_DEFAULT = "main"
@@ -58,11 +64,32 @@ RUNTIME_PREFIXES = (
     "文档/",
     "config/",
     "schemas/",
-    "official_apps/",
+    "official_apps/gffunds/",
+    "official_apps/gfsec_fima/",
+    "official_apps/gfsec_robot/",
+    "official_apps/outputs/",
+    "official_apps/qieman/production/",
+    "official_apps/qieman/authenticated_probe/",
     "tools/platform-tools/",
     "basic_data/assets/",
     "basic_data/config/",
     "业务基线/",
+)
+
+RUNTIME_EXCLUDED_PREFIXES = (
+    "official_apps/qieman/authenticated_probe/_analysis/",
+    "official_apps/qieman/authenticated_probe/_tooling/",
+    "official_apps/qieman/authenticated_probe/evaluations/",
+    "official_apps/qieman/authenticated_probe/runs/",
+    "official_apps/qieman/authenticated_probe/tests/",
+)
+
+RUNTIME_NORMALIZED_CHANNELS = (
+    "ttfund",
+    "gffunds",
+    "gfsec_fima",
+    "gfsec_robot",
+    "qieman",
 )
 
 SPARSE_PATTERNS = (
@@ -71,7 +98,15 @@ SPARSE_PATTERNS = (
     "/文档/",
     "/config/",
     "/schemas/",
-    "/official_apps/",
+    "/official_apps/gffunds/",
+    "/official_apps/gfsec_fima/",
+    "/official_apps/gfsec_robot/",
+    "/official_apps/outputs/",
+    "/official_apps/qieman/production/",
+    "/official_apps/qieman/authenticated_probe/*.py",
+    "/official_apps/qieman/authenticated_probe/*.js",
+    "/official_apps/qieman/authenticated_probe/*.json",
+    "/official_apps/qieman/authenticated_probe/*.md",
     "/tools/platform-tools/",
     "/basic_data/*.html",
     "/basic_data/assets/",
@@ -82,6 +117,15 @@ SPARSE_PATTERNS = (
 
 def now_local() -> datetime:
     return datetime.now().astimezone()
+
+
+def load_source_runtime_config() -> dict[str, Any]:
+    if not SOURCE_RUNTIME_CONFIG.is_file():
+        return {}
+    payload = json.loads(SOURCE_RUNTIME_CONFIG.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"runtime config must be an object: {SOURCE_RUNTIME_CONFIG}")
+    return payload
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,6 +186,15 @@ def runtime_path(path_text: str) -> bool:
     return any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in RUNTIME_PREFIXES)
 
 
+def runtime_file_excluded(relative: Path) -> bool:
+    normalized = relative.as_posix()
+    return (
+        relative.suffix.lower() in {".pyc", ".pyo"}
+        or "__pycache__" in relative.parts
+        or any(normalized.startswith(prefix) for prefix in RUNTIME_EXCLUDED_PREFIXES)
+    )
+
+
 def parse_status_path(line: str) -> str:
     path = line[3:].strip() if len(line) > 3 else ""
     if " -> " in path:
@@ -156,6 +209,23 @@ def validate_source_code(args: argparse.Namespace) -> dict[str, Any]:
             f"{issue['file']}:{issue['line']} {issue['text']}" for issue in portability["issues"]
         )
         raise RuntimeError(f"runtime path portability scan failed:\n{details}")
+    source_config = load_source_runtime_config()
+    git_available = (PROJECT_ROOT / ".git").exists()
+    if not git_available:
+        if args.code_source == "git":
+            raise RuntimeError(f"Git code source requires a checkout: {PROJECT_ROOT}")
+        branch = str(source_config.get("codeBranch") or args.code_branch or CODE_BRANCH_DEFAULT)
+        remote = str(source_config.get("codeRemote") or args.code_remote or "")
+        return {
+            "sourceMode": args.code_source,
+            "remote": remote,
+            "branch": branch,
+            "commit": None,
+            "remoteCommit": None,
+            "runtimeDirtyPaths": [],
+            "gitMetadataAvailable": False,
+        }
+
     branch = git_text("branch", "--show-current")
     if branch != args.code_branch:
         raise RuntimeError(f"source branch must be {args.code_branch}; current branch is {branch or 'detached'}")
@@ -194,6 +264,7 @@ def validate_source_code(args: argparse.Namespace) -> dict[str, Any]:
         "commit": head,
         "remoteCommit": remote_head,
         "runtimeDirtyPaths": [parse_status_path(line) for line in runtime_dirty],
+        "gitMetadataAvailable": True,
     }
 
 
@@ -202,8 +273,22 @@ def ensure_source_idle() -> None:
         PROJECT_ROOT / "data" / "daily_update.lock",
         PROJECT_ROOT / "data" / "run_daily_incremental.lock",
         PROJECT_ROOT / "data" / "update.lock",
+        WORKSPACE_ROOT / "运行状态" / "locks" / "daily_update.lock",
+        WORKSPACE_ROOT / "运行状态" / "locks" / "main_db_write.lock",
     ]
-    active = [str(path) for path in locks if path.exists()]
+    parent_run_id = str(os.environ.get("ADVISOR_MIGRATION_PARENT_RUN_ID") or "").strip()
+    active: list[str] = []
+    for path in locks:
+        if not path.exists():
+            continue
+        if path.name == "daily_update.lock" and parent_run_id:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+            if str(payload.get("runId") or "").strip() == parent_run_id:
+                continue
+        active.append(str(path))
     if active:
         raise RuntimeError(f"source update lock exists; package creation is blocked: {active}")
     for name in ("analysis_zh_current.sqlite", "advisor_monitor.sqlite", "update_state.sqlite"):
@@ -305,7 +390,7 @@ def copy_working_tree_code(target: Path) -> dict[str, Any]:
     copied: list[str] = []
 
     def copy_runtime_file(source: Path, relative: Path) -> None:
-        if source.suffix.lower() in {".pyc", ".pyo"} or "__pycache__" in relative.parts:
+        if runtime_file_excluded(relative):
             return
         copy_file(source, target / relative)
         copied.append(relative.as_posix())
@@ -377,10 +462,20 @@ def complete_collection_summary(channel_root: Path, channel: str) -> tuple[Path,
             continue
         if channel == "ttfund":
             complete = bool(payload.get("run_id") and payload.get("strategy_master_rows") and payload.get("daily_rows_total"))
-        else:
+        elif channel == "gffunds":
             complete = payload.get("collection_status") == "success" and bool(
                 payload.get("run_id") and payload.get("strategy_total") and payload.get("daily_rows_total")
             )
+        elif channel in {"gfsec_fima", "gfsec_robot"}:
+            complete = str(payload.get("collection_status") or "").startswith("success") and bool(
+                payload.get("run_id") and payload.get("strategy_total")
+            )
+        elif channel == "qieman":
+            complete = payload.get("state") == "qieman_daily_incremental_collected" and bool(
+                payload.get("run_id") and payload.get("strategy_total")
+            )
+        else:
+            complete = bool(payload.get("run_id"))
         if complete:
             candidates.append((path, payload))
     if not candidates:
@@ -431,6 +526,8 @@ def copy_selected_raw(source_raw: Path, target_raw: Path) -> dict[str, Any]:
         Path("ttfund") / "official_performance_curve",
         Path("ttfund") / "interface_probe",
         Path("gffunds") / "strategy_metadata",
+        Path("gfsec_fima") / "public_api",
+        Path("gfsec_robot") / "public_api",
     ):
         source = latest_run_directory(source_raw / relative)
         if source:
@@ -453,7 +550,46 @@ def copy_selected_raw(source_raw: Path, target_raw: Path) -> dict[str, Any]:
         if source.is_file():
             copy_file(source, target_raw / relative)
             copied.setdefault("files", []).append(relative.as_posix())
+    qieman = copy_qieman_accepted_baseline(source_raw, target_raw)
+    if qieman:
+        copied["trees"].append(qieman["tree"])
+        copied.setdefault("files", []).append(qieman["stateFile"])
+        copied["qiemanAcceptedBaseline"] = qieman
     return copied
+
+
+def copy_qieman_accepted_baseline(source_raw: Path, target_raw: Path) -> dict[str, Any] | None:
+    state_source = source_raw / "qieman" / "accepted_state.json"
+    if not state_source.is_file():
+        return None
+    state = json.loads(state_source.read_text(encoding="utf-8-sig"))
+    run_id = str(state.get("run_id") or "").strip()
+    source_run = Path(str(state.get("history_run_dir") or ""))
+    signed_root = (source_raw / "qieman" / "signed_history").resolve()
+    if not source_run.is_absolute() and run_id:
+        source_run = signed_root / run_id
+    source_run = source_run.resolve()
+    if not source_run.is_dir() or signed_root not in source_run.parents:
+        raise RuntimeError(f"Qieman accepted history baseline is invalid: {source_run}")
+    if not run_id:
+        run_id = source_run.name
+    target_run = target_raw / "qieman" / "signed_history" / run_id
+    file_count = copy_tree(source_run, target_run)
+    if file_count <= 0:
+        raise RuntimeError(f"Qieman accepted history baseline is empty: {source_run}")
+    target_state = dict(state)
+    target_state["run_id"] = run_id
+    target_state["history_run_dir"] = f"signed_history/{run_id}"
+    summary_path = str(target_state.get("summary_path") or "")
+    if summary_path:
+        target_state["summary_path"] = f"qieman/collection_summary/{run_id}/{run_id}.json"
+    atomic_write_json(target_raw / "qieman" / "accepted_state.json", target_state)
+    relative_tree = f"qieman/signed_history/{run_id}"
+    return {
+        "runId": run_id,
+        "tree": {"path": relative_tree, "fileCount": file_count},
+        "stateFile": "qieman/accepted_state.json",
+    }
 
 
 def find_latest(root: Path, name: str) -> Path | None:
@@ -504,18 +640,21 @@ def copy_baseline_reports(target: Path, report_root: Path) -> dict[str, str]:
 
 
 def copy_report_seed(source_root: Path, target_root: Path) -> dict[str, Any]:
-    page = source_root / "basic_data" / STATIC_REPORT_PAGE
-    assets = source_root / "basic_data" / "assets" / STATIC_REPORT_ASSET_DIR
-    copy_file(page, target_root / "basic_data" / STATIC_REPORT_PAGE)
-    asset_count = copy_tree(assets, target_root / "basic_data" / "assets" / STATIC_REPORT_ASSET_DIR)
-    if not asset_count:
-        raise RuntimeError(f"static report assets are missing: {assets}")
-    return {"page": f"basic_data/{STATIC_REPORT_PAGE}", "assetDirectory": f"basic_data/assets/{STATIC_REPORT_ASSET_DIR}", "assetFileCount": asset_count}
+    del source_root, target_root
+    return {
+        "status": "rebuild_required",
+        "reason": "formal_reports_are_rebuilt_from_the_database",
+        "page": None,
+        "assetDirectory": None,
+        "assetFileCount": 0,
+    }
 
 
-def database_summary(path: Path) -> dict[str, Any]:
-    with contextlib.closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=60)) as connection:
-        quick = connection.execute("PRAGMA quick_check").fetchone()[0]
+def database_summary(path: Path, *, quick_check_result: str | None = None) -> dict[str, Any]:
+    with contextlib.closing(
+        sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True, timeout=60)
+    ) as connection:
+        quick = quick_check_result or connection.execute("PRAGMA quick_check").fetchone()[0]
         tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
         counts: dict[str, int] = {}
         for name in (
@@ -648,7 +787,8 @@ def write_checksums(root: Path) -> Path:
 def package_templates(code_root: Path, workspace_root: Path, *, code_source: str) -> None:
     del code_source
     for name in ("00_每日数据更新并发布_唯一入口.bat", "AGENTS.md", "README_AI.md"):
-        copy_file(code_root / name, workspace_root / name)
+        source = WORKSPACE_ROOT / name
+        copy_file(source if source.is_file() else code_root / name, workspace_root / name)
 
 
 def build_locked(args: argparse.Namespace) -> Path:
@@ -690,7 +830,11 @@ def build_locked(args: argparse.Namespace) -> Path:
         else:
             code_snapshot = copy_working_tree_code(code_root)
         package_templates(code_root, stage, code_source=args.code_source)
-        documentation_file_count = copy_tree(code_root / "文档", stage / "文档")
+        documentation_source = WORKSPACE_ROOT / "文档"
+        documentation_file_count = copy_tree(
+            documentation_source if documentation_source.is_dir() else code_root / "文档",
+            stage / "文档",
+        )
 
         database_root = stage / "数据库"
         database_root.mkdir(parents=True)
@@ -705,7 +849,7 @@ def build_locked(args: argparse.Namespace) -> Path:
         normalized_root = stage / "采集数据" / "normalized"
         normalized = [
             copy_normalized_baseline(PROJECT_ROOT / "data" / "normalized", normalized_root, channel)
-            for channel in ("ttfund", "gffunds")
+            for channel in RUNTIME_NORMALIZED_CHANNELS
         ]
         raw = copy_selected_raw(PROJECT_ROOT / "data" / "raw", stage / "采集数据" / "raw")
 
@@ -729,16 +873,25 @@ def build_locked(args: argparse.Namespace) -> Path:
             timeout=1200,
         )
 
-        config = {
-            **DEFAULT_CONFIG,
-            "physicalDeviceId": args.physical_device_id,
-            "codeRemote": git_info["remote"],
-            "codeBranch": git_info["branch"],
-            "codeUpdateMode": "git" if args.code_source == "git" else "syncthing_snapshot",
-            "publishRemote": args.publish_remote,
-            "publishBranch": args.publish_branch,
-        }
+        source_config = load_source_runtime_config()
+        config = {**DEFAULT_CONFIG, **source_config}
+        config.update(
+            {
+                "physicalDeviceId": args.physical_device_id or config.get("physicalDeviceId") or "",
+                "codeRemote": git_info["remote"] or config.get("codeRemote") or "",
+                "codeBranch": git_info["branch"] or config.get("codeBranch") or CODE_BRANCH_DEFAULT,
+                "codeUpdateMode": "git" if args.code_source == "git" else "syncthing_snapshot",
+                "publishRemote": args.publish_remote or config.get("publishRemote") or PUBLISH_REMOTE_DEFAULT,
+                "publishBranch": args.publish_branch or config.get("publishBranch") or PUBLISH_BRANCH_DEFAULT,
+            }
+        )
         atomic_write_json(stage / "本机配置" / "runtime.local.json", config)
+        machine_bound_credentials: list[str] = []
+        for name in ("qieman_stargate_api_key.dpapi", "qieman_stargate_api_key.dpapi.meta.json"):
+            source = WORKSPACE_ROOT / "本机配置" / name
+            if source.is_file():
+                copy_file(source, stage / "本机配置" / name)
+                machine_bound_credentials.append(f"本机配置/{name}")
         baseline_root = stage / "迁移基线"
         baseline_root.mkdir(parents=True, exist_ok=True)
         baseline_reports = copy_baseline_reports(baseline_root, report_root)
@@ -748,7 +901,13 @@ def build_locked(args: argparse.Namespace) -> Path:
             deployment_payload["deployDir"] = "结果文件/全市场投顾分析平台"
             atomic_write_json(baseline_root / "latest_deployment_manifest.json", deployment_payload)
             baseline_reports["latest_deployment_manifest.json"] = "external_formal_report_baseline"
-        db_summary = database_summary(database_root / "analysis_zh_current.sqlite")
+        # sqlite_backup already ran quick_check against this exact target snapshot.
+        # Repeating it here adds tens of minutes on a USB hard disk without adding
+        # an independent integrity guarantee.
+        db_summary = database_summary(
+            database_root / "analysis_zh_current.sqlite",
+            quick_check_result="ok",
+        )
         manifest = {
             "formatVersion": 1,
             "status": "ready",
@@ -765,6 +924,8 @@ def build_locked(args: argparse.Namespace) -> Path:
             "baselineReports": baseline_reports,
             "reportSource": "external_formal_report_baseline",
             "documentationFileCount": documentation_file_count,
+            "machineBoundCredentialFiles": machine_bound_credentials,
+            "machineBoundCredentialNotice": "DPAPI CurrentUser credentials must be revalidated or recreated on the destination computer.",
         }
         atomic_write_json(baseline_root / "migration_manifest.json", manifest)
         if not args.skip_checksums:

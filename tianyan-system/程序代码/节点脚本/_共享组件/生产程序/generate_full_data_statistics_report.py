@@ -350,24 +350,27 @@ def strategy_statistics(conn: sqlite3.Connection) -> dict[str, Any]:
     by_advisor = fetch_all(
         conn,
         """
-        SELECT COALESCE("投顾机构", "未披露") AS "投顾机构", COUNT(*) AS "策略数"
+        SELECT "渠道ID", COALESCE("投顾机构", "未披露") AS "投顾机构", COUNT(*) AS "策略数"
         FROM "策略信息"
-        GROUP BY COALESCE("投顾机构", "未披露")
+        GROUP BY "渠道ID", COALESCE("投顾机构", "未披露")
         """,
     )
     ttfund_advisor = fetch_all(
         conn,
         """
-        SELECT COALESCE("投顾机构", "未披露") AS "投顾机构", COUNT(*) AS "天天策略数"
+        SELECT "渠道ID", COALESCE("投顾机构", "未披露") AS "投顾机构", COUNT(*) AS "天天策略数"
         FROM "策略信息"
         WHERE "渠道ID" = 'ttfund'
-        GROUP BY COALESCE("投顾机构", "未披露")
+        GROUP BY "渠道ID", COALESCE("投顾机构", "未披露")
         """,
     )
     def canonical_top20(rows: list[dict[str, Any]], count_field: str) -> list[dict[str, Any]]:
         totals: Counter[str] = Counter()
         for row in rows:
-            institution = canonical_advisor_institution(row.get("投顾机构")) or "未披露"
+            institution = canonical_advisor_institution(
+                row.get("投顾机构"),
+                row.get("渠道ID"),
+            ) or "未披露"
             totals[institution] += int(row.get(count_field) or 0)
         return [
             {"投顾机构": institution, count_field: count}

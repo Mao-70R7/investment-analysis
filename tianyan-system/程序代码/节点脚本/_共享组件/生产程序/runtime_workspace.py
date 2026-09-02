@@ -450,7 +450,9 @@ def sqlite_backup(source: Path, target: Path) -> None:
         raise FileNotFoundError(source)
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-    temp.unlink(missing_ok=True)
+    temp_sidecars = (Path(f"{temp}-shm"), Path(f"{temp}-wal"))
+    for path in (temp, *temp_sidecars):
+        path.unlink(missing_ok=True)
     try:
         source_conn = sqlite3.connect(f"file:{source.as_posix()}?mode=ro", uri=True, timeout=60)
         target_conn = sqlite3.connect(temp, timeout=60)
@@ -473,7 +475,11 @@ def sqlite_backup(source: Path, target: Path) -> None:
         finally:
             target_conn.close()
             source_conn.close()
-        check_conn = sqlite3.connect(f"file:{temp.as_posix()}?mode=ro", uri=True, timeout=60)
+        check_conn = sqlite3.connect(
+            f"file:{temp.as_posix()}?mode=ro&immutable=1",
+            uri=True,
+            timeout=60,
+        )
         try:
             result = check_conn.execute("PRAGMA quick_check").fetchone()[0]
             if result != "ok":
@@ -482,4 +488,5 @@ def sqlite_backup(source: Path, target: Path) -> None:
             check_conn.close()
         os.replace(temp, target)
     finally:
-        temp.unlink(missing_ok=True)
+        for path in (temp, *temp_sidecars):
+            path.unlink(missing_ok=True)

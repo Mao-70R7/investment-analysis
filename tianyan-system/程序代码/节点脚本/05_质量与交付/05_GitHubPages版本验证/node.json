@@ -8,7 +8,6 @@
     "publish"
   ],
   "criticality": "optional",
-  "failureImpact": "warning",
   "timeoutSeconds": 900,
   "maxProcessAttempts": 1,
   "resourceLock": null,
@@ -19,5 +18,6 @@
     "requiredStatus": "passed"
   },
   "daily": true,
-  "action": "pages_verify"
+  "action": "pages_verify",
+  "failureImpact": "warning"
 }
