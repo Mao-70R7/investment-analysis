@@ -1,0 +1,9 @@
+{
+  "formatVersion": 1,
+  "requiredPythonMajorMinor": [3, 12],
+  "minimumDatabaseUserVersion": 20260712,
+  "maximumDatabaseUserVersion": 20260712,
+  "databaseMigrations": [],
+  "migrationPolicy": "transactional-idempotent-only",
+  "notes": "A newer database schema requires an explicit migration and a successful pre-update backup."
+}

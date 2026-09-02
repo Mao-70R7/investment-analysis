@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "data_audit",
+  "name": "项目完整数据稽核",
+  "phase": "05_质量与交付",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "report_build"
+  ],
+  "criticality": "critical",
+  "timeoutSeconds": 14400,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "项规则",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "data_audit"
+}

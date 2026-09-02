@@ -1,0 +1,86 @@
+{
+  "channel_id": "antfortune",
+  "channel_name": "蚂蚁财富",
+  "provider_type": "platform",
+  "official_site_url": "https://www.antfortune.com/",
+  "android_package": "com.antfortune.wealth",
+  "android_version_analyzed": "10.5.0.8000",
+  "login_required_level": "required",
+  "collectors": {
+    "authorized_app_rpc_normalizer": {
+      "access_level": "login_capture",
+      "script": "scripts/collect_antfortune_raw.py",
+      "raw_dir": "data/raw/antfortune/app_rpc",
+      "expected_fields": [
+        "strategy_rebalance_event",
+        "strategy_rebalance_fund_delta",
+        "strategy_fund_snapshot"
+      ],
+      "notes": "Consumes user-authorized app RPC JSON captures and normalizes fund-level before/after weights. It does not call Ant RPC directly."
+    },
+    "bnt_adjustment": {
+      "access_level": "login",
+      "app_id": "68687202",
+      "operation_type": "com.alipay.ficcbffweb.marcopolo.adjustment.query",
+      "params_template": {
+        "clientOrderId": "{client_order_id}",
+        "useNewHeader": true
+      },
+      "expected_fields": [
+        "adjustmentInfoDate",
+        "adjustmentOriginalPortfolio[].products[].fundCode",
+        "adjustmentOriginalPortfolio[].products[].name",
+        "adjustmentOriginalPortfolio[].products[].originalRatioPercent",
+        "adjustmentOriginalPortfolio[].products[].ratioPercent"
+      ]
+    },
+    "advisor_adjustment_detail": {
+      "access_level": "login",
+      "app_id": "20000793",
+      "operation_type": "com.alipay.wealthbffweb.advisor.transaction.queryAdjustmentDetail",
+      "params_template": {
+        "orderId": "{order_id}",
+        "advisorMainOrderId": "{advisor_main_order_id}"
+      },
+      "expected_fields": [
+        "adjustmentCompare.rebalanceDate",
+        "adjustmentCompare.rebalanceReason",
+        "adjustmentCompare.changeList[].productId",
+        "adjustmentCompare.changeList[].productName",
+        "adjustmentCompare.changeList[].beforeRatio",
+        "adjustmentCompare.changeList[].afterRatio"
+      ]
+    },
+    "portfolio_convert_detail": {
+      "access_level": "login",
+      "app_id": "20000793",
+      "operation_type": "com.alipay.wealthbffweb.fund.portfolio.convertRecord.queryDetail",
+      "params_template": {
+        "productId": "{product_id}",
+        "portfolioCode": "{portfolio_code}",
+        "beforeVersion": "{before_version}",
+        "afterVersion": "{after_version}"
+      },
+      "expected_fields": [
+        "changeList[].productId",
+        "changeList[].productName",
+        "changeList[].beforeRatio",
+        "changeList[].afterRatio",
+        "rebalanceReason"
+      ]
+    },
+    "quarterly_report": {
+      "access_level": "login",
+      "app_id": "68687202",
+      "operation_type": "com.alipay.ficcbffweb.marcopolo.quarterlyReport.query",
+      "params_template": {
+        "reportId": "{report_id}"
+      },
+      "expected_fields": [
+        "assetConfigList[].productList[].productName",
+        "assetConfigList[].productList[].productRate",
+        "assetRatioChart.standard[].assetConfigList"
+      ]
+    }
+  }
+}

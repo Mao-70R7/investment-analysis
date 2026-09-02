@@ -1,0 +1,17 @@
+requests>=2.33,<3
+pandas>=3.0,<4
+numpy>=2.4,<3
+openpyxl>=3.1,<4
+matplotlib>=3.10,<4
+seaborn>=0.13,<1
+pdfplumber>=0.11,<1
+playwright>=1.59,<2
+beautifulsoup4>=4.14,<5
+lxml>=6.0,<7
+Pillow>=11,<13
+reportlab>=4.4,<5
+akshare>=1.18,<2
+pypdf>=6,<7
+PyYAML>=6,<7
+xlsxwriter>=3.2,<4
+mitmproxy>=12,<13

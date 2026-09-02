@@ -1,0 +1,109 @@
+{
+  "channel_id": "zocaifu",
+  "channel_name": "中欧财富/中欧钱滚滚",
+  "provider_type": "wealth_subsidiary",
+  "official_site_url": "https://www.zocaifu.com/",
+  "mobile_api_base_url": "https://mobile.qiangungun.com",
+  "h5_site_url": "https://galaxy.qiangungun.com/galaxy/share-react/build/index.html#/tab/fof",
+  "android_package": "com.qiangungun",
+  "login_required_level": "partial",
+  "collectors": {
+    "public_advisor_index": {
+      "access_level": "public",
+      "method": "POST",
+      "url": "https://mobile.qiangungun.com/v1/fof/queryAdPageStrategyInfo",
+      "body": {
+        "appRecommend": true,
+        "investTypeCodeList": [
+          "00",
+          "04"
+        ]
+      },
+      "expected_fields": [
+        "strategy_master",
+        "strategy_interval_performance",
+        "benchmark_description"
+      ]
+    },
+    "public_product_detail": {
+      "access_level": "public",
+      "method": "POST",
+      "url": "https://mobile.qiangungun.com/v2/product/detail",
+      "body_template": {
+        "productId": "{fof_id}"
+      },
+      "expected_fields": [
+        "strategy_master",
+        "strategy_fund_snapshot",
+        "asset_allocation",
+        "current_rebalance_preview"
+      ]
+    },
+    "public_daily_performance": {
+      "access_level": "public",
+      "method": "POST",
+      "url": "https://mobile.qiangungun.com/v1/fof/listDailyRiseAndFall",
+      "body_template": {
+        "fofId": "{fof_id}",
+        "pageNo": 1,
+        "pageSize": 100
+      },
+      "expected_fields": [
+        "strategy_performance_daily"
+      ]
+    },
+    "public_daily_nav": {
+      "access_level": "public",
+      "method": "POST",
+      "url": "https://mobile.qiangungun.com/v1/fof/queryFofNav",
+      "body_template": {
+        "productId": "{fof_id}",
+        "startDate": "",
+        "endDate": "",
+        "fofRateInterval": "total",
+        "hasTradeFlag": true
+      },
+      "expected_fields": [
+        "strategy_nav_daily",
+        "benchmark_description"
+      ]
+    },
+    "public_rebalance": {
+      "access_level": "public",
+      "method": "POST",
+      "url": "https://mobile.qiangungun.com/v1/product/queryFofRebalanceInfo",
+      "body_template": {
+        "fofId": "{fof_id}"
+      },
+      "expected_fields": [
+        "strategy_rebalance_event",
+        "strategy_rebalance_fund_delta"
+      ]
+    },
+    "public_underlying_fund_nav": {
+      "access_level": "public",
+      "method": "POST",
+      "url": "https://mobile.qiangungun.com/v1/product/nav/page",
+      "body_template": {
+        "productId": "{internal_product_id}",
+        "pageNo": 1,
+        "pageSize": 1,
+        "startDate": null,
+        "endDate": null
+      },
+      "expected_fields": [
+        "fund_nav",
+        "fund_nav_date"
+      ]
+    },
+    "android_app": {
+      "access_level": "app",
+      "package_name": "com.qiangungun",
+      "status": "blocked_until_adb_device_visible",
+      "expected_fields": [
+        "app_navigation_validation",
+        "app_only_api_delta"
+      ]
+    }
+  }
+}

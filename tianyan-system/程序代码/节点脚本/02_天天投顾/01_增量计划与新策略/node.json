@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "ttfund_plan_component",
+  "name": "天天增量计划与新策略组件",
+  "phase": "02_天天投顾",
+  "entrypoint": "run.ps1",
+  "dependencies": [],
+  "criticality": "optional",
+  "timeoutSeconds": 60,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "个计划",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": false,
+  "action": "component_info"
+}

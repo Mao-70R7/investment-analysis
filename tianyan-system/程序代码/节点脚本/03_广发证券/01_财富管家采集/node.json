@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "gfsec_fima_collect",
+  "name": "广发证券财富管家采集",
+  "phase": "03_广发证券",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "preflight_database"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 3600,
+  "maxProcessAttempts": 2,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "个底层组合",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "gfsec_fima_collect",
+  "failureImpact": "channel"
+}

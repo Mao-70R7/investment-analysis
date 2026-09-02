@@ -1,0 +1,55 @@
+{
+  "channel_id": "southern",
+  "channel_name": "南方基金/司南投顾",
+  "provider_type": "fund_company",
+  "official_site_url": "https://www.nffund.com/new/snzt/index.html",
+  "mobile_h5_url": "https://m.nffund.com/new/index.html?tabIndex=RoboHomePage",
+  "login_required_level": "partial",
+  "collectors": {
+    "public_h5_strategy": {
+      "access_level": "public",
+      "method": "official_page_request_client",
+      "function_codes": [
+        "IA049",
+        "IA050",
+        "IA028",
+        "IA009",
+        "IA006",
+        "IA027",
+        "IA032",
+        "FQ004"
+      ],
+      "expected_fields": [
+        "strategy_master",
+        "strategy_performance_daily",
+        "strategy_fund_snapshot_with_exact_fund_weight",
+        "strategy_asset_allocation_snapshot",
+        "strategy_notice_metadata",
+        "fund_public_dim"
+      ],
+      "status": "validated_partial_20260813"
+    },
+    "auth_adjustment_progress": {
+      "access_level": "login",
+      "function_code": "IA029",
+      "expected_fields": [
+        "customer_combination_adjustment_progress"
+      ],
+      "status": "blocked_login_required_not_validated_as_history"
+    },
+    "auth_advisor_service_history": {
+      "access_level": "login",
+      "function_code": "MSG002",
+      "expected_fields": [
+        "strategy_notice",
+        "rebalance_reason_candidate"
+      ],
+      "status": "blocked_login_required"
+    },
+    "legacy_public_landing_probe": {
+      "access_level": "public",
+      "url": "https://www.nffund.com/new/snzt/index.html",
+      "status": "retained_not_full_collector"
+    }
+  }
+}

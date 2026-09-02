@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "strategy_governance",
+  "name": "策略治理业绩风险分类",
+  "phase": "04_数据加工",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "index_benchmark"
+  ],
+  "criticality": "critical",
+  "timeoutSeconds": 21600,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "个步骤",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "strategy_governance"
+}

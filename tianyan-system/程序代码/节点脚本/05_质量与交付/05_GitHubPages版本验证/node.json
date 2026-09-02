@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "pages_verify",
+  "name": "GitHub Pages版本验证",
+  "phase": "05_质量与交付",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "publish"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 900,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "次检查",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "pages_verify",
+  "failureImpact": "warning"
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "ttfund_incremental",
+  "name": "天天失败重试与批次验收",
+  "phase": "02_天天投顾",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "device_select"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 28800,
+  "maxProcessAttempts": 1,
+  "resourceLock": "device",
+  "supportsResume": true,
+  "progressUnit": "只策略",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "ttfund_incremental",
+  "failureImpact": "channel"
+}

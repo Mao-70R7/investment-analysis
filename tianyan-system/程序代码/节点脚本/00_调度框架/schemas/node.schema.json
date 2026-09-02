@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schemaVersion", "id", "name", "phase", "entrypoint", "dependencies",
+    "criticality", "timeoutSeconds", "maxProcessAttempts", "resourceLock",
+    "supportsResume", "progressUnit", "validator"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "name": {"type": "string", "minLength": 1},
+    "phase": {"type": "string", "minLength": 1},
+    "entrypoint": {"type": "string", "minLength": 1},
+    "dependencies": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "criticality": {"enum": ["critical", "optional", "publish"]},
+    "failureImpact": {"enum": ["warning", "channel"]},
+    "allowFailedOptionalDependencies": {"type": "boolean"},
+    "timeoutSeconds": {"type": "integer", "minimum": 1},
+    "maxProcessAttempts": {"type": "integer", "minimum": 1},
+    "resourceLock": {"type": ["string", "null"]},
+    "supportsResume": {"type": "boolean"},
+    "progressUnit": {"type": "string"},
+    "validator": {"type": "object"}
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "gf_supplemental_gate",
+  "name": "广发证券历史接口批次验收",
+  "phase": "03_广发渠道补充",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "gf_supplemental_collect"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 600,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "个渠道",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "gf_supplemental_gate",
+  "failureImpact": "channel"
+}

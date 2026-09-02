@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "gfsec_fima_gate",
+  "name": "广发证券财富管家批次验收",
+  "phase": "03_广发证券",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "gfsec_fima_collect"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 600,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "项检查",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "gfsec_fima_gate",
+  "failureImpact": "channel"
+}

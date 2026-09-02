@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "device_select",
+  "name": "真机选择与预检",
+  "phase": "01_运行预检",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "source_readiness"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 900,
+  "maxProcessAttempts": 1,
+  "resourceLock": "device",
+  "supportsResume": true,
+  "progressUnit": "台设备",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "device_select",
+  "failureImpact": "warning"
+}

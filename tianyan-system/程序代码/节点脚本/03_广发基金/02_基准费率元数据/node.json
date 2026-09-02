@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "gffunds_metadata",
+  "name": "广发基准费率元数据",
+  "phase": "03_广发基金",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "process_load"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 7200,
+  "maxProcessAttempts": 2,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "只策略",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "gffunds_metadata",
+  "failureImpact": "warning"
+}

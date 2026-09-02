@@ -1,0 +1,1349 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AI选策略 · 业务实体图谱</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --surface: #ffffff;
+      --surface-2: #f8fafc;
+      --surface-3: #eef4f7;
+      --text: #10213a;
+      --muted: #607086;
+      --subtle: #8a97a8;
+      --border: #d8e0e8;
+      --border-strong: #b9c5d2;
+      --teal: #078984;
+      --teal-strong: #006d69;
+      --teal-soft: #e6f7f5;
+      --blue: #3677d9;
+      --blue-soft: #edf4ff;
+      --amber: #c58100;
+      --amber-soft: #fff6df;
+      --coral: #d95243;
+      --coral-soft: #fff0ed;
+      --violet: #6b5ec6;
+      --violet-soft: #f2efff;
+      --shadow: 0 12px 34px rgba(18, 39, 65, .08);
+      --shadow-soft: 0 5px 16px rgba(18, 39, 65, .06);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --header-h: 68px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      line-height: 1.62;
+    }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    a { color: var(--teal-strong); }
+    :focus-visible { outline: 3px solid rgba(7, 137, 132, .25); outline-offset: 2px; }
+
+    .app-header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      min-height: var(--header-h);
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      padding: 0 26px;
+      background: rgba(255,255,255,.97);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+    .brand {
+      min-width: max-content;
+      font-size: 22px;
+      font-weight: 780;
+      letter-spacing: -.02em;
+    }
+    .brand-dot { color: var(--teal); }
+    .top-nav {
+      display: flex;
+      align-self: stretch;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .top-nav::-webkit-scrollbar { display: none; }
+    .nav-tab {
+      position: relative;
+      min-width: max-content;
+      border: 0;
+      background: transparent;
+      padding: 0 16px;
+      font-size: 14px;
+      font-weight: 650;
+      color: var(--muted);
+    }
+    .nav-tab::after {
+      content: "";
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 0;
+      height: 3px;
+      background: transparent;
+      border-radius: 3px 3px 0 0;
+    }
+    .nav-tab:hover { color: var(--text); }
+    .nav-tab.active { color: var(--teal-strong); }
+    .nav-tab.active::after { background: var(--teal); }
+    .header-meta {
+      margin-left: auto;
+      min-width: max-content;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+    .header-meta strong { display: block; color: var(--text); font-size: 13px; }
+
+    main { max-width: 1880px; margin: 0 auto; padding: 22px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .section-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 20px;
+      margin: 2px 0 18px;
+    }
+    .section-heading h1,
+    .section-heading h2 { margin: 0; font-size: 24px; line-height: 1.3; letter-spacing: -.02em; }
+    .section-heading p { margin: 5px 0 0; color: var(--muted); max-width: 860px; }
+    .section-note { color: var(--muted); font-size: 12px; text-align: right; }
+
+    .overview-shell {
+      display: grid;
+      grid-template-columns: 190px minmax(640px, 1fr) 340px;
+      gap: 14px;
+      min-height: calc(100vh - 124px);
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-soft);
+    }
+    .layer-panel { padding: 14px 10px; }
+    .panel-title {
+      margin: 0 8px 10px;
+      font-size: 13px;
+      font-weight: 760;
+      color: var(--text);
+    }
+    .layer-list { display: grid; gap: 5px; }
+    .layer-button {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      align-items: center;
+      gap: 8px;
+      min-height: 50px;
+      padding: 7px 9px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      text-align: left;
+      color: var(--muted);
+    }
+    .layer-button:hover { background: var(--surface-2); color: var(--text); }
+    .layer-button.active { background: var(--teal-soft); border-color: #9fd8d3; color: var(--teal-strong); }
+    .layer-code { font-weight: 780; }
+    .layer-name { font-size: 12px; line-height: 1.35; }
+    .summary-rail {
+      margin-top: 16px;
+      padding: 14px 10px 4px;
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 10px;
+    }
+    .summary-rail div { display: grid; grid-template-columns: 42px 1fr; align-items: baseline; }
+    .summary-rail strong { color: var(--teal-strong); font-size: 22px; line-height: 1; }
+    .summary-rail span { color: var(--muted); font-size: 12px; }
+
+    .graph-panel { overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+    .graph-toolbar {
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .search-wrap {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      min-width: 180px;
+      height: 40px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .search-wrap svg { width: 18px; height: 18px; margin-left: 12px; color: var(--muted); }
+    .search-wrap input {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      padding: 0 10px;
+      font-size: 13px;
+    }
+    .select-control {
+      height: 40px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      padding: 0 32px 0 12px;
+      font-size: 13px;
+    }
+    .icon-button, .text-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 40px;
+      height: 40px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--muted);
+    }
+    .icon-button:hover, .text-button:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-2); }
+    .icon-button svg { width: 18px; height: 18px; }
+    .text-button { padding: 0 13px; font-size: 12px; min-width: max-content; }
+    .primary-button { background: var(--teal); border-color: var(--teal); color: #fff; }
+    .primary-button:hover { background: var(--teal-strong); color: #fff; }
+    .graph-stage {
+      position: relative;
+      flex: 1;
+      min-height: 590px;
+      background-color: #fff;
+      background-image:
+        linear-gradient(#eef2f6 1px, transparent 1px),
+        linear-gradient(90deg, #eef2f6 1px, transparent 1px);
+      background-size: 28px 28px;
+      overflow: hidden;
+    }
+    #entityGraph { width: 100%; height: 100%; display: block; touch-action: pan-y; }
+    .graph-help {
+      position: absolute;
+      left: 14px;
+      bottom: 12px;
+      padding: 7px 9px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,.95);
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .graph-node { cursor: pointer; }
+    .graph-node rect { transition: stroke-width .16s ease, filter .16s ease, opacity .16s ease; }
+    .graph-node:hover rect,
+    .graph-node.selected rect { stroke-width: 3; filter: drop-shadow(0 6px 8px rgba(17, 45, 74, .14)); }
+    .graph-node.dim { opacity: .18; }
+    .graph-edge { stroke: #8291a4; stroke-width: 1.65; fill: none; marker-end: url(#arrow); }
+    .graph-edge.highlight { stroke: var(--teal); stroke-width: 2.5; }
+    .graph-edge.dim { opacity: .12; }
+    .edge-label {
+      fill: #536377;
+      font-size: 12px;
+      font-weight: 600;
+      paint-order: stroke;
+      stroke: #fff;
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+    .node-label { font-size: 14px; font-weight: 750; text-anchor: middle; dominant-baseline: central; }
+    .node-sub { font-size: 10px; font-weight: 560; text-anchor: middle; fill: #68778a; }
+
+    .inspector { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+    .inspector-head {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .entity-avatar {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--teal-soft);
+      border: 1px solid #9fd8d3;
+      color: var(--teal-strong);
+      font-weight: 780;
+      font-size: 18px;
+      flex: 0 0 auto;
+    }
+    .inspector-head h2 { margin: 0; font-size: 20px; line-height: 1.2; }
+    .inspector-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .inspector-body { overflow: auto; padding: 16px; }
+    .definition {
+      padding: 12px 0 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .definition h3, .field-section h3, .relation-section h3 {
+      margin: 0 0 7px;
+      font-size: 13px;
+    }
+    .definition p { margin: 0; color: #34465d; font-size: 13px; }
+    .grain {
+      display: grid;
+      grid-template-columns: 70px 1fr;
+      margin-top: 11px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .grain strong { color: var(--text); }
+    .field-section, .relation-section { padding: 16px 0; border-bottom: 1px solid var(--border); }
+    .field-list { display: grid; gap: 6px; }
+    .field-row {
+      display: grid;
+      grid-template-columns: 1fr max-content;
+      gap: 10px;
+      align-items: center;
+      min-height: 32px;
+      padding: 5px 8px;
+      border-radius: 6px;
+      background: var(--surface-2);
+      font-size: 12px;
+    }
+    .field-type { color: var(--muted); }
+    .relation-list { display: grid; gap: 7px; }
+    .relation-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px dashed var(--border);
+      font-size: 12px;
+    }
+    .relation-row:last-child { border-bottom: 0; }
+    .relation-row span { color: var(--muted); }
+
+    .query-flow {
+      grid-column: 1 / -1;
+      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 12px;
+      align-items: center;
+    }
+    .query-flow h3 { margin: 0; font-size: 14px; }
+    .flow-steps { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .flow-step {
+      flex: 1 1 0;
+      min-width: 95px;
+      min-height: 46px;
+      display: grid;
+      place-items: center;
+      padding: 7px 9px;
+      border: 1px solid #9fd8d3;
+      border-radius: var(--radius-sm);
+      background: var(--teal-soft);
+      color: var(--teal-strong);
+      font-weight: 700;
+      font-size: 12px;
+      text-align: center;
+    }
+    .flow-step.model { border-color: #c7bff2; background: var(--violet-soft); color: var(--violet); }
+    .flow-arrow { color: var(--subtle); font-size: 18px; }
+
+    .stats-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 1px;
+      border: 1px solid var(--border);
+      background: var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .stat-item { background: var(--surface); padding: 18px 20px; }
+    .stat-item strong { display: block; color: var(--teal-strong); font-size: 28px; line-height: 1; }
+    .stat-item span { display: block; color: var(--muted); margin-top: 6px; font-size: 12px; }
+
+    .layer-map {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(120px, 1fr));
+      gap: 8px;
+      margin-bottom: 18px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .layer-card {
+      position: relative;
+      min-width: 126px;
+      padding: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-top: 4px solid var(--teal);
+      border-radius: var(--radius-sm);
+    }
+    .layer-card::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -9px;
+      width: 9px;
+      border-top: 1px solid var(--border-strong);
+    }
+    .layer-card:last-child::after { display: none; }
+    .layer-card strong { display: block; font-size: 15px; }
+    .layer-card span { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+    .toolbar-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .toolbar-line .search-wrap { max-width: 460px; background: var(--surface); }
+    .entity-groups { display: grid; gap: 18px; }
+    .entity-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .entity-group-head { padding: 13px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+    .entity-group-head h3 { margin: 0; font-size: 15px; }
+    .entity-group-head span { color: var(--muted); font-size: 12px; }
+    .entity-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .entity-card {
+      min-height: 176px;
+      padding: 16px;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      text-align: left;
+    }
+    .entity-card:nth-child(3n) { border-right: 0; }
+    .entity-card:hover { background: var(--surface-2); }
+    .entity-card h4 { margin: 0; font-size: 16px; }
+    .entity-card .meta { margin: 4px 0 8px; color: var(--teal-strong); font-size: 11px; font-weight: 700; }
+    .entity-card p { margin: 0; color: var(--muted); font-size: 12px; }
+    .entity-card .field-preview { margin-top: 10px; color: #33465c; font-size: 11px; line-height: 1.6; }
+
+    .data-table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: auto;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #edf2f6;
+      color: #31445a;
+      text-align: left;
+      font-size: 12px;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--border-strong);
+      white-space: nowrap;
+    }
+    td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 12px; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: var(--surface-2); }
+    .status-label {
+      display: inline-block;
+      padding: 2px 7px;
+      border: 1px solid #9fd8d3;
+      border-radius: 5px;
+      background: var(--teal-soft);
+      color: var(--teal-strong);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .status-label.internal { border-color: #cbd4de; background: #f3f5f7; color: #667588; }
+
+    .mapping-grid { display: grid; gap: 10px; }
+    details.mapping-group, details.dictionary-group, details.route-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    details summary {
+      list-style: none;
+      cursor: pointer;
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 15px;
+      font-weight: 720;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::after {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg);
+      transition: transform .16s ease;
+      color: var(--muted);
+    }
+    details[open] summary::after { transform: rotate(225deg); }
+    .mapping-count { color: var(--teal-strong); font-size: 12px; margin-left: auto; }
+    .field-cloud { padding: 0 15px 15px; display: flex; flex-wrap: wrap; gap: 7px; }
+    .field-chip {
+      padding: 5px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      font-size: 11px;
+    }
+    .field-chip.internal { color: var(--muted); border-style: dashed; }
+
+    .dictionary-layout {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 14px;
+    }
+    .dictionary-nav { padding: 10px; position: sticky; top: 90px; align-self: start; }
+    .dictionary-nav button {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      padding: 10px;
+      border-radius: 7px;
+      text-align: left;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .dictionary-nav button.active { background: var(--teal-soft); color: var(--teal-strong); font-weight: 720; }
+    .dictionary-content { display: grid; gap: 10px; }
+    .dictionary-body { padding: 0 15px 15px; }
+    .dictionary-body p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+
+    .route-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, .8fr); gap: 14px; }
+    .route-list { display: grid; gap: 10px; }
+    .route-body { padding: 0 15px 15px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .route-cell { padding: 10px; background: var(--surface-2); border-radius: 7px; font-size: 11px; }
+    .route-cell strong { display: block; margin-bottom: 4px; font-size: 12px; }
+    .cost-panel { padding: 18px; align-self: start; position: sticky; top: 90px; }
+    .cost-panel h3 { margin: 0 0 12px; font-size: 17px; }
+    .cost-rule { display: grid; grid-template-columns: 54px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .cost-rule:last-child { border-bottom: 0; }
+    .cost-number { color: var(--teal-strong); font-size: 26px; font-weight: 800; line-height: 1; }
+    .cost-rule strong { display: block; font-size: 13px; }
+    .cost-rule p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+
+    .quality-notice {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--coral);
+      background: var(--coral-soft);
+      color: #6b3029;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      font-size: 12px;
+    }
+    .quality-notice strong { color: #8e3328; }
+    footer { max-width: 1880px; margin: 0 auto; padding: 0 22px 26px; color: var(--muted); font-size: 11px; }
+
+    .mobile-actions { display: none; }
+
+    @media (max-width: 1180px) {
+      .overview-shell { grid-template-columns: 160px minmax(500px, 1fr) 300px; }
+      .header-meta { display: none; }
+      .entity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .entity-card:nth-child(3n) { border-right: 1px solid var(--border); }
+      .entity-card:nth-child(2n) { border-right: 0; }
+    }
+
+    @media (max-width: 820px) {
+      :root { --header-h: auto; }
+      body { font-size: 13px; }
+      .app-header {
+        position: sticky;
+        display: block;
+        padding: 12px 14px 0;
+      }
+      .brand { font-size: 19px; padding-bottom: 10px; text-align: center; }
+      .top-nav { height: 46px; margin: 0 -14px; padding: 0 8px; border-top: 1px solid var(--border); }
+      .nav-tab { padding: 0 12px; font-size: 13px; }
+      .nav-tab::after { left: 12px; right: 12px; }
+      main { padding: 12px; }
+      .section-heading { display: block; margin-bottom: 12px; }
+      .section-heading h1, .section-heading h2 { font-size: 20px; }
+      .section-note { text-align: left; margin-top: 5px; }
+      .stats-strip { grid-template-columns: repeat(2, 1fr); }
+      .stat-item { padding: 14px; }
+      .stat-item strong { font-size: 23px; }
+      .overview-shell { display: block; min-height: 0; }
+      .layer-panel {
+        display: block;
+        margin-bottom: 10px;
+        padding: 8px;
+        overflow-x: auto;
+        box-shadow: none;
+      }
+      .layer-panel .panel-title, .summary-rail { display: none; }
+      .layer-list { display: flex; min-width: 670px; gap: 5px; }
+      .layer-button {
+        display: block;
+        min-width: 76px;
+        min-height: 44px;
+        text-align: center;
+        padding: 6px;
+      }
+      .layer-code { display: block; }
+      .layer-name { font-size: 10px; }
+      .graph-panel { box-shadow: none; }
+      .graph-toolbar { flex-wrap: wrap; padding: 9px; }
+      .graph-toolbar .search-wrap { flex-basis: calc(100% - 54px); }
+      .select-control { flex: 1; }
+      .graph-stage { min-height: 520px; }
+      .graph-help { display: none; }
+      .inspector { margin-top: 10px; box-shadow: none; }
+      .inspector-body { max-height: none; }
+      .query-flow { margin-top: 10px; grid-template-columns: 1fr; box-shadow: none; }
+      .flow-steps { overflow-x: auto; padding-bottom: 5px; }
+      .flow-step { min-width: 108px; }
+      .mobile-actions {
+        display: grid;
+        grid-template-columns: 1fr 1.4fr 1fr;
+        gap: 7px;
+        position: sticky;
+        bottom: 8px;
+        z-index: 20;
+        margin-top: 10px;
+        padding: 7px;
+        background: rgba(255,255,255,.96);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+      .mobile-actions button { min-height: 46px; border: 1px solid var(--border); background: #fff; border-radius: 8px; font-weight: 700; font-size: 12px; }
+      .mobile-actions button.primary-button { background: var(--teal); color: #fff; border-color: var(--teal); }
+      .entity-grid { grid-template-columns: 1fr; }
+      .entity-card { min-height: auto; border-right: 0 !important; }
+      .dictionary-layout, .route-layout { grid-template-columns: 1fr; }
+      .dictionary-nav { position: static; display: flex; overflow-x: auto; padding: 7px; }
+      .dictionary-nav button { min-width: max-content; width: auto; }
+      .cost-panel { position: static; }
+      .route-body { grid-template-columns: 1fr 1fr; }
+      .data-table-wrap { border-radius: 8px; }
+      th, td { min-width: 130px; }
+      .quality-notice { margin-top: 12px; }
+    }
+
+    @media (max-width: 440px) {
+      .stats-strip { grid-template-columns: 1fr 1fr; }
+      .graph-stage { min-height: 500px; }
+      .entity-avatar { width: 38px; height: 38px; }
+      .inspector-head { padding: 13px; }
+      .inspector-body { padding: 13px; }
+      .route-body { grid-template-columns: 1fr; }
+      .mobile-actions { grid-template-columns: 1fr 1.25fr 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">AI选策略 <span class="brand-dot">·</span> 业务实体图谱</div>
+    <nav class="top-nav" aria-label="页面分区">
+      <button class="nav-tab active" data-view="overview">总览</button>
+      <button class="nav-tab" data-view="entities">业务实体</button>
+      <button class="nav-tab" data-view="relations">关系字典</button>
+      <button class="nav-tab" data-view="fields">字段归属</button>
+      <button class="nav-tab" data-view="dictionaries">业务字典</button>
+      <button class="nav-tab" data-view="routes">问题路由</button>
+    </nav>
+    <div class="header-meta"><strong>业务优先设计 v5</strong>口径更新：2026-08-08</div>
+  </header>
+
+  <main>
+    <section class="view active" id="view-overview">
+      <div class="overview-shell">
+        <aside class="panel layer-panel" aria-label="业务分层">
+          <h2 class="panel-title">业务分层</h2>
+          <div class="layer-list" id="layerList"></div>
+          <div class="summary-rail">
+            <div><strong>8</strong><span>核心处理层</span></div>
+            <div><strong>28</strong><span>业务数据实体</span></div>
+            <div><strong>8</strong><span>问答语义对象</span></div>
+            <div><strong>1</strong><span>统一基准权益分档</span></div>
+          </div>
+        </aside>
+
+        <section class="panel graph-panel" aria-label="业务实体关系图">
+          <div class="graph-toolbar">
+            <label class="search-wrap">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <input id="graphSearch" type="search" placeholder="搜索实体、字段或关系" aria-label="搜索实体、字段或关系">
+            </label>
+            <select class="select-control" id="domainFilter" aria-label="领域筛选">
+              <option value="all">全部领域</option>
+              <option value="object">业务对象</option>
+              <option value="strategy">策略治理</option>
+              <option value="performance">业绩与风险</option>
+              <option value="portfolio">持仓与调仓</option>
+              <option value="fund">基金与穿透</option>
+            </select>
+            <button class="icon-button" id="zoomIn" aria-label="放大关系图">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+            <button class="icon-button" id="zoomOut" aria-label="缩小关系图">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+            <button class="text-button" id="zoomReset">重置</button>
+          </div>
+          <div class="graph-stage">
+            <svg id="entityGraph" role="img" aria-labelledby="graphTitle graphDesc">
+              <title id="graphTitle">AI选策略核心业务实体关系图</title>
+              <desc id="graphDesc">策略位于中心，连接销售渠道、投顾机构、策略系列、治理、业绩、风险、基准、配置画像、持仓、调仓、信号和基金。选择节点可以查看业务字段和关系。</desc>
+            </svg>
+            <div class="graph-help">选择节点查看字段；搜索会聚焦相关实体；重要信息无需悬停。</div>
+          </div>
+        </section>
+
+        <aside class="panel inspector" aria-live="polite">
+          <div class="inspector-head">
+            <div class="entity-avatar" id="entityAvatar">策</div>
+            <div><h2 id="entityTitle">策略</h2><p id="entityMeta">业务对象 · 每策略一条</p></div>
+          </div>
+          <div class="inspector-body">
+            <section class="definition">
+              <h3>业务定义</h3>
+              <p id="entityDefinition"></p>
+              <div class="grain"><strong>业务粒度</strong><span id="entityGrain"></span></div>
+            </section>
+            <section class="field-section">
+              <h3>关键业务字段 <span id="fieldCount"></span></h3>
+              <div class="field-list" id="fieldList"></div>
+            </section>
+            <section class="relation-section">
+              <h3>直接关系 <span id="relationCount"></span></h3>
+              <div class="relation-list" id="relationList"></div>
+            </section>
+          </div>
+        </aside>
+
+        <section class="panel query-flow" aria-label="确定性查询流程">
+          <h3>确定性查询流程</h3>
+          <div class="flow-steps">
+            <div class="flow-step">本地字典</div><span class="flow-arrow">→</span>
+            <div class="flow-step">本地召回</div><span class="flow-arrow">→</span>
+            <div class="flow-step">歧义判断</div><span class="flow-arrow">→</span>
+            <div class="flow-step model">本地 0 次 / 模型固定 2 轮</div><span class="flow-arrow">→</span>
+            <div class="flow-step">查询执行</div><span class="flow-arrow">→</span>
+            <div class="flow-step">业务答案</div>
+          </div>
+        </section>
+      </div>
+      <div class="mobile-actions" aria-label="移动端快捷操作">
+        <button data-mobile-view="entities">实体列表</button>
+        <button class="primary-button" data-mobile-view="routes">智能查询</button>
+        <button data-mobile-view="relations">关系探索</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-entities">
+      <div class="section-heading">
+        <div><h1>业务实体</h1><p>28 个业务数据实体只保留可解释、可筛选、可比较的业务信息；采集方式、内部状态和技术追踪字段不进入业务图谱。</p></div>
+        <div class="section-note">点击实体卡片可回到关系图并查看全部字段与直接关系</div>
+      </div>
+      <div class="stats-strip">
+        <div class="stat-item"><strong>5</strong><span>机构与主业务对象</span></div>
+        <div class="stat-item"><strong>18</strong><span>策略与组合事实</span></div>
+        <div class="stat-item"><strong>4</strong><span>基金与穿透实体</span></div>
+        <div class="stat-item"><strong>1</strong><span>经营统计实体</span></div>
+      </div>
+      <div class="toolbar-line">
+        <label class="search-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="entitySearch" type="search" placeholder="搜索实体、定义或字段" aria-label="搜索业务实体">
+        </label>
+      </div>
+      <div class="entity-groups" id="entityGroups"></div>
+    </section>
+
+    <section class="view" id="view-relations">
+      <div class="section-heading">
+        <div><h1>关系字典</h1><p>所有共享、继承和穿透都必须落在明确关系上。母子策略的业绩、基准、持仓和调仓分别验证，不能一条关系全量继承。</p></div>
+        <div class="section-note">基数说明：1:N 一对多；N:M 多对多</div>
+      </div>
+      <div class="toolbar-line">
+        <label class="search-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="relationSearch" type="search" placeholder="搜索关系、实体或生效规则" aria-label="搜索关系">
+        </label>
+      </div>
+      <div class="data-table-wrap">
+        <table>
+          <thead><tr><th>起点实体</th><th>业务关系</th><th>目标实体</th><th>基数</th><th>业务含义</th><th>生效规则</th><th>用户可见表达</th></tr></thead>
+          <tbody id="relationTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="view" id="view-fields">
+      <div class="section-heading">
+        <div><h1>业务属性目录</h1><p>只列业务用户会用于筛选、比较、解释和决策的属性。内部主键、采集来源、可绘图标记、推断标记、置信度和执行路径保留在系统层，不进入本图谱。</p></div>
+        <div class="section-note">业务属性可组合计算；不等同于底层物理字段总表</div>
+      </div>
+      <div class="toolbar-line">
+        <label class="search-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16.5 16.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="fieldSearch" type="search" placeholder="搜索页面字段" aria-label="搜索页面字段">
+        </label>
+        <button class="text-button" id="expandFieldGroups">全部展开</button>
+        <button class="text-button" id="collapseFieldGroups">全部折叠</button>
+      </div>
+      <div class="mapping-grid" id="fieldMapping"></div>
+    </section>
+
+    <section class="view" id="view-dictionaries">
+      <div class="section-heading">
+        <div><h1>业务字典</h1><p>模型只能从字典候选中选择，不能创造机构、分类、枚举、单位和空值含义。动态名称字典在每次发布时离线生成。</p></div>
+        <div class="section-note">字典覆盖名称归一、策略分类、风险、基准、质量、空值、操作符与时间</div>
+      </div>
+      <div class="dictionary-layout">
+        <aside class="panel dictionary-nav" id="dictionaryNav"></aside>
+        <div class="dictionary-content" id="dictionaryContent"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-routes">
+      <div class="section-heading">
+        <div><h1>用户问题如何连接业务实体</h1><p>页面先做业务实体路由，再只展开相关实体字段卡生成筛选计划；最终筛选和说明由本地程序执行。</p></div>
+        <div class="section-note">常见问题 0 次；需要模型时固定两轮：第 1 轮识别实体，第 2 轮生成受约束筛选计划</div>
+      </div>
+      <div class="route-layout">
+        <div class="route-list" id="routeList"></div>
+        <aside class="panel cost-panel">
+          <h3>模型调用控制</h3>
+          <div class="cost-rule"><div class="cost-number">0</div><div><strong>标准业务筛选</strong><p>机构、策略、业绩、回撤、持仓、调仓、排序和统计由本地字典与规则完成。</p></div></div>
+          <div class="cost-rule"><div class="cost-number">2</div><div><strong>复杂业务表达</strong><p>第 1 轮只看核心图谱并返回实体、关系和条件片段；第 2 轮只看相关字段卡并输出严格筛选 JSON，不进行第三次重试。</p></div></div>
+          <div class="cost-rule"><div class="cost-number">0</div><div><strong>日期与指标计算</strong><p>日期、比例、收益、回撤、换手率、排名和 SQL 始终由程序确定性处理。</p></div></div>
+          <div class="cost-rule"><div class="cost-number">0</div><div><strong>重复或近似问题</strong><p>按标准化问题、字典版本和数据快照命中本地缓存。</p></div></div>
+        </aside>
+      </div>
+    </section>
+
+    <div class="quality-notice">
+      <strong>当前适配结论：</strong>当前筛选宽表为 1,340 条策略、153 个业务与执行字段，身份、分类、收益、风险、基准、配置画像、持仓日期和调仓汇总足以支撑主要 AI 筛选。具体同类名次、任意自定义区间曲线和基金级历史调仓动作尚未进入当前宽表，第二轮必须标记为“不可直接执行”，不能近似替换。技术 ID、文件路径和内部证据字段不进入模型字段卡。
+    </div>
+  </main>
+
+  <footer>
+    业务优先设计 v5 · 两轮受控语义筛选 · 新基准权益分档为首层策略分类 · 技术属性不进入业务图谱 · 详细口径见同目录《AI选策略业务实体结构图与问答字典.md》
+  </footer>
+
+  <script>
+    "use strict";
+
+    var layers = [
+      { code: "L0", name: "用户问题", description: "用户原始业务表达与上下文" },
+      { code: "L1", name: "问题语义", description: "意图、对象、指标、条件和时间" },
+      { code: "L2", name: "业务对象", description: "渠道、机构、策略系列、策略和基金" },
+      { code: "L3", name: "业务事实", description: "关系、观察、快照、头寸、事件和政策" },
+      { code: "L4", name: "指标评价", description: "收益、风险、换手、排名和完整性" },
+      { code: "L5", name: "业务字典", description: "名称、枚举、单位、空值和质量规则" },
+      { code: "L6", name: "查询执行", description: "本地召回、可选模型、编译与查询" },
+      { code: "L7", name: "业务答案", description: "识别总结、结果、证据与缺口" }
+    ];
+
+    var entities = [
+      { id:"channel", name:"销售渠道", group:"机构与主业务对象", domain:"object", layer:"L2", grain:"每个业务渠道一条", definition:"策略销售、展示或披露的业务入口。采集程序来源可以不同，但页面和统计必须按业务渠道归一。", fields:["渠道名称","渠道类型","业务别名","策略总数","业绩完整数","已终止数","业绩缺失数","最新有效数据时间"] },
+      { id:"advisor", name:"投顾管理机构", group:"机构与主业务对象", domain:"object", layer:"L2", grain:"每个标准机构一条", definition:"管理或提供策略服务的投顾主体，使用标准机构名称汇总跨来源记录。", fields:["标准机构名称","机构类型","业务别名","管理策略总数","业绩完整数","数据完整数","无基准数","无仓位数","已终止数","业绩缺失数","最新业绩时间","最新持仓时间"] },
+      { id:"series", name:"策略系列", group:"机构与主业务对象", domain:"object", layer:"L2", grain:"每个已识别系列一条", definition:"同一品牌、运作机制或目标盈机制下的一组母策略、期次或实例策略。", fields:["系列名称","系列类型","母策略名称","品牌或机制","期次数","运行中期次数","已结束期次数","最早成立日期","最新成立日期","业绩共享规则","基准共享规则","持仓共享规则","调仓共享规则"] },
+      { id:"strategy", name:"策略", group:"机构与主业务对象", domain:"object", layer:"L2", grain:"每个策略一条", definition:"在约定风险和约束条件下，由投顾机构管理资产配置、持仓和交易的投资方案，是 AI 选策略的根查询对象。新基准权益分档是首层策略分类。", fields:["策略名称","销售渠道","投顾管理机构","披露产品类型","披露风险等级","成立日期","建议持有时长","起投金额","策略说明","标签","运作状态","对客展示状态","基准权益分档","研报产品类型","研报股票子类型","业务分类","业务组合分类","市场地域","主动被动","风险等级","特殊标签","策略实现标签"] },
+      { id:"fund", name:"基金", group:"机构与主业务对象", domain:"fund", layer:"L2", grain:"每只基金一条", definition:"策略持仓、调仓和信号最终指向的底层公募基金业务对象。", fields:["基金名称","基金代码（业务追溯）","基金公司","基金类型","跟踪指数","主题标签","基金状态","最新单位净值","最新累计净值","最新净值日期","最新日收益"] },
+
+      { id:"strategyRelation", name:"策略关系", group:"策略与组合事实", domain:"strategy", layer:"L3", grain:"每个已验证关系一条", definition:"记录母子、期次和数据复用关系；业绩、基准、持仓、调仓分别验证。", fields:["子策略名称","母策略名称","关系类型","官方业绩来源策略名称","基准来源策略名称","持仓来源策略名称","调仓来源策略名称","继承口径"] },
+      { id:"governance", name:"生命周期与治理画像", group:"策略与组合事实", domain:"strategy", layer:"L3", grain:"每策略当前一条", definition:"控制策略是否展示、是否排名、如何处理已终止、目标盈、信号、测试和异常策略。", fields:["治理状态","分析分组","是否测试组合","是否信号类","是否目标盈期次","是否已停止","是否清盘","是否业绩停更","是否缺官方业绩","是否业绩异常","是否历史接口留档","是否纳入常规排名","是否单独分析","仅列表展示","业绩分析截止日期","官方最新业绩日期","业绩停更天数","持仓处理方式","调仓展示方式","治理规则","治理证据"] },
+      { id:"fee", name:"费率政策", group:"策略与组合事实", domain:"strategy", layer:"L3", grain:"每策略当前一条", definition:"策略当前披露的投顾服务费率及其可比较状态。", fields:["投顾费率原文","年化投顾费率","费率状态","适用区间","是否可用于费率比较"] },
+      { id:"benchmark", name:"业绩基准定义", group:"策略与组合事实", domain:"performance", layer:"L3", grain:"每策略当前一条", definition:"描述策略收益应与什么标准比较，并记录基准文本、有效区间和共享关系。", fields:["业绩基准原文","标准基准说明","基准可用状态","基准曲线起始日","基准曲线结束日","来源策略名称","继承口径","基准公式"] },
+      { id:"benchmarkCurve", name:"基准曲线点", group:"策略与组合事实", domain:"performance", layer:"L3", grain:"每策略每交易日一条", definition:"用于绘制业绩基准走势图和计算超额收益的逐日观察点。", fields:["交易日期","基准累计收益率","基准指数收益率","基准点位或归一净值"] },
+      { id:"benchmarkExposure", name:"基准资产暴露", group:"策略与组合事实", domain:"performance", layer:"L3", grain:"每策略当前基准一条", definition:"把基准公式解析为资产和地域暴露，并以权益、商品、另类风险资产合计权重形成新的基准权益分档。", fields:["基准公式","权益权重","债券权重","现金权重","商品权重","另类权重","A股权重","港股权重","海外权益权重","基准风险资产权重","基准权益分档","非权益比较轨道","正式可比池"] },
+      { id:"allocationProfile", name:"策略配置画像", group:"策略与组合事实", domain:"portfolio", layer:"L4", grain:"每策略当前一条", definition:"把当前持仓与基准暴露转换为可组合筛选的连续业务属性，不用单一标签限制用户问题。", fields:["权益中枢","固收中枢","基准风险资产中枢","海外配置中枢","指数化程度","主动管理程度","风险资产偏离","资产集中度","持仓分散度","调仓活跃度","回撤韧性","超额收益能力","运作成熟度","配置风格标签"] },
+      { id:"performanceDaily", name:"日度业绩观察", group:"策略与组合事实", domain:"performance", layer:"L3", grain:"每策略每交易日一条", definition:"策略在交易日上的业绩观察，用于走势图、收益和风险计算。", fields:["交易日期","单位净值","日收益率","累计收益率","基准收益率","超额收益","最大回撤"] },
+      { id:"performanceInterval", name:"区间业绩观察", group:"策略与组合事实", domain:"performance", layer:"L3", grain:"每策略每统计日每区间一条", definition:"记录近一周、近一月、近三月、今年以来等业务窗口的策略和基准收益。", fields:["统计日期","区间名称","策略收益率","基准收益率","超额收益","区间起始日","区间结束日"] },
+      { id:"replayPerformance", name:"标准回放业绩", group:"策略与组合事实", domain:"performance", layer:"L3", grain:"每策略每交易日一条", definition:"按统一调仓、基金复权净值和投顾费率算法回放的费前、费后业绩。", fields:["标准费后净值","标准费前净值","费后累计收益","费前累计收益","费后日收益","费前日收益","当日投顾费","累计投顾费","调仓日期"] },
+      { id:"risk", name:"风险观察", group:"策略与组合事实", domain:"performance", layer:"L3", grain:"每策略每统计日每区间一条", definition:"在明确区间上记录回撤、波动率和夏普等风险事实。", fields:["统计日期","区间","区间收益","最大回撤","当前回撤","年化波动率","夏普比率","风险触发指标"] },
+      { id:"peerRank", name:"同类池与排名", group:"策略与组合事实", domain:"performance", layer:"L4", grain:"每策略每评价区间一条", definition:"基于基准、产品类型、地域和治理资格形成可比池并计算排名。", fields:["研报产品类型","股票子类型","市场地域","主动被动","基准权益分档","非权益比较轨道","正式可比池","样本资格","排名区间","收益排名","回撤排名","综合排名","百分位","样本数量","统计截止日期","排名资格","排除原因"] },
+      { id:"holding", name:"持仓快照", group:"策略与组合事实", domain:"portfolio", layer:"L3", grain:"每策略每持仓日一条", definition:"策略在某一持仓日的整体组合截面。", fields:["持仓日期","披露日期","分组数量","基金数量","基金权重合计","现金权重","分组权重合计"] },
+      { id:"position", name:"持仓基金头寸", group:"策略与组合事实", domain:"portfolio", layer:"L3", grain:"每策略每持仓日每基金一条", definition:"持仓快照中的单只基金、权重、分组和穿透分类。", fields:["基金名称","基金代码（业务追溯）","资产类型","分组名称","基金权重","分组权重","基金净值","净值日期","最新日涨幅","操作标记","经济资产分类","行业暴露","主题暴露"] },
+      { id:"rebalance", name:"调仓事件", group:"策略与组合事实", domain:"portfolio", layer:"L3", grain:"每个调仓事件一条", definition:"策略发生的调仓及其原因、换手和结果。", fields:["所属策略","调仓日期","上次仓位日期","本次仓位日期","标题","原因","调仓明细数","调前权重合计","调后权重合计","单次换手率","下次调仓日期","调仓超额","胜负","结果评价"] },
+      { id:"rebalanceDetail", name:"调仓基金明细", group:"策略与组合事实", domain:"portfolio", layer:"L3", grain:"每调仓事件每基金一条", definition:"记录调仓中每只基金的前后权重、动作和后续贡献。", fields:["基金名称","分组","调前权重","调后权重","权重变化","调仓动作","分组调前权重","分组调后权重","基金区间收益","调前贡献","调后贡献","贡献变化","收益起始日","收益结束日"] },
+      { id:"signal", name:"信号事件", group:"策略与组合事实", domain:"portfolio", layer:"L3", grain:"每个信号事件一条", definition:"信号服务在某一时间发出的组合级买卖或调整指令集合。", fields:["所属策略","信号日期","信号时间","标题","原因","指令总数","买入数","卖出数","加仓数","减仓数","净买入权重","总调整强度","1/3/6/12月可评价数","胜率","加权方向收益","评价结论"] },
+      { id:"signalDetail", name:"信号基金指令", group:"策略与组合事实", domain:"portfolio", layer:"L3", grain:"每信号事件每基金一条", definition:"信号事件作用于单只基金的方向、强度和后续评价。", fields:["基金名称","分组","资产类型","指令方向","调前权重","调后权重","权重变化","指令强度","1/3/6/12月基金收益","方向收益","评价","收益起止日期"] },
+
+      { id:"fundFamily", name:"基金份额家族", group:"基金与穿透实体", domain:"fund", layer:"L3", grain:"每个基金份额一条", definition:"识别同一基金的 A/C 等份额，确定回放和统计使用的主份额。", fields:["基金家族","主份额名称","主份额代码","当前份额名称","当前份额代码","份额类别","计价币种","是否主份额","合并份额","映射来源","映射置信度","主份额选择规则"] },
+      { id:"fundClass", name:"基金标准分类", group:"基金与穿透实体", domain:"fund", layer:"L3", grain:"每基金当前一条", definition:"基金在资产、地域、主动被动、指数和产品结构上的标准业务分类。", fields:["标准基金名称","其他名称","基金公司","基金经理","天天基金细分类","天天基金大类","天天基金二级分类","标准资产大类","标准资产细类","市场地域","主动被动","投顾资产分类桶","跟踪指数","主题标签","货币/债券/权益/混合标记","指数/ETF/联接/增强标记","QDII/FOF/LOF/REITs标记","商品黄金/短债/纯债/可转债标记","分类来源","置信度","最近更新时间"] },
+      { id:"fundNav", name:"基金净值点", group:"基金与穿透实体", domain:"fund", layer:"L3", grain:"每基金每交易日一条", definition:"底层基金每日净值、复权值和货币基金收益事实。", fields:["交易日期","单位净值","累计净值","复权净值","日收益率","每万份收益","七日年化","是否货币基金","分红送配"] },
+      { id:"fundExposure", name:"基金经济暴露", group:"基金与穿透实体", domain:"fund", layer:"L3", grain:"每基金每报告期一条", definition:"按总资产口径形成基金资产、行业和主题穿透暴露。", fields:["报告期","标准资产大类","标准资产细类","经济资产暴露","经济行业暴露","主题暴露","原始资产暴露","当前持仓权重","当前持仓策略数"] },
+
+      { id:"institutionStats", name:"机构经营统计", group:"经营统计实体", domain:"strategy", layer:"L4", grain:"每渠道或每管理机构一条", definition:"从策略、治理、业绩、基准和持仓聚合的机构业务统计。", fields:["机构名称","统计维度","策略总数","业绩完整总数","其中数据完整数","无基准数","无仓位数","已终止数","业绩缺失数","最新数据时间"] }
+    ];
+
+    var relations = [
+      { from:"销售渠道", verb:"展示/销售", to:"策略", cardinality:"1:N", meaning:"某渠道销售、展示或披露策略。", rule:"按业务渠道归一，不按采集程序名拆分。", visible:"在天天基金/投顾展示" },
+      { from:"投顾管理机构", verb:"管理", to:"策略", cardinality:"1:N", meaning:"某机构管理或提供策略服务。", rule:"使用标准机构名称和别名字典。", visible:"由广发基金管理" },
+      { from:"策略系列", verb:"包含", to:"策略", cardinality:"1:N", meaning:"品牌或机制下包含母策略、期次和实例。", rule:"需名称、产品类型、说明书或官方关系证据。", visible:"第19期属于幸福小心愿目标盈系列" },
+      { from:"策略", verb:"母子/数据复用", to:"策略", cardinality:"1:N / N:1", meaning:"母子、期次和共享业绩、基准、持仓、调仓。", rule:"不能只凭第X期继承；四类来源分别验证。", visible:"本期共享母策略官方业绩" },
+      { from:"策略", verb:"当前治理", to:"生命周期与治理画像", cardinality:"1:1", meaning:"决定展示、排名和生命周期处理。", rule:"由治理规则生成并保留证据。", visible:"已终止，可查询但不排名" },
+      { from:"策略", verb:"适用费率", to:"费率政策", cardinality:"1:1", meaning:"当前披露费率及结构化值。", rule:"以标准费率状态为准。", visible:"年化投顾费率0.5%" },
+      { from:"策略", verb:"对标", to:"业绩基准定义", cardinality:"1:1", meaning:"策略收益应比较的当前有效基准。", rule:"自身披露优先，共享需已验证关系。", visible:"基准为20%沪深300+80%中债指数" },
+      { from:"策略", verb:"产生", to:"日度业绩观察", cardinality:"1:N", meaning:"策略在交易日产生收益观察。", rule:"收益、基准和回撤使用同一交易日对齐。", visible:"7月28日累计收益8.42%" },
+      { from:"策略", verb:"产生", to:"风险观察", cardinality:"1:N", meaning:"策略在统计日和区间产生风险观察。", rule:"明确样本窗口和计算来源。", visible:"近一年最大回撤3.2%" },
+      { from:"策略", verb:"形成", to:"策略配置画像", cardinality:"1:1", meaning:"把持仓和基准转成可组合的配置中枢与风格属性。", rule:"连续属性由确定性公式计算，标签只作辅助。", visible:"低权益中枢、固收为主、贴近基准风险" },
+      { from:"策略", verb:"拥有", to:"持仓快照", cardinality:"1:N", meaning:"策略在持仓日的组合截面。", rule:"业务回答展示已确认的持仓日期、基金和权重。", visible:"截至7月28日持仓" },
+      { from:"持仓快照", verb:"包含", to:"持仓基金头寸", cardinality:"1:N", meaning:"快照中的基金、分组和权重。", rule:"权重为空不得猜测，合计必须稽核。", visible:"持有某基金12%" },
+      { from:"持仓基金头寸", verb:"指向", to:"基金", cardinality:"N:1", meaning:"基金头寸对应标准基金对象。", rule:"通过基金名称与代码字典解析。", visible:"底层基金为某债券基金" },
+      { from:"策略", verb:"发生", to:"调仓事件", cardinality:"1:N", meaning:"策略发生调仓。", rule:"业务回答使用调仓日期、原因、前后权重、换手率和结果。", visible:"最近一次调仓" },
+      { from:"调仓事件", verb:"改变", to:"调仓基金明细", cardinality:"1:N", meaning:"事件中每只基金的前后权重变化。", rule:"事件内按基金业务键去重。", visible:"卖出A、买入B" },
+      { from:"策略", verb:"发出", to:"信号事件", cardinality:"1:N", meaning:"信号策略发出组合级事件。", rule:"候选清单不能当真实持仓。", visible:"发出买入信号" },
+      { from:"基金", verb:"具有", to:"基金标准分类", cardinality:"1:1", meaning:"基金当前标准业务分类。", rule:"标准分类字典优先。", visible:"海外指数基金" },
+      { from:"基金", verb:"产生", to:"基金净值点", cardinality:"1:N", meaning:"基金逐交易日净值事实。", rule:"保留复权口径和分红。", visible:"基金真实走势" },
+      { from:"基金", verb:"具有", to:"基金经济暴露", cardinality:"1:N", meaning:"基金在报告期的资产、行业和主题暴露。", rule:"行业必须使用总资产口径。", visible:"AI主题暴露20%" },
+      { from:"同类池与排名", verb:"评价", to:"策略", cardinality:"N:M", meaning:"策略在不同区间进入相应可比池。", rule:"以新基准权益分档为首层，再结合非权益轨道、地域、产品类型和样本资格。", visible:"同类100只中排名第8" }
+    ];
+
+    var graphNodes = [
+      { id:"strategy", x:500, y:315, w:150, h:62, label:"策略", sub:"根查询对象", domain:"object" },
+      { id:"channel", x:115, y:120, w:134, h:54, label:"销售渠道", sub:"展示/销售", domain:"object" },
+      { id:"advisor", x:315, y:88, w:134, h:54, label:"投顾机构", sub:"管理", domain:"object" },
+      { id:"series", x:685, y:88, w:134, h:54, label:"策略系列", sub:"包含期次", domain:"object" },
+      { id:"governance", x:855, y:155, w:134, h:54, label:"治理画像", sub:"展示与排名", domain:"strategy" },
+      { id:"performanceDaily", x:118, y:350, w:134, h:54, label:"业绩观察", sub:"曲线与收益", domain:"performance" },
+      { id:"risk", x:240, y:535, w:134, h:54, label:"风险观察", sub:"回撤与波动", domain:"performance" },
+      { id:"benchmark", x:760, y:520, w:134, h:54, label:"业绩基准", sub:"定义与曲线", domain:"performance" },
+      { id:"holding", x:408, y:540, w:134, h:54, label:"持仓快照", sub:"基金与权重", domain:"portfolio" },
+      { id:"rebalance", x:570, y:550, w:134, h:54, label:"调仓事件", sub:"前后权重", domain:"portfolio" },
+      { id:"signal", x:850, y:355, w:134, h:54, label:"信号事件", sub:"买卖指令", domain:"portfolio" },
+      { id:"fund", x:500, y:95, w:134, h:54, label:"基金", sub:"底层资产", domain:"fund" },
+      { id:"allocationProfile", x:885, y:590, w:144, h:54, label:"策略配置画像", sub:"中枢与偏离", domain:"portfolio" }
+    ];
+
+    var graphEdges = [
+      { from:"channel", to:"strategy", label:"展示/销售" },
+      { from:"advisor", to:"strategy", label:"管理" },
+      { from:"series", to:"strategy", label:"包含" },
+      { from:"governance", to:"strategy", label:"治理" },
+      { from:"strategy", to:"performanceDaily", label:"产生业绩" },
+      { from:"strategy", to:"risk", label:"承担风险" },
+      { from:"strategy", to:"benchmark", label:"对标" },
+      { from:"strategy", to:"holding", label:"拥有持仓" },
+      { from:"strategy", to:"rebalance", label:"发生调仓" },
+      { from:"strategy", to:"signal", label:"发出信号" },
+      { from:"holding", to:"fund", label:"包含基金" },
+      { from:"strategy", to:"allocationProfile", label:"形成画像" }
+    ];
+
+    var fieldMappings = [
+      { entity:"策略", count:20, fields:["策略代码（业务追溯）","策略名称","渠道","投顾机构","披露策略类型","披露风险等级","基准权益分档","研报产品类型","研报股票子类型","业务分类","业务组合分类","风险等级","权益风险档","波动风险档","回撤风险档","成立日期","运作状态","市场地域","主动被动","策略实现标签"] },
+      { entity:"策略关系", count:3, fields:["母策略名称","策略关系类型","官方业绩来源策略名称"] },
+      { entity:"生命周期与治理", count:22, fields:["策略治理状态","分析分组","是否测试组合","是否信号类组合","是否目标盈期次","是否已停止","是否历史接口留档","是否纳入常规排名","仅列表展示","是否单独分析","是否多元策略","持仓处理方式","调仓展示方式","治理规则说明","业务分类依据","天天展示判定依据","分类依据","风险分类依据","研报分类依据","天天当前对客展示","天天展示状态","洞察评价对象"] },
+      { entity:"业绩基准定义", count:5, fields:["基准可用状态","业绩基准说明","业绩基准","业绩基准来源策略ID（仅内部）","业绩基准继承口径"] },
+      { entity:"基准资产暴露", count:16, fields:["基准风险资产权重","基准权益分档","基准权益分档说明","基准权益权重","基准债券权重","基准货币权重","基准港股权益权重","基准海外权益权重","基准资产大类-权益","基准资产大类-债券","基准资产大类-现金","基准资产大类-商品","基准资产大类-另类","非权益比较轨道","正式可比池","可比池样本资格"] },
+      { entity:"策略配置画像", count:14, fields:["权益中枢","固收中枢","基准风险资产中枢","海外配置中枢","指数化程度","主动管理程度","风险资产偏离","资产集中度","持仓分散度","调仓活跃度","回撤韧性","超额收益能力","运作成熟度","配置风格标签"] },
+      { entity:"业绩观察", count:17, fields:["官方业绩口径","业绩分析截止日期","最新业绩日期","收益数据截至","近一周","近一月","近三月","近6月","近1年","今年以来","累计收益率","官方单位净值","官方累计收益","自建累计收益","与官方偏差","年化收益","日涨跌幅"] },
+      { entity:"风险观察", count:5, fields:["最大回撤","当前回撤","波动率","夏普比率","风险数据截至"] },
+      { entity:"持仓快照", count:2, fields:["最新持仓日","持仓基金数"] },
+      { entity:"持仓基金头寸", count:7, fields:["权益基金权重","债券基金权重","货币基金权重","混合基金权重","QDII权重","指数基金权重","主动基金权重"] },
+      { entity:"调仓事件", count:6, fields:["最近调仓日","调仓次数","最近一年调仓次数","单次平均换手率","年化换手率","调仓频率"] },
+      { entity:"信号事件", count:10, fields:["信号事件数","最近信号日","信号胜率_1月","信号胜率_3月","信号胜率_6月","信号胜率_1年","信号加权方向收益_1月","信号加权方向收益_3月","信号加权方向收益_6月","信号加权方向收益_1年"] },
+      { entity:"信号基金指令", count:5, fields:["信号指令数","买入指令数","卖出指令数","加仓指令数","减仓指令数"] },
+      { entity:"费率政策", count:2, fields:["费率状态","年化投顾费率"] },
+      { entity:"业务完整性", count:6, fields:["业绩完整","基准完整","仓位完整","是否可排名","已终止","业绩缺失原因"] }
+    ];
+
+    var dictionaries = [
+      { id:"names", name:"名称归一", description:"页面、机构统计和问答统一使用业务名称，采集源名称只在审计层保留。", rows:[
+        ["广发证券","广发证券易淘金/财富管家、广发证券易淘金/贝塔牛理财、易淘金、贝塔牛理财","销售渠道统一称“广发证券”"],
+        ["广发基金","广发基金-广发投顾、广发基金投顾、广发基金有限公司、广发基金管理有限公司","渠道和管理机构统一称“广发基金”"],
+        ["天天基金/投顾","天天基金、天天投顾等业务别名","销售渠道统一称“天天基金/投顾”"],
+        ["动态名称字典","当前库中的策略、基金、机构标准名称及简称、历史名、拼音缩写","每次发布离线生成，不写死进模型提示词"]
+      ], headers:["标准值","别名或来源值","规则"] },
+      { id:"classification", name:"策略分类", description:"研报分类负责同类比较，业务分类负责运营货架，两者不能混用。", rows:[
+        ["研报产品类型","纯债型、固收+型、股债混合型、股票型、多元配置型、持仓缺失/不入池","面向投研比较的主分类"],
+        ["研报股票子类型","主动优选、指数驱动、行业主题型、行业轮动、QDII型","只适用于股票型策略"],
+        ["业务分类","现金管理、纯债/短债、固收增强、偏股、多资产、海外/全球、主题/行业、目标日期/养老、目标盈系列、信号类","运营货架口径"],
+        ["业务组合分类","风险等级｜业务分类","两个既有字典的组合，不是新独立分类"],
+        ["市场地域","国内、国内+海外、海外/全球","按持仓、基准和强名称证据归类"],
+        ["主动被动","主动为主、指数/被动为主、主动被动混合、未稳定识别","按实际持仓基金类型聚合"]
+      ], headers:["字典","标准值","业务定义"] },
+      { id:"risk", name:"风险等级", description:"权益、波动和回撤分别落档，最终风险等级取三项中最高风险档。", rows:[
+        ["R0 现金/超低波","权益≤3%；波动≤0.8%；回撤≤1.2%","现金管理或极低波动"],
+        ["R1 低波","权益≤8%；波动≤2.0%；回撤≤3.0%","低波稳健"],
+        ["R2 稳健收益","权益≤18%；波动≤4.0%；回撤≤6.0%","稳健收益"],
+        ["R3 均衡稳健","权益≤35%；波动≤7.5%；回撤≤12.0%","股债均衡偏稳健"],
+        ["R4 均衡成长","权益≤55%；波动≤11.0%；回撤≤20.0%","均衡成长"],
+        ["R5 权益/进取","高于R4任一上限","权益或进取型"],
+        ["D0 持仓缺失","无法计算","不进入正式风险同档比较"]
+      ], headers:["风险档","阈值","业务解释"] },
+      { id:"benchmark", name:"基准、配置中枢与同类池", description:"新基准权益分档是唯一首层分档；基准未知权重未消解时，不得输出确定分档。", rows:[
+        ["基准权益分档","L0—L10","按基准中的权益+商品+另类风险资产合计权重分档：L0=0%；L1=(0%,10%]；之后每10个百分点一档；L10=(90%,100%]"],
+        ["权益中枢","权益基金权重+50%×混合基金权重","观察组合当前近似权益暴露，可与回撤、收益、地域组合筛选"],
+        ["固收中枢","债券基金权重+货币基金权重+50%×混合基金权重","观察组合当前近似固收暴露"],
+        ["风险资产偏离","权益中枢-基准风险资产中枢","正值表示当前组合风险资产暴露高于基准，负值表示低于基准"],
+        ["基准可用状态","文本+曲线、仅曲线、仅文本、仅区间、缺失","综合判断说明和收益序列"],
+        ["非权益比较轨道","债券主导、货币主导、多资产、商品主导、纯权益、未纳入","在权益分档之外约束比较对象"],
+        ["正式可比池","由基准权益分档、非权益轨道、地域和产品类型组合","用于排名和同类比较；策略主分类先看基准权益分档"]
+      ], headers:["字典","标准值","业务定义"] },
+      { id:"quality", name:"完整性与质量", description:"业绩完整、数据完整和页面综合完整性是三个不同口径。", rows:[
+        ["业绩完整","最新业绩距最新数据日≤5天，且点位足够绘制连续曲线","已终止策略单独统计"],
+        ["数据完整","业绩完整，且基准与历史仓位满足业务要求","用于机构统计中的数据完整数"],
+        ["基础数据等级A","费率可解析，且有基准文本或曲线","适合正式评价"],
+        ["基础数据等级B","费率或基准至少一项可用","有限可用"],
+        ["基础数据等级C","费率和基准均不可用","不适合正式比较"],
+        ["质量状态","已核验、有限可用、稀疏、缺失、冲突、不适用、衍生未核验","控制执行和披露行为"]
+      ], headers:["口径","标准","业务影响"] },
+      { id:"null", name:"空值语义", description:"空值不能默认解释为“不满足”。", rows:[
+        ["未披露","源渠道没有披露该事实","说明渠道未披露"],
+        ["未采集","应有数据但本次采集未成功","标记数据缺口和影响范围"],
+        ["不适用","该字段对当前策略类型无意义","从有效分母排除"],
+        ["尚未形成","成立时间短、窗口未满或事件未发生","说明时间原因"],
+        ["解析失败","原始值存在但无法可靠标准化","不执行结构化硬筛选"],
+        ["治理留空","规则明确要求不生成该值","返回治理原因，不补猜"]
+      ], headers:["空值","业务含义","回答行为"] },
+      { id:"operators", name:"操作符与时间", description:"百分比按百分点存储；相对日期由本地日历程序计算。", rows:[
+        ["文本/实体","是、包含、不包含、属于","别名归一后精确匹配"],
+        ["枚举","R2、国内、固收增强","只能使用字典已有值"],
+        ["百分比","大于5%、不超过3%、2%—5%","5%标准化为数值5"],
+        ["日期","今年、近3个月、成立超过1年","由查询基准日计算边界"],
+        ["布尔","有基准、无仓位、已终止","必须区分否和缺失"],
+        ["排序","收益最高、回撤最小、最近调仓","空值置后并披露数量"]
+      ], headers:["数据类型","用户表达","确定性规则"] },
+      { id:"metadata", name:"字典元数据", description:"每个可执行概念必须具备20项元数据。", rows:[
+        ["业务（6项）","标准概念键、业务名称、业务定义、实体类型、事实类型、数据粒度","技术概念键不向用户展示"],
+        ["值（4项）","数据类型、单位、值域、空值语义","保证数值和缺失解释准确"],
+        ["时间（1项）","时间轴","区分有效、观察、披露、采集和生成时间"],
+        ["语义（2项）","业务别名、易混淆概念","降低规则和模型误识别"],
+        ["执行（4项）","允许操作符、标准化规则、适用范围、执行绑定","安全编译为查询"],
+        ["来源质量（3项）","来源血缘、质量画像、字典版本","可追溯和可审计"]
+      ], headers:["维度","必填项","作用"] }
+    ];
+
+    var routes = [
+      { question:"回撤小于3%、累计收益大于5%、成立超过1年", object:"策略", path:"策略 → 业绩/风险/生命周期", facts:"最大回撤、累计收益、成立日期", calls:"0次" },
+      { question:"广发基金当前有多少业绩完整策略", object:"投顾管理机构", path:"机构 → 策略 → 业绩", facts:"标准机构名、业绩完整口径、数量", calls:"0次" },
+      { question:"幸福小心愿目标盈各期近三月收益", object:"策略系列", path:"系列 → 子策略 → 业绩来源关系 → 区间业绩", facts:"期次、共享口径、近三月收益", calls:"0次；本地不足时固定2轮" },
+      { question:"近一个月增加了哪些债券基金", object:"策略", path:"策略 → 调仓事件 → 调仓明细 → 基金分类", facts:"调仓日期、买入/加仓、债券基金", calls:"0次" },
+      { question:"找AI主题暴露超过20%的策略", object:"策略", path:"策略 → 持仓头寸 → 基金经济暴露", facts:"AI主题实体、组合聚合权重", calls:"0次" },
+      { question:"广发证券业绩缺失都是什么原因", object:"销售渠道", path:"渠道 → 策略 → 业绩 → 数据质量", facts:"连续曲线、最新日期、缺失原因", calls:"0次" },
+      { question:"偏稳健但不要纯债，最好海外少一点", object:"策略", path:"策略 → 配置画像/风险/业务分类", facts:"权益中枢、固收中枢、排除纯债、海外配置中枢", calls:"2轮：实体路由→字段卡计划" },
+      { question:"选几个适合震荡市、不要太激进的", object:"策略", path:"策略 → 配置画像/风险/业绩/基准", facts:"低权益中枢、低回撤、正超额、运作成熟度", calls:"2轮；不能执行的主观条件明示" }
+    ];
+
+    var entityById = {};
+    entities.forEach(function(entity){ entityById[entity.id] = entity; });
+    var selectedEntityId = "strategy";
+    var graphScale = 1;
+    var activeLayer = "L2";
+
+    function escapeHtml(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function switchView(viewName) {
+      document.querySelectorAll(".nav-tab").forEach(function(tab){
+        tab.classList.toggle("active", tab.getAttribute("data-view") === viewName);
+      });
+      document.querySelectorAll(".view").forEach(function(view){
+        view.classList.toggle("active", view.id === "view-" + viewName);
+      });
+      if (history.replaceState) history.replaceState(null, "", "#" + viewName);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function renderLayers() {
+      var target = document.getElementById("layerList");
+      target.innerHTML = layers.map(function(layer){
+        return '<button class="layer-button ' + (layer.code === activeLayer ? "active" : "") + '" data-layer="' + layer.code + '" title="' + escapeHtml(layer.description) + '">' +
+          '<span class="layer-code">' + layer.code + '</span><span class="layer-name">' + escapeHtml(layer.name) + '</span></button>';
+      }).join("");
+      target.querySelectorAll("button").forEach(function(button){
+        button.addEventListener("click", function(){
+          activeLayer = button.getAttribute("data-layer");
+          renderLayers();
+          applyGraphFilters();
+        });
+      });
+    }
+
+    function nodeColors(domain) {
+      if (domain === "performance") return { fill:"#edf4ff", stroke:"#3677d9", text:"#245aa8" };
+      if (domain === "portfolio") return { fill:"#edf4ff", stroke:"#4f83d1", text:"#2a5da4" };
+      if (domain === "fund") return { fill:"#eef8ef", stroke:"#4d9b5e", text:"#347541" };
+      if (domain === "quality") return { fill:"#fff0ed", stroke:"#d95243", text:"#a73b30" };
+      if (domain === "strategy") return { fill:"#fff6df", stroke:"#c58100", text:"#8f5e00" };
+      return { fill:"#e6f7f5", stroke:"#078984", text:"#006d69" };
+    }
+
+    function getNode(id) {
+      return graphNodes.filter(function(node){ return node.id === id; })[0];
+    }
+
+    function edgeEndpoints(from, to) {
+      var dx = to.x - from.x;
+      var dy = to.y - from.y;
+      var distance = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dx / distance;
+      var uy = dy / distance;
+      var fromRadiusX = from.w / 2;
+      var fromRadiusY = from.h / 2;
+      var toRadiusX = to.w / 2;
+      var toRadiusY = to.h / 2;
+      return {
+        x1: from.x + ux * Math.min(fromRadiusX, fromRadiusY),
+        y1: from.y + uy * Math.min(fromRadiusX, fromRadiusY),
+        x2: to.x - ux * Math.min(toRadiusX, toRadiusY),
+        y2: to.y - uy * Math.min(toRadiusX, toRadiusY),
+        mx: (from.x + to.x) / 2,
+        my: (from.y + to.y) / 2
+      };
+    }
+
+    function renderGraph() {
+      var svg = document.getElementById("entityGraph");
+      var width = 1000;
+      var height = 680;
+      svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+      var defs = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8291a4"></path></marker></defs>';
+      var edges = graphEdges.map(function(edge, index){
+        var from = getNode(edge.from);
+        var to = getNode(edge.to);
+        var p = edgeEndpoints(from, to);
+        return '<g class="edge-group" data-from="' + edge.from + '" data-to="' + edge.to + '">' +
+          '<path class="graph-edge" d="M ' + p.x1 + ' ' + p.y1 + ' L ' + p.x2 + ' ' + p.y2 + '"></path>' +
+          '<text class="edge-label" x="' + p.mx + '" y="' + (p.my - (index % 2 ? 6 : -12)) + '" text-anchor="middle">' + escapeHtml(edge.label) + '</text></g>';
+      }).join("");
+      var nodes = graphNodes.map(function(node){
+        var colors = nodeColors(node.domain);
+        return '<g class="graph-node ' + (node.id === selectedEntityId ? "selected" : "") + '" tabindex="0" role="button" aria-label="查看' + escapeHtml(node.label) + '" data-node-id="' + node.id + '" transform="translate(' + (node.x - node.w/2) + ' ' + (node.y - node.h/2) + ')">' +
+          '<rect width="' + node.w + '" height="' + node.h + '" rx="10" fill="' + colors.fill + '" stroke="' + colors.stroke + '" stroke-width="1.8"></rect>' +
+          '<text class="node-label" x="' + node.w/2 + '" y="' + (node.h/2 - 6) + '" fill="' + colors.text + '">' + escapeHtml(node.label) + '</text>' +
+          '<text class="node-sub" x="' + node.w/2 + '" y="' + (node.h/2 + 13) + '">' + escapeHtml(node.sub) + '</text></g>';
+      }).join("");
+      var tx = width * (1 - graphScale) / 2;
+      var ty = height * (1 - graphScale) / 2;
+      svg.innerHTML = defs + '<g id="graphViewport" transform="translate(' + tx + ' ' + ty + ') scale(' + graphScale + ')">' + edges + nodes + '</g>';
+      svg.querySelectorAll(".graph-node").forEach(function(nodeElement){
+        function activate() {
+          selectedEntityId = nodeElement.getAttribute("data-node-id");
+          renderGraph();
+          renderInspector();
+          applyGraphFilters();
+        }
+        nodeElement.addEventListener("click", activate);
+        nodeElement.addEventListener("keydown", function(event){
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); }
+        });
+      });
+      applyGraphFilters();
+    }
+
+    function applyGraphFilters() {
+      var svg = document.getElementById("entityGraph");
+      if (!svg) return;
+      var query = document.getElementById("graphSearch").value.trim().toLowerCase();
+      var domain = document.getElementById("domainFilter").value;
+      var matchedIds = {};
+      graphNodes.forEach(function(node){
+        var entity = entityById[node.id];
+        var haystack = [node.label, node.sub, entity ? entity.definition : "", entity ? entity.fields.join(" ") : ""].join(" ").toLowerCase();
+        var matchesQuery = !query || haystack.indexOf(query) >= 0;
+        var matchesDomain = domain === "all" || node.domain === domain;
+        var matchesLayer = activeLayer === "L2" ? true : (entity ? entity.layer === activeLayer : true);
+        var visible = matchesQuery && matchesDomain && matchesLayer;
+        if (visible) matchedIds[node.id] = true;
+        var element = svg.querySelector('[data-node-id="' + node.id + '"]');
+        if (element) element.classList.toggle("dim", !visible);
+      });
+      svg.querySelectorAll(".edge-group").forEach(function(edge){
+        var from = edge.getAttribute("data-from");
+        var to = edge.getAttribute("data-to");
+        var highlight = from === selectedEntityId || to === selectedEntityId;
+        edge.querySelector(".graph-edge").classList.toggle("highlight", highlight);
+        edge.classList.toggle("dim", (query || domain !== "all" || activeLayer !== "L2") && !(matchedIds[from] || matchedIds[to]));
+      });
+    }
+
+    function entityRelations(entityName) {
+      return relations.filter(function(relation){
+        return relation.from === entityName || relation.to === entityName;
+      });
+    }
+
+    function renderInspector() {
+      var entity = entityById[selectedEntityId] || entityById.strategy;
+      document.getElementById("entityAvatar").textContent = entity.name.slice(0,1);
+      document.getElementById("entityTitle").textContent = entity.name;
+      document.getElementById("entityMeta").textContent = entity.layer + " · " + entity.group;
+      document.getElementById("entityDefinition").textContent = entity.definition;
+      document.getElementById("entityGrain").textContent = entity.grain;
+      document.getElementById("fieldCount").textContent = "（" + entity.fields.length + "）";
+      document.getElementById("fieldList").innerHTML = entity.fields.slice(0, 12).map(function(field){
+        var type = /日期|时间/.test(field) ? "日期" : /率|权重|占比|回撤|波动|夏普|费用|金额/.test(field) ? "指标" : /是否|状态|类型|分类|分组|等级|口径/.test(field) ? "分类/状态" : "业务属性";
+        return '<div class="field-row"><span>' + escapeHtml(field) + '</span><span class="field-type">' + type + '</span></div>';
+      }).join("") + (entity.fields.length > 12 ? '<button class="text-button" id="showAllFields">查看全部 ' + entity.fields.length + ' 个字段</button>' : "");
+      var direct = entityRelations(entity.name);
+      document.getElementById("relationCount").textContent = "（" + direct.length + "）";
+      document.getElementById("relationList").innerHTML = direct.length ? direct.map(function(relation){
+        var text = relation.from === entity.name ? relation.verb + " → " + relation.to : relation.from + " → " + relation.verb;
+        return '<div class="relation-row"><strong>' + escapeHtml(text) + '</strong><span>' + escapeHtml(relation.cardinality) + '</span></div>';
+      }).join("") : '<div class="relation-row"><span>该实体的关系在完整关系字典中查看。</span></div>';
+      var showAll = document.getElementById("showAllFields");
+      if (showAll) showAll.addEventListener("click", function(){
+        document.getElementById("fieldList").innerHTML = entity.fields.map(function(field){
+          return '<div class="field-row"><span>' + escapeHtml(field) + '</span><span class="field-type">业务字段</span></div>';
+        }).join("");
+      });
+    }
+
+    function renderEntityGroups(filterText) {
+      var query = String(filterText || "").trim().toLowerCase();
+      var groups = ["机构与主业务对象","策略与组合事实","基金与穿透实体","经营统计实体"];
+      var target = document.getElementById("entityGroups");
+      target.innerHTML = groups.map(function(groupName){
+        var groupEntities = entities.filter(function(entity){
+          var haystack = [entity.name, entity.definition, entity.fields.join(" ")].join(" ").toLowerCase();
+          return entity.group === groupName && (!query || haystack.indexOf(query) >= 0);
+        });
+        if (!groupEntities.length) return "";
+        return '<section class="entity-group"><div class="entity-group-head"><h3>' + groupName + '</h3><span>' + groupEntities.length + ' 个实体</span></div><div class="entity-grid">' +
+          groupEntities.map(function(entity){
+            return '<button class="entity-card" data-entity-id="' + entity.id + '"><h4>' + escapeHtml(entity.name) + '</h4><div class="meta">' + escapeHtml(entity.layer + " · " + entity.grain) + '</div><p>' + escapeHtml(entity.definition) + '</p><div class="field-preview">' + escapeHtml(entity.fields.slice(0,6).join(" · ")) + (entity.fields.length > 6 ? " …" : "") + '</div></button>';
+          }).join("") + '</div></section>';
+      }).join("");
+      target.querySelectorAll("[data-entity-id]").forEach(function(card){
+        card.addEventListener("click", function(){
+          selectedEntityId = card.getAttribute("data-entity-id");
+          switchView("overview");
+          renderGraph();
+          renderInspector();
+        });
+      });
+    }
+
+    function renderRelationTable(filterText) {
+      var query = String(filterText || "").trim().toLowerCase();
+      var filtered = relations.filter(function(relation){
+        return !query || Object.keys(relation).map(function(key){ return relation[key]; }).join(" ").toLowerCase().indexOf(query) >= 0;
+      });
+      document.getElementById("relationTableBody").innerHTML = filtered.map(function(relation){
+        return "<tr><td><strong>" + escapeHtml(relation.from) + "</strong></td><td><span class='status-label'>" + escapeHtml(relation.verb) + "</span></td><td><strong>" + escapeHtml(relation.to) + "</strong></td><td>" + escapeHtml(relation.cardinality) + "</td><td>" + escapeHtml(relation.meaning) + "</td><td>" + escapeHtml(relation.rule) + "</td><td>" + escapeHtml(relation.visible) + "</td></tr>";
+      }).join("");
+    }
+
+    function renderFieldMapping(filterText) {
+      var query = String(filterText || "").trim().toLowerCase();
+      var filtered = fieldMappings.map(function(group){
+        return { entity:group.entity, count:group.count, fields:group.fields.filter(function(field){ return !query || (group.entity + " " + field).toLowerCase().indexOf(query) >= 0; }) };
+      }).filter(function(group){ return group.fields.length > 0; });
+      document.getElementById("fieldMapping").innerHTML = filtered.map(function(group, index){
+        return '<details class="mapping-group" ' + (query || index < 3 ? "open" : "") + '><summary><span>' + escapeHtml(group.entity) + '</span><span class="mapping-count">' + group.fields.length + ' / ' + group.count + ' 字段</span></summary><div class="field-cloud">' +
+          group.fields.map(function(field){
+            var internal = /仅内部/.test(field);
+            return '<span class="field-chip ' + (internal ? "internal" : "") + '">' + escapeHtml(field) + '</span>';
+          }).join("") + '</div></details>';
+      }).join("");
+    }
+
+    function renderDictionaries() {
+      document.getElementById("dictionaryNav").innerHTML = dictionaries.map(function(dict, index){
+        return '<button class="' + (index === 0 ? "active" : "") + '" data-dictionary="' + dict.id + '">' + escapeHtml(dict.name) + '</button>';
+      }).join("");
+      document.getElementById("dictionaryContent").innerHTML = dictionaries.map(function(dict, index){
+        var header = "<tr>" + dict.headers.map(function(cell){ return "<th>" + escapeHtml(cell) + "</th>"; }).join("") + "</tr>";
+        var body = dict.rows.map(function(row){
+          return "<tr>" + row.map(function(cell){ return "<td>" + escapeHtml(cell) + "</td>"; }).join("") + "</tr>";
+        }).join("");
+        return '<details class="dictionary-group" id="dict-' + dict.id + '" ' + (index === 0 ? "open" : "") + '><summary>' + escapeHtml(dict.name) + '</summary><div class="dictionary-body"><p>' + escapeHtml(dict.description) + '</p><div class="data-table-wrap"><table><thead>' + header + '</thead><tbody>' + body + '</tbody></table></div></div></details>';
+      }).join("");
+      document.querySelectorAll("[data-dictionary]").forEach(function(button){
+        button.addEventListener("click", function(){
+          document.querySelectorAll("[data-dictionary]").forEach(function(item){ item.classList.remove("active"); });
+          button.classList.add("active");
+          var details = document.getElementById("dict-" + button.getAttribute("data-dictionary"));
+          details.open = true;
+          details.scrollIntoView({ behavior:"smooth", block:"start" });
+        });
+      });
+    }
+
+    function renderRoutes() {
+      document.getElementById("routeList").innerHTML = routes.map(function(route, index){
+        return '<details class="route-card" ' + (index < 2 ? "open" : "") + '><summary>' + escapeHtml(route.question) + '<span class="mapping-count">' + escapeHtml(route.calls) + '</span></summary><div class="route-body">' +
+          '<div class="route-cell"><strong>主业务对象</strong>' + escapeHtml(route.object) + '</div>' +
+          '<div class="route-cell"><strong>关系路径</strong>' + escapeHtml(route.path) + '</div>' +
+          '<div class="route-cell"><strong>使用事实</strong>' + escapeHtml(route.facts) + '</div>' +
+          '<div class="route-cell"><strong>模型调用</strong>' + escapeHtml(route.calls) + '</div>' +
+          '</div></details>';
+      }).join("");
+    }
+
+    document.querySelectorAll(".nav-tab").forEach(function(tab){
+      tab.addEventListener("click", function(){ switchView(tab.getAttribute("data-view")); });
+    });
+    document.querySelectorAll("[data-mobile-view]").forEach(function(button){
+      button.addEventListener("click", function(){ switchView(button.getAttribute("data-mobile-view")); });
+    });
+    document.getElementById("graphSearch").addEventListener("input", applyGraphFilters);
+    document.getElementById("domainFilter").addEventListener("change", applyGraphFilters);
+    document.getElementById("zoomIn").addEventListener("click", function(){ graphScale = Math.min(1.35, graphScale + .1); renderGraph(); });
+    document.getElementById("zoomOut").addEventListener("click", function(){ graphScale = Math.max(.72, graphScale - .1); renderGraph(); });
+    document.getElementById("zoomReset").addEventListener("click", function(){
+      graphScale = 1;
+      activeLayer = "L2";
+      document.getElementById("graphSearch").value = "";
+      document.getElementById("domainFilter").value = "all";
+      renderLayers();
+      renderGraph();
+    });
+    document.getElementById("entitySearch").addEventListener("input", function(event){ renderEntityGroups(event.target.value); });
+    document.getElementById("relationSearch").addEventListener("input", function(event){ renderRelationTable(event.target.value); });
+    document.getElementById("fieldSearch").addEventListener("input", function(event){ renderFieldMapping(event.target.value); });
+    document.getElementById("expandFieldGroups").addEventListener("click", function(){ document.querySelectorAll(".mapping-group").forEach(function(item){ item.open = true; }); });
+    document.getElementById("collapseFieldGroups").addEventListener("click", function(){ document.querySelectorAll(".mapping-group").forEach(function(item){ item.open = false; }); });
+
+    window.addEventListener("hashchange", function(){
+      var viewName = location.hash.replace("#", "");
+      if (document.getElementById("view-" + viewName)) switchView(viewName);
+    });
+    window.addEventListener("resize", function(){ renderGraph(); });
+
+    renderLayers();
+    renderGraph();
+    renderInspector();
+    renderEntityGroups("");
+    renderRelationTable("");
+    renderFieldMapping("");
+    renderDictionaries();
+    renderRoutes();
+    var initialView = location.hash.replace("#", "");
+    if (document.getElementById("view-" + initialView)) switchView(initialView);
+  </script>
+</body>
+</html>

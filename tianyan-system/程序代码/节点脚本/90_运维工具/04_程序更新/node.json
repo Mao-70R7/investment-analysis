@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime_update",
+  "name": "程序更新",
+  "phase": "90_运维工具",
+  "entrypoint": "run.ps1",
+  "dependencies": [],
+  "criticality": "critical",
+  "timeoutSeconds": 3600,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "个提交",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": false,
+  "action": "runtime_update"
+}

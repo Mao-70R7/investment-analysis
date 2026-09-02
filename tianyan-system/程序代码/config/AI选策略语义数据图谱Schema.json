@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tianyan.local/schema/ai-strategy-semantic-data-graph.schema.json",
+  "title": "AI选策略语义图谱与数据图谱配置",
+  "description": "约束标准概念、物理字段、虚拟字段、算子、图谱边和渐进式检索视图。该 Schema 只允许映射已存在的数据字段或运行时虚拟字段。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schemaVersion",
+    "catalogVersion",
+    "status",
+    "scope",
+    "datasetProfile",
+    "domains",
+    "operatorProfiles",
+    "concepts",
+    "physicalFieldMappings",
+    "virtualFieldMappings",
+    "edges",
+    "retrievalViews",
+    "designConstraints"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "kind": { "const": "ai_strategy_semantic_data_graph" },
+    "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "catalogVersion": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["proposal", "approved", "active", "retired"] },
+    "scope": { "$ref": "#/$defs/scope" },
+    "datasetProfile": { "$ref": "#/$defs/datasetProfile" },
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/domain" }
+    },
+    "operatorProfiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/operatorProfile" }
+    },
+    "concepts": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/concept" }
+    },
+    "physicalFieldMappings": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fieldMapping" }
+    },
+    "virtualFieldMappings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/virtualFieldMapping" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "retrievalViews": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/retrievalView" }
+    },
+    "designConstraints": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasetId", "datasetName", "sourceArtifact", "physicalFieldsOnly", "virtualFieldsPolicy"],
+      "properties": {
+        "datasetId": { "type": "string", "pattern": "^[a-z0-9_.-]+$" },
+        "datasetName": { "type": "string", "minLength": 1 },
+        "sourceArtifact": { "type": "string", "minLength": 1 },
+        "physicalFieldsOnly": { "const": true },
+        "virtualFieldsPolicy": { "enum": ["existing_runtime_only", "none"] },
+        "excludedExampleConcepts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "datasetProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asOf",
+        "rowCount",
+        "physicalFieldCount",
+        "virtualFieldCount",
+        "dictionaryDescribedFieldCount",
+        "dictionaryMissingFieldCount",
+        "emptyPhysicalFields"
+      ],
+      "properties": {
+        "asOf": { "type": "string", "format": "date-time" },
+        "rowCount": { "type": "integer", "minimum": 0 },
+        "physicalFieldCount": { "type": "integer", "minimum": 1 },
+        "virtualFieldCount": { "type": "integer", "minimum": 0 },
+        "dictionaryDescribedFieldCount": { "type": "integer", "minimum": 0 },
+        "dictionaryMissingFieldCount": { "type": "integer", "minimum": 0 },
+        "coverageSummary": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "minimum": 0 }
+        },
+        "emptyPhysicalFields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "dictionaryMissingFields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "description", "retrievalPriority"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "retrievalPriority": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "operatorProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "valueType", "allowedOperators", "valueFormat", "normalizationRules"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "valueType": {
+          "enum": ["identifier", "text", "enum", "boolean", "integer", "number", "percent", "date", "path", "search_text"]
+        },
+        "allowedOperators": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "eq", "neq", "in", "not_in", "contains", "not_contains", "gt", "gte", "lt", "lte",
+              "between", "on", "before", "after", "relative_period", "is_true", "is_false", "exists", "not_exists"
+            ]
+          }
+        },
+        "valueFormat": { "type": "string", "minLength": 1 },
+        "normalizationRules": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "concept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "domainId",
+        "conceptType",
+        "description",
+        "operatorProfileId",
+        "semanticVisibility",
+        "aliases",
+        "positiveCues",
+        "negativeCues",
+        "confusableWith"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "domainId": { "type": "string", "minLength": 1 },
+        "conceptType": { "enum": ["attribute", "measure", "evidence", "entity_binding", "technical"] },
+        "description": { "type": "string", "minLength": 1 },
+        "operatorProfileId": { "type": "string", "minLength": 1 },
+        "semanticVisibility": { "$ref": "#/$defs/semanticVisibility" },
+        "aliases": { "$ref": "#/$defs/stringArray" },
+        "positiveCues": { "$ref": "#/$defs/stringArray" },
+        "negativeCues": { "$ref": "#/$defs/stringArray" },
+        "confusableWith": { "$ref": "#/$defs/stringArray" },
+        "applicability": { "$ref": "#/$defs/stringArray" },
+        "entityGraphDimensions": { "$ref": "#/$defs/stringArray" },
+        "notes": { "type": "string" }
+      }
+    },
+    "fieldMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fieldName",
+        "conceptId",
+        "fieldType",
+        "semanticRole",
+        "semanticVisibility",
+        "executionStatus"
+      ],
+      "properties": {
+        "fieldName": { "type": "string", "minLength": 1 },
+        "conceptId": { "type": "string", "minLength": 1 },
+        "fieldType": { "$ref": "#/$defs/fieldType" },
+        "semanticRole": { "$ref": "#/$defs/semanticRole" },
+        "semanticVisibility": { "$ref": "#/$defs/semanticVisibility" },
+        "executionStatus": { "$ref": "#/$defs/executionStatus" },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "unit": { "type": "string" },
+        "dictionaryDocumented": { "type": "boolean" },
+        "availabilityBucket": { "enum": ["full", "high", "medium", "low", "very_low", "empty"] },
+        "notes": { "type": "string" }
+      }
+    },
+    "virtualFieldMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fieldName",
+        "conceptId",
+        "fieldType",
+        "semanticRole",
+        "semanticVisibility",
+        "executionStatus",
+        "derivation"
+      ],
+      "properties": {
+        "fieldName": { "type": "string", "minLength": 1 },
+        "conceptId": { "type": "string", "minLength": 1 },
+        "fieldType": { "$ref": "#/$defs/fieldType" },
+        "semanticRole": { "$ref": "#/$defs/semanticRole" },
+        "semanticVisibility": { "$ref": "#/$defs/semanticVisibility" },
+        "executionStatus": { "$ref": "#/$defs/executionStatus" },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "unit": { "type": "string" },
+        "derivation": { "type": "string", "minLength": 1 },
+        "sourceFields": { "$ref": "#/$defs/stringArray" },
+        "notes": { "type": "string" }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "type", "to", "purpose"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "type": {
+          "enum": [
+            "is_a", "part_of", "maps_to", "derived_from", "confusable_with", "requires", "gates",
+            "supports", "same_value_as", "entity_dimension_of", "candidate_for"
+          ]
+        },
+        "to": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "retrievalView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "intentCues", "candidateConcepts", "modelPayload"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "intentCues": { "$ref": "#/$defs/stringArray" },
+        "candidateConcepts": { "$ref": "#/$defs/stringArray" },
+        "modelPayload": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "concept_summary", "aliases", "positive_cues", "negative_cues", "confusable_fields",
+              "field_details", "operator_profile", "value_dictionary", "normalization_rules", "quality_status"
+            ]
+          }
+        }
+      }
+    },
+    "fieldType": {
+      "enum": ["identifier", "text", "enum", "boolean", "integer", "number", "percent", "date", "path", "search_text"]
+    },
+    "semanticRole": {
+      "enum": ["primary", "variant", "source_variant", "derived", "evidence", "technical", "current_duplicate", "quality_gate"]
+    },
+    "semanticVisibility": {
+      "enum": ["direct_filter", "advanced_filter", "conditional", "evidence_only", "audit_only"]
+    },
+    "executionStatus": {
+      "enum": ["active", "conditional", "evidence_only", "audit_only", "inactive_no_data"]
+    },
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

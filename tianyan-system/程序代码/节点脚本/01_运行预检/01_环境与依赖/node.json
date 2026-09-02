@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "preflight_environment",
+  "name": "运行环境与依赖",
+  "phase": "01_运行预检",
+  "entrypoint": "run.ps1",
+  "dependencies": [],
+  "criticality": "critical",
+  "timeoutSeconds": 600,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "项",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "environment_preflight"
+}

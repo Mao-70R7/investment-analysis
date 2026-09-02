@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "publish",
+  "name": "最小发布集发布",
+  "phase": "05_质量与交付",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "data_audit"
+  ],
+  "criticality": "publish",
+  "timeoutSeconds": 10800,
+  "maxProcessAttempts": 1,
+  "resourceLock": "publish_repo",
+  "supportsResume": true,
+  "progressUnit": "个文件",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "publish"
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "database_backup",
+  "name": "成功数据库备份",
+  "phase": "05_质量与交付",
+  "entrypoint": "run.ps1",
+  "dependencies": [
+    "data_audit"
+  ],
+  "criticality": "optional",
+  "timeoutSeconds": 14400,
+  "maxProcessAttempts": 1,
+  "resourceLock": "main_db_write",
+  "supportsResume": true,
+  "progressUnit": "个版本",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": true,
+  "action": "database_backup",
+  "failureImpact": "warning"
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "ttfund_holding_component",
+  "name": "天天详情与当前仓位组件",
+  "phase": "02_天天投顾",
+  "entrypoint": "run.ps1",
+  "dependencies": [],
+  "criticality": "optional",
+  "timeoutSeconds": 60,
+  "maxProcessAttempts": 1,
+  "resourceLock": null,
+  "supportsResume": true,
+  "progressUnit": "只策略",
+  "validator": {
+    "type": "node_result",
+    "requiredStatus": "passed"
+  },
+  "daily": false,
+  "action": "component_info"
+}
